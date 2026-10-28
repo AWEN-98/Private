@@ -1,5 +1,6 @@
 #import "XFModelsController.h"
 #import <Security/Security.h>
+#import "XFModelProbe.h"
 
 
 static UIColor *XFUIBackground(void) {return [UIColor colorWithRed:0.964 green:0.972 blue:0.986 alpha:1];}
@@ -526,6 +527,13 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 @property(nonatomic,copy) NSString *selectedProviderID;
 @property(nonatomic,copy) NSString *term;
 @property(nonatomic,strong) NSArray *visibleModels;
+@property(nonatomic,strong) UIButton *probeButton;
+@property(nonatomic,strong) NSMutableArray *probeQueue;
+@property(nonatomic,assign) BOOL probeRunning;
+@property(nonatomic,assign) BOOL probeStop;
+@property(nonatomic,assign) NSUInteger probeIndex;
+@property(nonatomic,assign) NSUInteger probeBatchRemaining;
+@property(nonatomic,assign) NSUInteger probeBatchTotal;
 @end
 
 @implementation XFModelsController
@@ -579,7 +587,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.filterPanel.backgroundColor=XFUIBackground();
     self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.providerButton.frame=CGRectMake(11,5,width-22,32);
+    self.providerButton.frame=CGRectMake(11,5,width-125,32);
     self.providerButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton.backgroundColor=[UIColor whiteColor];
     self.providerButton.layer.cornerRadius=8;
@@ -589,6 +597,16 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.providerButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
     [self.providerButton addTarget:self action:@selector(chooseProvider) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.providerButton];
+    self.probeButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.probeButton.frame=CGRectMake(width-105,5,94,32);
+    self.probeButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
+    self.probeButton.backgroundColor=XFUIAccent();
+    [self.probeButton setTitle:@"一键检测" forState:UIControlStateNormal];
+    [self.probeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.probeButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
+    self.probeButton.layer.cornerRadius=8;
+    [self.probeButton addTarget:self action:@selector(testTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.filterPanel addSubview:self.probeButton];
 
     self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,42,width,39)];
     self.categoryScroll.autoresizingMask=UIViewAutoresizingFlexibleWidth;
@@ -644,6 +662,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSArray *options=[self filterCategories];
     if(sender.tag<0 || (NSUInteger)sender.tag>=options.count)return;
     [self.search resignFirstResponder];
+    if(self.probeQueue && !self.probeRunning)[self.probeQueue removeAllObjects];
     self.selectedCategory=options[(NSUInteger)sender.tag];
     [[NSUserDefaults standardUserDefaults] setObject:self.selectedCategory forKey:@"xf_model_last_filter"];
     [self refresh];
@@ -669,11 +688,13 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"筛选 API 服务"
       message:@"只显示所选服务下的模型" preferredStyle:UIAlertControllerStyleAlert];
     [menu addAction:[UIAlertAction actionWithTitle:@"全部服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
+        if(self.probeQueue && !self.probeRunning)[self.probeQueue removeAllObjects];
         self.selectedProviderID=nil;[self refresh];
     }]];
     for(NSDictionary *account in XFAccounts()){
         NSString *aid=account[@"id"];
         [menu addAction:[UIAlertAction actionWithTitle:account[@"name"]?:@"未命名服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
+            if(self.probeQueue && !self.probeRunning)[self.probeQueue removeAllObjects];
             self.selectedProviderID=aid;[self refresh];
         }]];
     }
@@ -710,11 +731,18 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
             NSString *name=[model[@"name"] isKindOfClass:[NSString class]]?model[@"name"]:mid;
             NSString *searchText=[[NSString stringWithFormat:@"%@ %@ %@",name,mid,account[@"name"]?:@""] lowercaseString];
             if(self.term.length && [searchText rangeOfString:self.term].location==NSNotFound)continue;
+            NSDictionary *result=[XFModelProbe cachedForAccount:account model:model];
             [matching addObject:@{@"account":account,@"model":model,@"category":kind,
-              @"favorite":@(favorite),@"active":@(selected)}];
+              @"favorite":@(favorite),@"active":@(selected),
+              @"probe":result?:@{}}];
         }
     }
     [matching sortUsingComparator:^NSComparisonResult(NSDictionary *lhs,NSDictionary *rhs) {
+        // Keep verified working models near the top, followed by untested and finally failed.
+        NSString *ls=lhs[@"probe"][@"status"],*rs=rhs[@"probe"][@"status"];
+        NSInteger lx=[ls isEqualToString:@"ok"]?0:([ls isEqualToString:@"bad"]?2:1);
+        NSInteger rx=[rs isEqualToString:@"ok"]?0:([rs isEqualToString:@"bad"]?2:1);
+        if(lx!=rx)return lx<rx?NSOrderedAscending:NSOrderedDescending;
         BOOL l=[lhs[@"favorite"] boolValue],r=[rhs[@"favorite"] boolValue];
         if(l!=r)return l?NSOrderedAscending:NSOrderedDescending;
         BOOL la=[lhs[@"active"] boolValue],ra=[rhs[@"active"] boolValue];
@@ -724,6 +752,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         return [ln localizedCaseInsensitiveCompare:rn];
     }];
     self.visibleModels=matching;
+    [self updateProbeButton];
     [self.tableView reloadData];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 1;}
@@ -732,7 +761,15 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 }
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if(!self.visibleModels.count)return @"没有符合筛选条件的模型";
-    return [NSString stringWithFormat:@"共 %lu 个模型 · 点击切换，右侧管理",(unsigned long)self.visibleModels.count];
+    NSUInteger good=0,bad=0,unknown=0;
+    for(NSDictionary *item in self.visibleModels){
+        NSString *status=item[@"probe"][@"status"];
+        if([status isEqualToString:@"ok"])good++;
+        else if([status isEqualToString:@"bad"])bad++;
+        else if([status isEqualToString:@"unknown"])unknown++;
+    }
+    return [NSString stringWithFormat:@"%lu 个模型 · 可用 %lu · 不可用 %lu · 待确认 %lu",
+      (unsigned long)self.visibleModels.count,(unsigned long)good,(unsigned long)bad,(unsigned long)unknown];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"model"];
@@ -750,11 +787,19 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSDictionary *item=self.visibleModels[(NSUInteger)index.row];
     NSDictionary *model=item[@"model"],*account=item[@"account"];
     BOOL favorite=[item[@"favorite"] boolValue],active=[item[@"active"] boolValue];
+    NSString *status=item[@"probe"][@"status"];
+    BOOL passed=[status isEqualToString:@"ok"],failed=[status isEqualToString:@"bad"];
+    BOOL uncertain=[status isEqualToString:@"unknown"];
+    BOOL probeCapable=[XFModelProbe canProbeCategory:item[@"category"]];
+    NSString *state=passed?@"● 可用":(failed?@"● 不可用":(uncertain?@"○ 待确认":(probeCapable?@"○ 未测":@"○ 未验证")));
     NSString *name=model[@"name"]?:model[@"id"];
     cell.textLabel.text=[NSString stringWithFormat:@"%@%@%@",active?@"✓  ":@"",favorite?@"★  ":@"",name];
-    cell.textLabel.textColor=active?XFUIAccent():XFUIText();
+    cell.textLabel.textColor=failed?[UIColor colorWithWhite:0.70 alpha:1]:(active?XFUIAccent():XFUIText());
     cell.textLabel.font=active?[UIFont boldSystemFontOfSize:14.5]:[UIFont systemFontOfSize:14.5];
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",account[@"name"]?:@"", [self shortCategoryName:item[@"category"]]];
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@ · %@",state,account[@"name"]?:@"",
+      [self shortCategoryName:item[@"category"]]];
+    cell.detailTextLabel.textColor=passed?[UIColor colorWithRed:0.24 green:0.57 blue:0.40 alpha:1]:
+      (failed?[UIColor colorWithWhite:0.73 alpha:1]:XFUIHint());
     cell.accessoryType=UITableViewCellAccessoryDetailButton;
     return cell;
 }
@@ -767,6 +812,18 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     }
     NSDictionary *item=self.visibleModels[(NSUInteger)index.row];
     NSDictionary *account=item[@"account"],*model=item[@"model"];
+    NSDictionary *probe=item[@"probe"];
+    if([probe[@"status"] isEqualToString:@"bad"]) {
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"暂不可用"
+          message:[NSString stringWithFormat:@"上次检测：%@\n请检查模型名称或 API 服务。修复后可以重新检测。",
+              probe[@"reason"]?:@"模型调用未通过"] preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"返回" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"重新检测" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            [self testSingleItem:item];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
     NSString *capability=XFCapability(item[@"category"]);
     if([capability isEqualToString:@"other"]){[self editCategoryForEntry:item];return;}
     XFSelect(capability,account[@"id"],model[@"id"]);
@@ -791,6 +848,18 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
       style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         XFSetFavorite(account,model,!favorite);[self refresh];
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"检测这个模型" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self testSingleItem:item];
+    }]];
+    NSDictionary *record=item[@"probe"];
+    if([record[@"reason"] length]){
+        [menu addAction:[UIAlertAction actionWithTitle:@"查看检测原因" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            UIAlertController *details=[UIAlertController alertControllerWithTitle:@"检测详情"
+               message:record[@"reason"] preferredStyle:UIAlertControllerStyleAlert];
+            [details addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:details animated:YES completion:nil];
+        }]];
+    }
     [menu addAction:[UIAlertAction actionWithTitle:@"修改分类" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         [self editCategoryForEntry:item];
     }]];
@@ -824,4 +893,87 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     [picker addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:picker animated:YES completion:nil];
 }
+
+- (void)updateProbeButton {
+    if(!self.probeButton)return;
+    NSString *label=@"一键检测";
+    if(self.probeRunning){
+        label=[NSString stringWithFormat:@"停止 %lu/%lu",(unsigned long)self.probeIndex,(unsigned long)self.probeBatchTotal];
+    } else if(self.probeQueue.count) {
+        label=@"继续检测";
+    }
+    [self.probeButton setTitle:label forState:UIControlStateNormal];
+}
+- (void)testTapped {
+    if(self.probeRunning){
+        self.probeStop=YES;
+        [self.probeButton setTitle:@"正在停止…" forState:UIControlStateNormal];
+        return;
+    }
+    if(!self.probeQueue.count) {
+        self.probeQueue=[NSMutableArray array];
+        for(NSDictionary *item in self.visibleModels) {
+            if([XFModelProbe canProbeCategory:item[@"category"]]) [self.probeQueue addObject:item];
+        }
+    }
+    if(!self.probeQueue.count){
+        UIAlertController *info=[UIAlertController alertControllerWithTitle:@"此分类暂不支持低成本检测"
+           message:@"一键检测目前验证对话、推理和视觉模型的文字调用。生图、音频等可能额外收费，暂不会自动请求；未测模型不会置灰。"
+           preferredStyle:UIAlertControllerStyleAlert];
+        [info addAction:[UIAlertAction actionWithTitle:@"了解" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:info animated:YES completion:nil];return;
+    }
+    NSUInteger total=MIN((NSUInteger)12,self.probeQueue.count);
+    NSString *message=[NSString stringWithFormat:
+      @"将检测当前筛选中的 %lu 个模型（本批 %lu 个），逐个发送一次极短文字请求。每次调用可能产生 API 费用。网络错误和限流只标为「待确认」，不会直接置灰。\\n\\n生图和语音暂不自动测试。",
+      (unsigned long)self.probeQueue.count,(unsigned long)total];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"确认开始模型检测？"
+       message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"开始检测" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.probeRunning=YES;self.probeStop=NO;self.probeIndex=0;
+        self.probeBatchRemaining=total;self.probeBatchTotal=total;
+        [self updateProbeButton];
+        [self probeNext];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)testSingleItem:(NSDictionary *)item {
+    if(![XFModelProbe canProbeCategory:item[@"category"]]){
+        UIAlertController *a=[UIAlertController alertControllerWithTitle:@"尚不支持此类检测"
+           message:@"图片生成、录音识别或语音合成的真实调用可能收费，本版一键检测只支持聊天类接口。"
+           preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];return;
+    }
+    if(self.probeRunning)return;
+    self.probeQueue=[NSMutableArray arrayWithObject:item];
+    [self testTapped];
+}
+- (void)probeNext {
+    if(!self.probeRunning)return;
+    if(self.probeStop || self.probeBatchRemaining==0 || self.probeQueue.count==0) {
+        self.probeRunning=NO;
+        self.probeStop=NO;
+        self.probeBatchRemaining=0;
+        [self updateProbeButton];
+        [self refresh];
+        return;
+    }
+    NSDictionary *item=self.probeQueue[0];
+    [self.probeQueue removeObjectAtIndex:0];
+    NSDictionary *account=item[@"account"],*model=item[@"model"];
+    NSString *secret=XFSecret(account[@"id"]);
+    self.probeIndex++;
+    self.probeBatchRemaining--;
+    [self updateProbeButton];
+    __weak XFModelsController *weakSelf=self;
+    [XFModelProbe probeAccount:account model:model apiKey:secret completion:^(NSDictionary *result){
+        XFModelsController *controller=weakSelf;
+        if(!controller)return;
+        [controller refresh];
+        [controller probeNext];
+    }];
+}
+
 @end
