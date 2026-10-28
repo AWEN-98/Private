@@ -3,7 +3,6 @@
 #import "XFChatStore.h"
 #import "XFHistoryController.h"
 #import <AVFoundation/AVFoundation.h>
-#import <MobileCoreServices/MobileCoreServices.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
