@@ -6,6 +6,8 @@
 <key>CFBundleName</key><string>XiaoFeiAgent</string>
 <key>CFBundleExecutable</key><string>XiaoFeiAgent</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIcons</key><dict><key>CFBundlePrimaryIcon</key><dict><key>CFBundleIconFiles</key><array><string>Icon.png</string><string>Icon@2x.png</string></array></dict></dict>
+<key>CFBundleIconFiles</key><array><string>Icon.png</string><string>Icon@2x.png</string></array>
 <key>CFBundleVersion</key><string>2</string>
 <key>CFBundleShortVersionString</key><string>0.2.0</string>
 <key>MinimumOSVersion</key><string>8.0</string>
