@@ -3,6 +3,7 @@ ARCHS = armv7
 APPLICATION_NAME = XiaoFeiAgent
 XiaoFeiAgent_FILES = main.m XFAppDelegate.m XFViewController.m
 XiaoFeiAgent_FRAMEWORKS = UIKit Foundation AVFoundation AudioToolbox QuartzCore
+XiaoFeiAgent_RESOURCE_DIRS = Resources
 XiaoFeiAgent_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 include $(THEOS)/makefiles/common.mk
 include $(THEOS_MAKE_PATH)/application.mk
