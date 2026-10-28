@@ -3,4 +3,5 @@
 + (NSDictionary *)activeProfile;
 + (NSDictionary *)activeProfileForCapability:(NSString *)capability;
 + (NSString *)secretForProfile:(NSDictionary *)profile;
++ (NSArray *)allChatProfiles;
 @end
