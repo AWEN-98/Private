@@ -22,6 +22,7 @@
 @property(nonatomic,strong) UITextView *message;
 @property(nonatomic,strong) UILabel *messagePlaceholder;
 @property(nonatomic,assign) BOOL chatPayloadExceeded;
+@property(nonatomic,copy) NSString *lastSubmittedDraft;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
 @property(nonatomic,strong) UIButton *pasteButton;
@@ -212,6 +213,7 @@
     [self layoutForKeyboard:self.keyboardOffset];
 }
 - (void)dealloc {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.connection cancel];
     [self.recordTimer invalidate];
@@ -288,15 +290,24 @@
 - (void)textViewDidChange:(UITextView *)view {
     if(view!=self.message)return;
     self.messagePlaceholder.hidden=view.text.length>0;
-    if(self.conversationID.length){
-        NSString *value=view.text?:@"";
-        if(value.length>5000)value=[value substringToIndex:5000];
-        [[NSUserDefaults standardUserDefaults] setObject:value
-          forKey:[self draftKeyForConversation:self.conversationID]];
-    }
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(saveDraft) object:nil];
+    [self performSelector:@selector(saveDraft) withObject:nil afterDelay:0.50];
 }
 - (NSString *)draftKeyForConversation:(NSString *)cid {
     return [@"xf_draft_" stringByAppendingString:cid?:@"default"];
+}
+- (void)saveDraft {
+    if(!self.conversationID.length)return;
+    NSString *value=self.message.text?:@"";
+    if(value.length>6000)value=[value substringToIndex:6000];
+    [[NSUserDefaults standardUserDefaults] setObject:value
+      forKey:[self draftKeyForConversation:self.conversationID]];
+}
+- (void)restoreSubmittedDraft {
+    if(self.message.text.length || !self.lastSubmittedDraft.length)return;
+    self.message.text=self.lastSubmittedDraft;
+    [self textViewDidChange:self.message];
+    self.status.text=@"请求失败，已恢复输入内容";
 }
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
@@ -317,6 +328,8 @@
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)loadConversation:(NSString *)cid {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(saveDraft) object:nil];
+    [self saveDraft];
     self.conversationID=cid;
     NSDictionary *item=[XFChatStore conversationForID:cid];
     self.history=[item[@"messages"] mutableCopy]?:[NSMutableArray array];
@@ -463,6 +476,7 @@
     self.usingCompatibilityMode=compatible;
     self.lastChatUsedSearch=web;
     self.sendingContent=sent;
+    self.lastSubmittedDraft=self.message.text?:@"";
     [self.message resignFirstResponder];self.message.text=@"";
     [self textViewDidChange:self.message];
     self.pendingFileText=nil;self.pendingImage=nil;
@@ -474,6 +488,7 @@
 }
 - (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
     self.httpCode=[response isKindOfClass:[NSHTTPURLResponse class]]?[(NSHTTPURLResponse *)response statusCode]:0;
+    self.chatPayloadExceeded=NO;
     [self.streamBuffer setLength:0];
 }
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
@@ -485,8 +500,27 @@
         }
         return;
     }
+    if(self.chatPayloadExceeded)return;
+    NSUInteger limit=self.usingCompatibilityMode?512*1024:128*1024;
+    if(self.streamBuffer.length+data.length>limit || self.streamText.length>30000){
+        self.chatPayloadExceeded=YES;
+        [self.connection cancel];self.connection=nil;
+        [self setWorking:NO];
+        [self restoreSubmittedDraft];
+        self.status.text=@"回复太大，已停止以保护旧设备内存";
+        [XFDiagnostics record:@"回复超过内存限制" code:0 detail:@"超过 128KB 事件缓存 / 512KB JSON / 30000 字"];
+        return;
+    }
     [self.streamBuffer appendData:data];
     if(self.usingCompatibilityMode)return;
+    // Normalize CRLF to LF so iOS 8 handles both kinds of SSE separators.
+    if(self.streamBuffer.length){
+        NSString *part=[[NSString alloc] initWithData:self.streamBuffer encoding:NSUTF8StringEncoding];
+        if(part && [part rangeOfString:@"\r"].location!=NSNotFound){
+            NSString *normalized=[part stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
+            self.streamBuffer=[[normalized dataUsingEncoding:NSUTF8StringEncoding] mutableCopy];
+        }
+    }
     NSData *separator=[@"\n\n" dataUsingEncoding:NSUTF8StringEncoding];
     while(self.streamBuffer.length) {
         NSRange boundary=[self.streamBuffer rangeOfData:separator options:0 range:NSMakeRange(0,self.streamBuffer.length)];
@@ -526,14 +560,19 @@
 - (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
     if(connection!=self.connection)return;
     self.connection=nil;[self setWorking:NO];
-    self.status.text=[NSString stringWithFormat:@"网络失败 %ld；旧 iOS 可能不兼容厂商 HTTPS",(long)error.code];
+    [XFDiagnostics record:@"聊天网络错误" code:error.code detail:error.domain?:@""];
+    [self restoreSubmittedDraft];
+    self.status.text=[NSString stringWithFormat:@"网络失败 %ld；检查 HTTPS/TLS 或当前网络",(long)error.code];
 }
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection {
     if(connection!=self.connection)return;
     self.connection=nil;[self setWorking:NO];
     if(self.httpCode>=400) {
         NSString *reason=[self explainAPIError:self.streamBuffer];
-        self.status.text=[NSString stringWithFormat:@"HTTP %ld · 点击弹窗查看原因",(long)self.httpCode];
+        NSString *endpointHost=[NSURL URLWithString:self.lastChatProfile[@"endpoint"]].host?:@"未知";
+        [XFDiagnostics record:@"API 错误" code:self.httpCode detail:endpointHost];
+        [self restoreSubmittedDraft];
+        self.status.text=[NSString stringWithFormat:@"HTTP %ld · 查看接口报错原因",(long)self.httpCode];
         [self showAPIErrorWithReason:reason status:self.httpCode];
         return;
     }
@@ -548,12 +587,18 @@
                 answer=message[@"content"];
         }
     }
-    if(!answer.length) {self.status.text=@"API 未返回可用文字，请检查模型是否支持 Chat Completions";return;}
+    if(!answer.length) {
+        [XFDiagnostics record:@"无文本回复" code:self.httpCode detail:@"检查 Chat Completions 兼容性"];
+        [self restoreSubmittedDraft];
+        self.status.text=@"API 没有返回可用文字：查看诊断或换兼容模型";
+        return;
+    }
     [self.chat finishStreaming:answer];
     [self addExchange:self.sendingContent answer:answer];
     if(self.usingCompatibilityMode && self.lastChatProfile) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:[self compatibilityKeyFor:self.lastChatProfile]];
     }
+    self.lastSubmittedDraft=nil;
     self.status.text=self.usingCompatibilityMode?@"兼容模式成功，下次将自动使用":@"回复完成，已保存到历史对话";
 }
 - (NSString *)compatibilityKeyFor:(NSDictionary *)profile {
@@ -603,7 +648,13 @@
         [UIPasteboard generalPasteboard].string=report;
         self.status.text=@"诊断信息已复制，可直接粘贴给我";
     }]];
-    if(status==400 && self.lastChatRequest && !self.usingCompatibilityMode) {
+    NSString *low=reason.lowercaseString?:@"";
+    BOOL accountIssue=[low containsString:@"not activated"] ||
+      [low containsString:@"未开通"] || [low containsString:@"insufficient balance"] ||
+      [low containsString:@"余额不足"] || [low containsString:@"rate limit"] ||
+      [low containsString:@"api key"] || status==401 || status==403 || status==429;
+    if((status==400 || status==422) && self.lastChatRequest &&
+       !self.usingCompatibilityMode && !accountIssue) {
         [alert addAction:[UIAlertAction actionWithTitle:@"兼容格式重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self retryWithoutStreaming];
         }]];
