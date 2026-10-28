@@ -41,8 +41,9 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
     [super viewDidLayoutSubviews];
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
     self.editor.frame=CGRectMake(10,10,w-20,MAX(80,h-73));
-    NSArray *buttons=[self.view.subviews filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"SELF isKindOfClass: %@",[UIButton class]]];
-    for(UIButton *b in buttons){
+    for(UIView *view in self.view.subviews){
+        if(![view isKindOfClass:[UIButton class]])continue;
+        UIButton *b=(UIButton *)view;
         CGFloat available=w-20,space=5,bw=(available-2*space)/3;
         b.frame=CGRectMake(10+b.tag*(bw+space),h-53,bw,43);
     }
