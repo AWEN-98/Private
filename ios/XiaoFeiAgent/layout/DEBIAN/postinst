@@ -1,0 +1,12 @@
+#!/bin/sh
+# iOS 8 does not always register applications installed by dpkg/iFile.
+# Refresh the app cache after installation. Never fail the installation
+# solely because UIKit Tools / uicache is absent or broken.
+if [ "$1" = "configure" ] || [ "$1" = "triggered" ]; then
+    if [ -x /usr/bin/uicache ]; then
+        /usr/bin/uicache >/dev/null 2>&1 || true
+    elif command -v uicache >/dev/null 2>&1; then
+        uicache >/dev/null 2>&1 || true
+    fi
+fi
+exit 0
