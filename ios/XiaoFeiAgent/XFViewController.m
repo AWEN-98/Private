@@ -627,6 +627,8 @@
         return;
     }
     NSString *sent=msg;
+    if(self.voiceAwaitingChat)
+        msg=[NSString stringWithFormat:@"请用自然、简短、清晰的中文口语回答，尽量不超过150字。问题：%@",msg];
     NSString *imageName=nil;
     if(self.pendingFileText.length) {
         msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
@@ -731,6 +733,7 @@
         [self setWorking:NO];
         [self restoreSubmittedDraft];
         self.status.text=@"回复太大，已停止以保护旧设备内存";
+        if(self.voiceAwaitingChat)[self voiceError:@"回答数据太大，已停止以保护设备"];
         [XFDiagnostics record:@"回复超过内存限制" code:0 detail:@"超过 128KB 事件缓存 / 512KB JSON / 30000 字"];
         return;
     }
@@ -786,6 +789,7 @@
     [XFDiagnostics record:@"聊天网络错误" code:error.code detail:error.domain?:@""];
     [self restoreSubmittedDraft];
     self.status.text=[NSString stringWithFormat:@"网络失败 %ld；检查 HTTPS/TLS 或当前网络",(long)error.code];
+    if(self.voiceAwaitingChat)[self voiceError:@"聊天连接失败，检查网络或 HTTPS"];
 }
 - (void)connectionDidFinishLoading:(NSURLConnection *)connection {
     if(connection!=self.connection)return;
@@ -796,7 +800,10 @@
         [XFDiagnostics record:@"API 错误" code:self.httpCode detail:endpointHost];
         [self restoreSubmittedDraft];
         self.status.text=[NSString stringWithFormat:@"HTTP %ld · 查看接口报错原因",(long)self.httpCode];
-        [self showAPIErrorWithReason:reason status:self.httpCode];
+        if(self.voiceAwaitingChat && self.voiceActive){
+            [self voiceError:[NSString stringWithFormat:@"HTTP %ld：%@",(long)self.httpCode,
+               reason.length>85?[reason substringToIndex:85]:reason]];
+        } else [self showAPIErrorWithReason:reason status:self.httpCode];
         return;
     }
     NSString *answer=[self.streamText copy];
@@ -814,6 +821,7 @@
         [XFDiagnostics record:@"无文本回复" code:self.httpCode detail:@"检查 Chat Completions 兼容性"];
         [self restoreSubmittedDraft];
         self.status.text=@"API 没有返回可用文字：查看诊断或换兼容模型";
+        if(self.voiceAwaitingChat)[self voiceError:@"模型没有返回可朗读的文字"];
         return;
     }
     [self.chat finishStreaming:answer];
@@ -827,6 +835,10 @@
     }
     self.lastSubmittedDraft=nil;
     self.status.text=self.usingCompatibilityMode?@"兼容模式成功，下次将自动使用":@"回复完成，已保存到历史对话";
+    if(self.voiceAwaitingChat){
+        self.voiceAwaitingChat=NO;
+        [self voiceReadAnswer:answer];
+    }
 }
 - (NSString *)compatibilityKeyFor:(NSDictionary *)profile {
     NSString *idText=[NSString stringWithFormat:@"%@|%@",profile[@"account_id"]?:@"",profile[@"model"]?:@""];
