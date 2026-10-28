@@ -18,6 +18,7 @@
 @property(nonatomic,strong) UITextField *message;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
+@property(nonatomic,strong) UIButton *pasteButton;
 @property(nonatomic,strong) UIScrollView *tools;
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,copy) NSString *conversationID;
@@ -115,7 +116,7 @@
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
     NSArray *items=@[@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"]];
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"]];
     CGFloat x=1;
     for(NSArray *item in items){
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -159,10 +160,22 @@
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.footerBar addSubview:self.sendButton];
 
+    self.pasteButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    [self.pasteButton setTitle:@"粘贴" forState:UIControlStateNormal];
+    self.pasteButton.titleLabel.font=[UIFont boldSystemFontOfSize:12];
+    [self styleNavigationButton:self.pasteButton filled:NO];
+    self.pasteButton.layer.cornerRadius=10;
+    self.pasteButton.hidden=YES;
+    [self.pasteButton addTarget:self action:@selector(pasteTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.footerBar addSubview:self.pasteButton];
+
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
       name:UIKeyboardWillShowNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:)
       name:UIKeyboardWillHideNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillChangeFrame:)
+      name:UIKeyboardWillChangeFrameNotification object:nil];
+
 
     NSArray *existing=[XFChatStore conversations];
     self.conversationID=existing.count?existing[0][@"id"]:[XFChatStore createConversation];
@@ -187,23 +200,61 @@
     NSString *name=profile[@"name"];
     self.status.text=name.length?[NSString stringWithFormat:@"聊天模型：%@ · %@",name,self.isWorking?@"处理中":@"已就绪"]:@"尚未选择聊天模型，点击右上角「模型」";
 }
-- (void)keyboardWillShow:(NSNotification *)n {
-    CGRect key=[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-    CGFloat keyboardHeight=MIN(key.size.height,self.view.bounds.size.height/2);
-    [self layoutForKeyboard:keyboardHeight];
+// The iOS 8 Chinese candidate bar can change keyboard height while editing.
+// Use the actual end frame in this view, never cap it to half the screen.
+- (void)keyboardWillShow:(NSNotification *)n {[self keyboardWillChangeFrame:n];}
+- (void)keyboardWillChangeFrame:(NSNotification *)n {
+    NSValue *value=n.userInfo[UIKeyboardFrameEndUserInfoKey];
+    if(!value)return;
+    CGRect keyboardScreen=[value CGRectValue];
+    CGRect keyboardInView=[self.view convertRect:keyboardScreen fromView:nil];
+    CGRect overlap=CGRectIntersection(self.view.bounds,keyboardInView);
+    CGFloat covered=0;
+    if(!CGRectIsNull(overlap) && !CGRectIsEmpty(overlap) &&
+       CGRectGetMaxY(overlap)>=CGRectGetMaxY(self.view.bounds)-2) {
+        covered=CGRectGetMaxY(self.view.bounds)-CGRectGetMinY(overlap);
+    }
+    [self layoutForKeyboard:covered];
 }
 - (void)keyboardWillHide:(NSNotification *)n {[self layoutForKeyboard:0];}
 - (void)layoutForKeyboard:(CGFloat)height {
-    self.keyboardOffset=height;
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    CGFloat top=88,footerHeight=125;
-    CGFloat footerY=h-footerHeight-height;
-    if(footerY<top+96)footerY=top+96;
-    self.chat.frame=CGRectMake(0,top,w,footerY-top);
+    if(h<1 || w<1)return;
+    self.keyboardOffset=MAX(0,MIN(height,h));
+    BOOL typing=self.keyboardOffset>1;
+    // Leave a small gap above the Chinese predictive-word bar.
+    CGFloat availableBottom=MAX(0,h-self.keyboardOffset-(typing?5:0));
+    self.headerBar.hidden=typing;
+    self.tools.hidden=typing;
+    self.pasteButton.hidden=!typing;
+    CGFloat top=typing?0:88;
+    CGFloat footerHeight=typing?MIN(62,availableBottom):125;
+    CGFloat footerY=MAX(0,availableBottom-footerHeight);
+    self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
-    self.tools.frame=CGRectMake(10,7,w-20,42);
-    self.message.frame=CGRectMake(11,60,w-94,44);
-    self.sendButton.frame=CGRectMake(w-75,60,64,44);
+    if(typing){
+        CGFloat margin=8,gap=6,pasteW=46,sendW=58;
+        CGFloat inputW=MAX(60,w-2*margin-2*gap-pasteW-sendW);
+        CGFloat y=MAX(2,(footerHeight-44)/2);
+        self.message.frame=CGRectMake(margin,y,inputW,MIN(44,footerHeight));
+        self.pasteButton.frame=CGRectMake(margin+inputW+gap,y,pasteW,MIN(44,footerHeight));
+        self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,MIN(44,footerHeight));
+    } else {
+        self.tools.frame=CGRectMake(10,7,w-20,42);
+        self.message.frame=CGRectMake(11,60,w-94,44);
+        self.sendButton.frame=CGRectMake(w-75,60,64,44);
+    }
+}
+- (void)pasteTapped {
+    NSString *clip=[UIPasteboard generalPasteboard].string;
+    if(!clip.length){
+        [self showAlert:@"剪贴板没有文字" detail:@"可以先在其他软件中复制文本，再回到小斐 AI 点击粘贴。"];
+        return;
+    }
+    UITextRange *selection=self.message.selectedTextRange;
+    if(selection) [self.message replaceRange:selection withText:clip];
+    else self.message.text=[(self.message.text?:@"") stringByAppendingString:clip];
+    [self.message becomeFirstResponder];
 }
 - (BOOL)textFieldShouldReturn:(UITextField *)field { [self sendTapped];return NO;}
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
@@ -253,6 +304,11 @@
     NSString *name=[button accessibilityIdentifier];
     [self.message resignFirstResponder];
     if([name isEqualToString:@"new"]) {[self loadConversation:[XFChatStore createConversation]];return;}
+    if([name isEqualToString:@"copyreply"]) {
+        if(self.lastAnswer.length) {[UIPasteboard generalPasteboard].string=self.lastAnswer;self.status.text=@"已复制上一次 AI 回复";}
+        else [self showAlert:@"暂无可复制的回复" detail:@"收到 AI 回复后即可复制。"];
+        return;
+    }
     if([name isEqualToString:@"photo"]) {[self pickImage];return;}
     if([name isEqualToString:@"file"]) {[self pickFile];return;}
     if([name isEqualToString:@"record"]) {[self toggleRecord];return;}
