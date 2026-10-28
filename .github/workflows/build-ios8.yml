@@ -24,6 +24,8 @@ jobs:
           test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
           "$HOME/theos/bin/install-sdk" iPhoneOS9.3
           test -f "$HOME/theos/sdks/iPhoneOS9.3.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+          # Theos iOS 9.3 patched SDK refers to a missing liblaunch shim on Linux.
+          sed -i "s@/usr/lib/system/liblaunch.dylib, @@g" "$HOME/theos/sdks/iPhoneOS9.3.sdk/usr/lib/libSystem.tbd"
       - name: Compile armv7 and package
         env:
           THEOS: ${{ github.workspace }}/.theos-link
