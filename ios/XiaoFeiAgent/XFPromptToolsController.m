@@ -119,13 +119,14 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
     editor.promptTitle=item[@"title"];
     editor.promptText=item[@"text"];
     __weak XFPromptToolsController *weakSelf=self;
+    __weak XFPromptEditor *weakEditor=editor;
     editor.onUse=^(NSString *text){
         if(weakSelf.onUsePrompt)weakSelf.onUsePrompt(text);
         [weakSelf dismissViewControllerAnimated:YES completion:nil];
     };
     editor.onSave=^(NSString *text){
         [weakSelf saveTemplateWithTitle:item[@"title"] text:text];
-        editor.title=@"模板已保存";
+        weakEditor.title=@"模板已保存";
     };
     [self.navigationController pushViewController:editor animated:YES];
 }
