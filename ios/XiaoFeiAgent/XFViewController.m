@@ -384,7 +384,8 @@
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
+    UIViewController *presenter=(self.voiceActive && self.jarvisNavigation)?self.jarvisNavigation:self;
+    [presenter presentViewController:a animated:YES completion:nil];
 }
 - (void)modelsTapped {
     [self.message resignFirstResponder];
@@ -1001,6 +1002,12 @@
     self.recordingBadge.text=[NSString stringWithFormat:@"● 正在录音 %02ld:%02ld · 点击停止",
          (long)(seconds/60),(long)(seconds%60)];
     self.status.text=@"录音中，点红色「停止录音」结束";
+    if(self.voiceCapture && self.voiceActive) {
+        [self.recorder updateMeters];
+        float db=[self.recorder averagePowerForChannel:0];
+        float level=MAX(0,MIN(1,(db+53.0f)/48.0f));
+        [self.jarvis updateMeter:level seconds:seconds];
+    }
     if(seconds>=60)[self finishRecording];
 }
 - (void)finishRecording {
@@ -1010,6 +1017,7 @@
     [self.recordTimer invalidate];self.recordTimer=nil;
     [self setRecordingDisplay:NO];
     self.status.text=@"录音结束，正在识别语音…";
+    if(self.voiceCapture)[self voiceUpdate:@"transcribing" message:@"录音已结束，正在转换为文字…"];
     [self transcribeRecording];
 }
 - (void)toggleRecord {
@@ -1020,15 +1028,19 @@
     [session setCategory:AVAudioSessionCategoryPlayAndRecord error:&sessionError];
     [session setActive:YES error:&sessionError];
     if(sessionError){
-        [self showAlert:@"无法启动录音" detail:sessionError.localizedDescription];
+        if(self.voiceCapture)[self voiceError:@"麦克风无法启动，请检查录音权限"];
+        else [self showAlert:@"无法启动录音" detail:sessionError.localizedDescription];
         return;
     }
     self.status.text=@"正在请求麦克风权限…";
     [session requestRecordPermission:^(BOOL granted) {
         [[NSOperationQueue mainQueue] addOperationWithBlock:^{
+            if(self.voiceActive && !self.voiceCapture)return;
             if(!granted){
                 self.status.text=@"未获得麦克风权限";
-                [self showAlert:@"没有麦克风权限" detail:@"请到系统设置允许小斐 AI 使用麦克风。"];return;
+                if(self.voiceCapture)[self voiceError:@"没有麦克风权限，请到系统设置中开启"];
+                else [self showAlert:@"没有麦克风权限" detail:@"请到系统设置允许小斐 AI 使用麦克风。"];
+                return;
             }
             NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"xf-recording.m4a"];
             NSDictionary *settings=@{AVFormatIDKey:@(kAudioFormatMPEG4AAC),
@@ -1039,10 +1051,15 @@
                                                        settings:settings error:&error];
             if(error || ![self.recorder prepareToRecord] || ![self.recorder recordForDuration:60]){
                 self.status.text=@"录音无法开始";
-                [self showAlert:@"录音失败" detail:error.localizedDescription?:@"检查麦克风权限及设备剩余空间。"];return;
+                if(self.voiceCapture)[self voiceError:@"录音启动失败，请检查存储空间与系统权限"];
+                else [self showAlert:@"录音失败" detail:error.localizedDescription?:@"检查麦克风权限及设备剩余空间。"];
+                return;
             }
             self.isRecording=YES;
+            self.voiceStarting=NO;
             self.recordStarted=[NSDate date];
+            if(self.voiceCapture)[self voiceUpdate:@"listening" message:@"请说话，结束后点击「结束并提问」"];
+            self.recorder.meteringEnabled=YES;
             [self setRecordingDisplay:YES];
             [self.recordTimer invalidate];
             self.recordTimer=[NSTimer scheduledTimerWithTimeInterval:1.0 target:self
@@ -1052,15 +1069,22 @@
     }];
 }
 - (void)transcribeRecording {
-    NSDictionary *p=[self profileFor:@"stt"];if(!p)return;
+    BOOL wasVoice=self.voiceCapture;
+    NSDictionary *p=[self profileFor:@"stt"];
+    if(!p){if(wasVoice)[self voiceError:@"没有语音识别模型"];return;}
     NSData *audio=[NSData dataWithContentsOfURL:self.recorder.url];
-    if(!audio.length) {self.status.text=@"录音文件为空";[XFDiagnostics record:@"录音文件为空" code:0 detail:@"无音频数据"];return;}
+    if(!audio.length) {
+        self.status.text=@"录音文件为空";[XFDiagnostics record:@"录音文件为空" code:0 detail:@"无音频数据"];
+        if(wasVoice)[self voiceError:@"没有录到声音，请重新尝试"];return;
+    }
     if(audio.length>3*1024*1024){
         self.status.text=@"录音数据超过 3MB，未上传";
         [XFDiagnostics record:@"音频超过限制" code:0 detail:@"录音超过 3MB"];
+        if(wasVoice)[self voiceError:@"录音过长，请缩短后重试"];
         return;
     }
-    NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
+    NSMutableURLRequest *req=[self requestForProfile:p];
+    if(!req){if(wasVoice)[self voiceError:@"请检查语音识别 API 配置"];return;}
     NSString *boundary=[[NSUUID UUID] UUIDString];
     [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
     NSMutableData *body=[NSMutableData data];
@@ -1071,18 +1095,32 @@
     req.HTTPBody=body;
     self.status.text=@"正在语音识别…";
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
+        if(wasVoice && (!self.voiceActive || !self.voiceCapture))return;
         if(err){
             [XFDiagnostics record:@"语音识别网络失败" code:err.code detail:err.domain?:@""];
-            self.status.text=[NSString stringWithFormat:@"语音请求失败 %ld",(long)err.code];return;
+            self.status.text=[NSString stringWithFormat:@"语音请求失败 %ld",(long)err.code];
+            if(wasVoice)[self voiceError:@"语音识别连接失败，请检查网络"];
+            return;
         }
         NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
         NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         NSString *text=[json isKindOfClass:[NSDictionary class]]?json[@"text"]:nil;
         if(code>=300 || ![text isKindOfClass:[NSString class]]){
             [XFDiagnostics record:@"语音识别接口失败" code:code detail:@"API 不兼容或模型权限不足"];
-            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld；查看诊断",(long)code];return;
+            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld；查看诊断",(long)code];
+            if(wasVoice)[self voiceError:[NSString stringWithFormat:@"语音识别错误 HTTP %ld，请检查 STT 模型",(long)code]];
+            return;
         }
-        self.message.text=text;[self textViewDidChange:self.message];self.status.text=@"已识别语音，点击发送";
+        if(!text.length){if(wasVoice)[self voiceError:@"没有识别出文字，请再试一次"];return;}
+        self.message.text=text;[self textViewDidChange:self.message];
+        self.status.text=@"已识别语音，点击发送";
+        if(wasVoice) {
+            self.voiceCapture=NO;
+            self.voiceAwaitingChat=YES;
+            [self voiceUpdate:@"thinking" message:@"已识别，正在生成回答…"];
+            [self sendChat:NO];
+            if(!self.isWorking)[self voiceError:@"无法发送，请检查聊天模型配置"];
+        }
     }];
 }
 - (void)speakLastAnswer {
