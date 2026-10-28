@@ -1,0 +1,8 @@
+TARGET = iphone:clang:9.3:8.0
+ARCHS = armv7
+APPLICATION_NAME = XiaoFeiAgent
+XiaoFeiAgent_FILES = main.m XFAppDelegate.m XFViewController.m
+XiaoFeiAgent_FRAMEWORKS = UIKit Foundation AVFoundation AudioToolbox QuartzCore
+XiaoFeiAgent_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
+include $(THEOS)/makefiles/common.mk
+include $(THEOS_MAKE_PATH)/application.mk
