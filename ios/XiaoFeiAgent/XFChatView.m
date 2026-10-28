@@ -1,7 +1,10 @@
 #import "XFChatView.h"
+#import "XFChatStore.h"
 #import <QuartzCore/QuartzCore.h>
 @interface XFChatBubble : UIView
 @property(nonatomic,strong) UILabel *label;
+@property(nonatomic,strong) UIImageView *imagePreview;
+@property(nonatomic,copy) NSString *imageName;
 @property(nonatomic,assign) BOOL user;
 @property(nonatomic,assign) BOOL notice;
 @end
@@ -73,7 +76,7 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     self.welcomeTitle.frame=CGRectMake(12,center-45,w-24,35);
     self.welcomeSubtitle.frame=CGRectMake(20,center+4,w-40,45);
 }
-- (XFChatBubble *)makeBubble:(NSString *)text user:(BOOL)user notice:(BOOL)notice {
+- (XFChatBubble *)makeBubble:(NSString *)text user:(BOOL)user notice:(BOOL)notice imageName:(NSString *)imageName {
     XFChatBubble *bubble=[[XFChatBubble alloc] initWithFrame:CGRectZero];
     bubble.user=user;bubble.notice=notice;
     bubble.backgroundColor=notice?[UIColor colorWithRed:0.91 green:0.93 blue:0.98 alpha:1]:
@@ -91,6 +94,22 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     label.text=text?:@"";
     [bubble addSubview:label];
     bubble.label=label;
+    if(imageName.length){
+        UIImage *thumb=[XFChatStore thumbnailForName:imageName];
+        if(thumb){
+            UIImageView *picture=[[UIImageView alloc] initWithImage:thumb];
+            picture.contentMode=UIViewContentModeScaleAspectFill;
+            picture.clipsToBounds=YES;
+            picture.layer.cornerRadius=8;
+            picture.userInteractionEnabled=YES;
+            picture.accessibilityIdentifier=imageName;
+            UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(imageTapped:)];
+            [picture addGestureRecognizer:tap];
+            [bubble addSubview:picture];
+            bubble.imagePreview=picture;
+            bubble.imageName=imageName;
+        }
+    }
     bubble.userInteractionEnabled=YES;
     UILongPressGestureRecognizer *longPress=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(bubbleLongPressed:)];
     longPress.minimumPressDuration=0.45;
@@ -101,6 +120,14 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
         XFChatBubble *old=self.bubbles[0];[old removeFromSuperview];[self.bubbles removeObjectAtIndex:0];
     }
     return bubble;
+}
+- (XFChatBubble *)makeBubble:(NSString *)text user:(BOOL)user notice:(BOOL)notice {
+    return [self makeBubble:text user:user notice:notice imageName:nil];
+}
+- (void)imageTapped:(UITapGestureRecognizer *)gesture {
+    NSString *filename=gesture.view.accessibilityIdentifier;
+    UIImage *image=[XFChatStore imageForName:filename];
+    if(image && self.onImageTap)self.onImageTap(image);
 }
 - (BOOL)canBecomeFirstResponder {return YES;}
 - (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
@@ -131,7 +158,8 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
         NSString *text=message[@"content"];
         if(![text isKindOfClass:[NSString class]])continue;
         BOOL user=[message[@"role"] isEqualToString:@"user"];
-        [self makeBubble:text user:user notice:NO];
+        NSString *filename=[message[@"image_file"] isKindOfClass:[NSString class]]?message[@"image_file"]:nil;
+        [self makeBubble:text user:user notice:NO imageName:filename];
     }
     [self layoutBubbles:YES];
 }
@@ -139,6 +167,12 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     [self hideWelcome];
     self.streamBubble=nil;
     [self makeBubble:text user:user notice:NO];
+    [self layoutBubbles:YES];
+}
+- (void)addImageMessage:(NSString *)text imageName:(NSString *)filename {
+    [self hideWelcome];
+    self.streamBubble=nil;
+    [self makeBubble:text user:YES notice:NO imageName:filename];
     [self layoutBubbles:YES];
 }
 - (void)updateStreaming:(NSString *)text {
@@ -179,12 +213,16 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
         CGSize max=CGSizeMake(labelWidth,CGFLOAT_MAX);
         CGSize measured=[bubble.label sizeThatFits:max];
         CGFloat actualWidth=MIN(labelWidth,MAX(65,ceil(measured.width)));
-        CGFloat h=MAX(37,ceil(measured.height)+21);
+        BOOL hasImage=bubble.imagePreview!=nil;
+        if(hasImage)actualWidth=MAX(actualWidth,165);
+        CGFloat imageHeight=hasImage?118:0;
+        CGFloat h=MAX(37,ceil(measured.height)+21)+(hasImage?imageHeight+11:0);
         CGFloat w=actualWidth+26;
         CGFloat x=bubble.user?width-13-w:13;
         if(bubble.notice){x=(width-w)/2;}
         bubble.frame=CGRectMake(floor(x),y,ceil(w),h);
         bubble.label.frame=CGRectMake(13,10,actualWidth,ceil(measured.height)+2);
+        if(hasImage)bubble.imagePreview.frame=CGRectMake(13,ceil(measured.height)+17,actualWidth,imageHeight);
         y+=h+12;
     }
     self.scroll.contentSize=CGSizeMake(width,MAX(self.scroll.bounds.size.height+1,y+9));
