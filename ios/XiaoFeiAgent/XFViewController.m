@@ -1,4 +1,5 @@
 #import "XFViewController.h"
+#import "XFModelsController.h"
 #import <Security/Security.h>
 
 @interface XFViewController ()
@@ -23,6 +24,8 @@
 }
 
 - (NSDictionary *)selectedProvider {
+    NSDictionary *profile=[XFModelsController activeProfile];
+    if(profile) return @{@"id":profile[@"id"],@"name":profile[@"name"],@"url":profile[@"endpoint"],@"model":profile[@"model"]};
     NSString *providerId = [[NSUserDefaults standardUserDefaults] stringForKey:@"direct_provider"];
     for (NSDictionary *provider in [self providers]) {
         if ([provider[@"id"] isEqualToString:providerId]) return provider;
@@ -114,7 +117,8 @@
 - (void)refreshStatus {
     if ([self isDirect]) {
        NSDictionary *p=[self selectedProvider];
-       self.status.text=[NSString stringWithFormat:@"直连：%@ · %@",p[@"name"],[self keyForProvider:p[@"id"]]?@"已保存密钥":@"请填写密钥"];
+       NSString *key=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:p[@"id"]];
+       self.status.text=[NSString stringWithFormat:@"直连：%@ · %@",p[@"name"],key.length?@"已保存密钥":@"请填写密钥"];
     } else {
        self.status.text=@"电脑服务端模式 · 点击设置连接";
     }
@@ -151,6 +155,7 @@
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.sendButton];
     [self refreshStatus];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshStatus) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)field {
@@ -158,6 +163,10 @@
 }
 
 - (void)settingsTapped {
+    XFModelsController *vc=[[XFModelsController alloc] initWithStyle:UITableViewStyleGrouped];
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:vc];
+    [self presentViewController:nav animated:YES completion:nil];
+    return;
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"连接方式"
        message:@"推荐国产 AI 直连：无需电脑，使用手机网络即可聊天"
        preferredStyle:UIAlertControllerStyleAlert];
@@ -282,8 +291,9 @@
     if (![self isDirect] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"server"] length]) {
         [self settingsTapped]; return;
     }
-    if ([self isDirect] && ![[self keyForProvider:[self selectedProvider][@"id"]] length]) {
-        [self selectProvider]; return;
+    NSString *activeKey=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:[self selectedProvider][@"id"]];
+    if ([self isDirect] && !activeKey.length) {
+        [self settingsTapped]; return;
     }
     [self.message resignFirstResponder];
     self.message.text=@"";
@@ -359,9 +369,10 @@
     NSDictionary *provider=[self selectedProvider];
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
     NSString *pid=provider[@"id"];
-    NSString *urlStr=[pid isEqualToString:@"custom"]?[d stringForKey:@"direct_url_custom"]:provider[@"url"];
+    NSString *urlStr=[XFModelsController activeProfile]?provider[@"url"]:([pid isEqualToString:@"custom"]?[d stringForKey:@"direct_url_custom"]:provider[@"url"]);
     NSString *model=[d stringForKey:[@"model_" stringByAppendingString:pid]];
-    if (!model.length) model=provider[@"model"];
+    if ([XFModelsController activeProfile]) model=provider[@"model"];
+    else if (!model.length) model=provider[@"model"];
     NSURL *url=[NSURL URLWithString:urlStr];
     if (!url || ![[url scheme] isEqualToString:@"https"] || !model.length) {
         self.status.text=@"模型接口地址无效"; self.sendButton.enabled=YES; return;
@@ -375,7 +386,8 @@
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod=@"POST"; req.timeoutInterval=100; req.HTTPBody=json;
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [req setValue:[@"Bearer " stringByAppendingString:[self keyForProvider:pid]] forHTTPHeaderField:@"Authorization"];
+    NSString *secret=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:pid];
+    [req setValue:[@"Bearer " stringByAppendingString:secret?:@""] forHTTPHeaderField:@"Authorization"];
     [self request:req finishedForMessage:content direct:YES];
 }
 
