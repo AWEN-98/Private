@@ -5,6 +5,89 @@ static NSString * const kXFProfiles = @"xf_saved_profiles";
 static NSString * const kXFActive = @"xf_active_profile";
 static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
 
+
+@interface XFProfileEditor : UIViewController <UITextFieldDelegate>
+@property(nonatomic,strong) NSDictionary *source;
+@property(nonatomic,strong) UITextField *nameField;
+@property(nonatomic,strong) UITextField *modelField;
+@property(nonatomic,strong) UITextField *urlField;
+@property(nonatomic,strong) UITextField *keyField;
+@property(nonatomic,strong) UIScrollView *scroll;
+@property(nonatomic,copy) void (^saveBlock)(XFProfileEditor *editor);
+@end
+@implementation XFProfileEditor
+- (UITextField *)addField:(NSString *)value placeholder:(NSString *)placeholder top:(CGFloat)y {
+    UILabel *label=[[UILabel alloc] initWithFrame:CGRectMake(16,y,self.view.bounds.size.width-32,22)];
+    label.text=placeholder;label.font=[UIFont systemFontOfSize:14];
+    [self.scroll addSubview:label];
+    UITextField *f=[[UITextField alloc] initWithFrame:CGRectMake(16,y+23,self.view.bounds.size.width-32,40)];
+    f.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    f.borderStyle=UITextBorderStyleRoundedRect;
+    f.backgroundColor=[UIColor whiteColor];
+    f.font=[UIFont systemFontOfSize:15];
+    f.placeholder=placeholder;f.text=value?:@"";
+    f.autocorrectionType=UITextAutocorrectionTypeNo;
+    f.autocapitalizationType=UITextAutocapitalizationTypeNone;
+    f.delegate=self;f.returnKeyType=UIReturnKeyDone;
+    [self.scroll addSubview:f];
+    return f;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title=@"添加 / 编辑模型";
+    self.view.backgroundColor=[UIColor colorWithWhite:0.96 alpha:1];
+    self.scroll=[[UIScrollView alloc] initWithFrame:self.view.bounds];
+    self.scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    self.scroll.alwaysBounceVertical=YES;
+    [self.view addSubview:self.scroll];
+    self.nameField=[self addField:self.source[@"name"]?:self.source[@"provider"] placeholder:@"显示名称" top:12];
+    self.modelField=[self addField:self.source[@"model"] placeholder:@"模型 ID" top:82];
+    self.urlField=[self addField:self.source[@"endpoint"] placeholder:@"完整 HTTPS API 地址" top:152];
+    self.urlField.keyboardType=UIKeyboardTypeURL;
+    self.keyField=[self addField:nil placeholder:@"API Key（已有密钥可留空）" top:222];
+    self.keyField.secureTextEntry=YES;
+    UIButton *save=[UIButton buttonWithType:UIButtonTypeSystem];
+    save.frame=CGRectMake(16,315,self.view.bounds.size.width-32,46);
+    save.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    save.layer.cornerRadius=7;
+    [save setTitle:@"保存模型" forState:UIControlStateNormal];
+    save.titleLabel.font=[UIFont boldSystemFontOfSize:17];
+    [save addTarget:self action:@selector(saveTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.scroll addSubview:save];
+    UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(16,370,self.view.bounds.size.width-32,70)];
+    hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    hint.numberOfLines=0;hint.font=[UIFont systemFontOfSize:12];hint.textColor=[UIColor grayColor];
+    hint.text=@"可随时返回编辑。第一次添加请填写 API Key。旧越狱系统无法写入钥匙串时，会先征求同意再使用本机兼容存储。";
+    [self.scroll addSubview:hint];
+    self.scroll.contentSize=CGSizeMake(self.view.bounds.size.width,500);
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardShown:) name:UIKeyboardWillShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardHidden:) name:UIKeyboardWillHideNotification object:nil];
+}
+- (void)keyboardShown:(NSNotification *)n {
+    CGRect frame=[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    self.scroll.contentInset=UIEdgeInsetsMake(0,0,frame.size.height+10,0);
+    self.scroll.scrollIndicatorInsets=self.scroll.contentInset;
+}
+- (void)keyboardHidden:(NSNotification *)n {
+    self.scroll.contentInset=UIEdgeInsetsZero;
+    self.scroll.scrollIndicatorInsets=UIEdgeInsetsZero;
+}
+- (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
+- (BOOL)textFieldShouldReturn:(UITextField *)field {[field resignFirstResponder];return YES;}
+- (void)textFieldDidBeginEditing:(UITextField *)field {
+    [self.scroll scrollRectToVisible:CGRectInset(field.frame,0,-25) animated:YES];
+}
+- (void)saveTapped {
+    [self.view endEditing:YES];
+    if(self.saveBlock)self.saveBlock(self);
+}
+- (void)showIssue:(NSString *)text {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"模型配置" message:text preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+@end
+
 @interface XFModelsController ()
 @property(nonatomic,strong) NSMutableArray *profiles;
 @end
@@ -208,36 +291,21 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
 - (void)editProfile:(NSDictionary *)profile index:(NSInteger)index {
     BOOL existing=index>=0;
     NSString *pid=existing?profile[@"id"]:[[NSUUID UUID] UUIDString];
-    UIAlertController *form=[UIAlertController alertControllerWithTitle:existing?@"编辑模型":@"添加模型"
-        message:@"可以随时修改名称、模型 ID、URL 和密钥。已有密钥留空则保留。"
-        preferredStyle:UIAlertControllerStyleAlert];
-    NSArray *labels=@[@"显示名称",@"模型 ID",@"完整 HTTPS 接口地址",@"API Key（已有密钥可留空）"];
-    NSArray *values=@[profile[@"name"]?:profile[@"provider"]?:@"",profile[@"model"]?:@"",profile[@"endpoint"]?:@"",@""];
-    for(NSInteger i=0;i<4;i++) {
-        NSString *label=labels[i],*value=values[i];
-        [form addTextFieldWithConfigurationHandler:^(UITextField *field) {
-            field.placeholder=label;
-            field.text=value;
-            field.autocorrectionType=UITextAutocorrectionTypeNo;
-            field.autocapitalizationType=UITextAutocapitalizationTypeNone;
-            if(i==3) field.secureTextEntry=YES;
-        }];
-    }
-    [form addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [form addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        NSArray *fields=form.textFields;
-        NSString *name=[[fields[0] text] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *model=[[fields[1] text] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *endpoint=[[fields[2] text] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *key=[fields[3] text];
+    XFProfileEditor *editor=[[XFProfileEditor alloc] init];
+    editor.source=profile;
+    editor.saveBlock=^(XFProfileEditor *screen) {
+        NSString *name=[screen.nameField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *model=[screen.modelField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *endpoint=[screen.urlField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *key=screen.keyField.text;
         NSURL *url=[NSURL URLWithString:endpoint];
         if(!name.length || !model.length || ![url.scheme isEqualToString:@"https"] || !url.host.length) {
-            [self showMessage:@"名称、模型 ID 不能为空，接口必须是完整 HTTPS URL"];
+            [screen showIssue:@"名称、模型 ID 不能为空，接口必须是完整 HTTPS URL。"];
             return;
         }
         NSDictionary *saved=@{@"id":pid,@"name":name,@"model":model,@"endpoint":endpoint,
-                               @"provider":profile[@"provider"]?:@"自定义",
-                               @"capability":profile[@"capability"]?:@"chat"};
+             @"provider":profile[@"provider"]?:@"自定义",
+             @"capability":profile[@"capability"]?:@"chat"};
         if(key.length) {
             OSStatus code=[XFModelsController writeKeychain:key forID:pid];
             if(code!=errSecSuccess) {
@@ -245,32 +313,28 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
                 return;
             }
         } else if(![[XFModelsController secretForProfile:saved] length]) {
-            // One provider may have multiple model profiles sharing one API key.
             NSString *reuse=nil;
+            NSString *host=[url host];
             for(NSDictionary *other in self.profiles) {
-                NSString *newHost=[[NSURL URLWithString:saved[@"endpoint"]] host];
                 NSString *otherHost=[[NSURL URLWithString:other[@"endpoint"]] host];
-                BOOL safeProvider=![saved[@"provider"] hasPrefix:@"自定义"];
-                if(safeProvider && newHost.length && [newHost isEqualToString:otherHost] &&
-                   [other[@"provider"] isEqualToString:saved[@"provider"]]) {
+                BOOL knownVendor=![saved[@"provider"] hasPrefix:@"自定义"];
+                if(knownVendor && [other[@"provider"] isEqualToString:saved[@"provider"]] &&
+                   [host isEqualToString:otherHost]) {
                     reuse=[XFModelsController secretForProfile:other];
-                    if(reuse.length) break;
+                    if(reuse.length)break;
                 }
             }
             if(reuse.length) {
                 OSStatus code=[XFModelsController writeKeychain:reuse forID:pid];
-                if(code!=errSecSuccess) {
-                    [self offerFallback:reuse code:code saved:saved index:index];
-                    return;
-                }
+                if(code!=errSecSuccess) {[self offerFallback:reuse code:code saved:saved index:index];return;}
             } else {
-                [self showMessage:@"首次添加该厂商时，请填写 API Key"];
+                [screen showIssue:@"首次添加这个厂商的模型，请填写 API Key。"];
                 return;
             }
         }
         [self finishSave:saved index:index];
-    }]];
-    [self presentViewController:form animated:YES completion:nil];
+    };
+    [self.navigationController pushViewController:editor animated:YES];
 }
 - (void)offerFallback:(NSString *)key code:(OSStatus)code saved:(NSDictionary *)saved index:(NSInteger)index {
     NSString *message=[NSString stringWithFormat:@"iOS 钥匙串写入错误 %ld。可自愿改用 App 私有文件，保护弱于钥匙串，越狱设备有泄露风险。",(long)code];
@@ -283,7 +347,7 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
         }
         [self finishSave:saved index:index];
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self.navigationController.topViewController presentViewController:a animated:YES completion:nil];
 }
 - (void)finishSave:(NSDictionary *)profile index:(NSInteger)index {
     if(index>=0 && index<self.profiles.count) self.profiles[index]=profile;
@@ -297,5 +361,8 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
         [d setObject:@"direct" forKey:@"connect_mode"];
     }
     [self saveProfiles];
+    if([self.navigationController.topViewController isKindOfClass:[XFProfileEditor class]]) {
+        [self.navigationController popViewControllerAnimated:YES];
+    }
 }
 @end
