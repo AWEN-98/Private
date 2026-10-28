@@ -34,6 +34,10 @@
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,copy) NSString *conversationID;
 @property(nonatomic,strong) UIImage *pendingImage;
+@property(nonatomic,copy) NSString *sendingImageName;
+@property(nonatomic,strong) UIImageView *attachmentPreview;
+@property(nonatomic,strong) UIButton *removeAttachmentButton;
+@property(nonatomic,strong) UILabel *attachmentCaption;
 @property(nonatomic,copy) NSString *pendingFileText;
 @property(nonatomic,copy) NSString *lastAnswer;
 @property(nonatomic,strong) AVAudioRecorder *recorder;
@@ -113,6 +117,10 @@
     self.chat=[[XFChatView alloc] initWithFrame:CGRectZero];
     self.chat.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.chat];
+    __weak XFViewController *weakSelf=self;
+    self.chat.onImageTap=^(UIImage *image) {
+        [weakSelf showGeneratedImage:image];
+    };
     self.recordingBadge=[[UILabel alloc] initWithFrame:CGRectMake(6,94,w-12,30)];
     self.recordingBadge.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.recordingBadge.font=[UIFont boldSystemFontOfSize:13];
@@ -194,6 +202,31 @@
     [self.pasteButton addTarget:self action:@selector(pasteTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.footerBar addSubview:self.pasteButton];
 
+    self.attachmentPreview=[[UIImageView alloc] initWithFrame:CGRectZero];
+    self.attachmentPreview.backgroundColor=[UIColor colorWithWhite:0.92 alpha:1];
+    self.attachmentPreview.contentMode=UIViewContentModeScaleAspectFill;
+    self.attachmentPreview.layer.cornerRadius=8;
+    self.attachmentPreview.clipsToBounds=YES;
+    self.attachmentPreview.userInteractionEnabled=YES;
+    UITapGestureRecognizer *previewTap=[[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(previewPendingImage)];
+    [self.attachmentPreview addGestureRecognizer:previewTap];
+    [self.footerBar addSubview:self.attachmentPreview];
+    self.removeAttachmentButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    [self.removeAttachmentButton setTitle:@"移除" forState:UIControlStateNormal];
+    [self styleNavigationButton:self.removeAttachmentButton filled:NO];
+    self.removeAttachmentButton.titleLabel.font=[UIFont boldSystemFontOfSize:11];
+    [self.removeAttachmentButton addTarget:self action:@selector(removePendingImage)
+        forControlEvents:UIControlEventTouchUpInside];
+    [self.footerBar addSubview:self.removeAttachmentButton];
+    self.attachmentCaption=[[UILabel alloc] initWithFrame:CGRectZero];
+    self.attachmentCaption.text=@"已附加图片 · 点击缩略图预览";
+    self.attachmentCaption.font=[UIFont systemFontOfSize:11];
+    self.attachmentCaption.textColor=[self ink];
+    self.attachmentCaption.numberOfLines=2;
+    [self.footerBar addSubview:self.attachmentCaption];
+    [self updateAttachmentViews];
+
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
       name:UIKeyboardWillShowNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:)
@@ -256,7 +289,8 @@
     self.tools.hidden=typing;
     self.pasteButton.hidden=!typing;
     CGFloat top=typing?0:88;
-    CGFloat footerHeight=typing?MIN(62,availableBottom):125;
+    BOOL hasImage=self.pendingImage!=nil;
+    CGFloat footerHeight=typing?MIN(hasImage?110:62,availableBottom):(hasImage?192:125);
     CGFloat footerY=MAX(0,availableBottom-footerHeight);
     self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
@@ -264,17 +298,37 @@
     if(typing){
         CGFloat margin=8,gap=6,pasteW=46,sendW=58;
         CGFloat inputW=MAX(60,w-2*margin-2*gap-pasteW-sendW);
-        CGFloat y=MAX(2,(footerHeight-44)/2);
+        CGFloat y=hasImage?MAX(2,footerHeight-51):MAX(2,(footerHeight-44)/2);
         self.message.frame=CGRectMake(margin,y,inputW,MIN(44,footerHeight));
         self.messagePlaceholder.frame=CGRectMake(margin+11,y+6,inputW-17,27);
         self.pasteButton.frame=CGRectMake(margin+inputW+gap,y,pasteW,MIN(44,footerHeight));
         self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,MIN(44,footerHeight));
     } else {
         self.tools.frame=CGRectMake(10,7,w-20,42);
-        self.message.frame=CGRectMake(11,57,w-94,53);
-        self.messagePlaceholder.frame=CGRectMake(22,65,w-110,26);
-        self.sendButton.frame=CGRectMake(w-75,60,64,44);
+        CGFloat inputY=hasImage?130:57;
+        self.message.frame=CGRectMake(11,inputY,w-94,53);
+        self.messagePlaceholder.frame=CGRectMake(22,inputY+8,w-110,26);
+        self.sendButton.frame=CGRectMake(w-75,inputY+3,64,44);
     }
+    self.attachmentPreview.frame=typing?CGRectMake(10,7,36,36):CGRectMake(11,54,63,63);
+    self.removeAttachmentButton.frame=typing?CGRectMake(53,8,43,30):CGRectMake(82,63,43,30);
+    self.attachmentCaption.frame=typing?CGRectMake(102,7,MAX(30,w-112),35):CGRectMake(133,59,MAX(30,w-144),46);
+    [self updateAttachmentViews];
+}
+- (void)updateAttachmentViews {
+    BOOL show=self.pendingImage!=nil;
+    self.attachmentPreview.hidden=!show;
+    self.removeAttachmentButton.hidden=!show;
+    self.attachmentCaption.hidden=!show;
+    self.attachmentPreview.image=show?self.pendingImage:nil;
+}
+- (void)removePendingImage {
+    self.pendingImage=nil;
+    self.status.text=@"已移除图片附件";
+    [self layoutForKeyboard:self.keyboardOffset];
+}
+- (void)previewPendingImage {
+    if(self.pendingImage)[self showGeneratedImage:self.pendingImage];
 }
 - (void)pasteTapped {
     NSString *clip=[UIPasteboard generalPasteboard].string;
@@ -340,6 +394,7 @@
     }
     [self.chat showConversation:self.history];
     self.pendingFileText=nil;self.pendingImage=nil;
+    [self layoutForKeyboard:self.keyboardOffset];
     self.message.text=[[NSUserDefaults standardUserDefaults] stringForKey:[self draftKeyForConversation:cid]]?:@"";
     self.messagePlaceholder.hidden=self.message.text.length>0;
 }
@@ -348,7 +403,12 @@
     else [self.chat showNotice:line];
 }
 - (void)addExchange:(NSString *)question answer:(NSString *)answer {
-    if(question.length) [self.history addObject:@{@"role":@"user",@"content":question}];
+    if(question.length) {
+        if(self.sendingImageName.length)
+            [self.history addObject:@{@"role":@"user",@"content":question,@"image_file":self.sendingImageName}];
+        else [self.history addObject:@{@"role":@"user",@"content":question}];
+    }
+    self.sendingImageName=nil;
     if(answer.length) [self.history addObject:@{@"role":@"assistant",@"content":answer}];
     [XFChatStore saveConversationID:self.conversationID messages:self.history];
     if(answer.length) self.lastAnswer=answer;
