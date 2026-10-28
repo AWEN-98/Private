@@ -434,10 +434,26 @@ static void XFDropAccount(NSString *aid){
             NSString *mid=item[@"id"];
             if(![mid isKindOfClass:[NSString class]] || !mid.length || [seen containsObject:mid])continue;
             [seen addObject:mid];
-            NSMutableDictionary *model=[NSMutableDictionary dictionaryWithDictionary:item];
-            NSString *name=[model[@"name"] isKindOfClass:[NSString class]]?model[@"name"]:mid;
-            model[@"name"]=name;
-            if(overrides[mid]) model[@"user_category"]=overrides[mid];
+            // Only keep property-list values; API JSON often contains NSNull.
+            NSMutableDictionary *model=[NSMutableDictionary dictionary];
+            model[@"id"]=mid;
+            model[@"name"]=[item[@"name"] isKindOfClass:[NSString class]]?item[@"name"]:mid;
+            NSDictionary *arch=[item[@"architecture"] isKindOfClass:[NSDictionary class]]?item[@"architecture"]:nil;
+            NSArray *inModalities=[item[@"input_modalities"] isKindOfClass:[NSArray class]]?item[@"input_modalities"]:arch[@"input_modalities"];
+            NSArray *outModalities=[item[@"output_modalities"] isKindOfClass:[NSArray class]]?item[@"output_modalities"]:arch[@"output_modalities"];
+            if([inModalities isKindOfClass:[NSArray class]]) {
+                NSMutableArray *safe=[NSMutableArray array];
+                for(id x in inModalities)if([x isKindOfClass:[NSString class]])[safe addObject:x];
+                model[@"input_modalities"]=safe;
+            }
+            if([outModalities isKindOfClass:[NSArray class]]) {
+                NSMutableArray *safe=[NSMutableArray array];
+                for(id x in outModalities)if([x isKindOfClass:[NSString class]])[safe addObject:x];
+                model[@"output_modalities"]=safe;
+            }
+            if([item[@"supports_image_in"] isKindOfClass:[NSNumber class]])model[@"supports_image_in"]=item[@"supports_image_in"];
+            if([item[@"supports_reasoning"] isKindOfClass:[NSNumber class]])model[@"supports_reasoning"]=item[@"supports_reasoning"];
+            if(overrides[mid])model[@"user_category"]=overrides[mid];
             [models addObject:model];
         }
         if(!models.count){[self alert:@"模型列表为空。可手动添加模型。"];return;}
