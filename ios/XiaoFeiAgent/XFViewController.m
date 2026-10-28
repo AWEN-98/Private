@@ -414,7 +414,10 @@
 - (void)sendTapped {
     if(self.isWorking) {
         [self.connection cancel];self.connection=nil;
-        [self setWorking:NO];self.status.text=@"已停止请求";
+        [self setWorking:NO];
+        [self restoreSubmittedDraft];
+        [XFDiagnostics record:@"手动停止请求" code:0 detail:@"用户中止"];
+        self.status.text=@"已停止请求；输入草稿已保留";
         return;
     }
     [self sendChat:NO];
@@ -430,14 +433,30 @@
     if(!msg.length && self.pendingImage) msg=@"请详细描述这张图片";
     if(!msg.length && self.pendingFileText.length) msg=@"请分析这份文档";
     if(!msg.length) {self.status.text=@"请先输入问题";return;}
+    if(msg.length>6000) {
+        [self showAlert:@"输入内容过长" detail:@"iPhone 4S 建议每次不超过 6000 字，请拆成几段发送。"];
+        return;
+    }
     NSString *sent=msg;
     if(self.pendingFileText.length) {
         msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
         sent=[sent stringByAppendingString:@" [文本文件]"];
     }
     NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":@"你是小斐，中文智能助手。准确回答问题，信息不确定时如实说明。"}];
-    NSUInteger start=self.history.count>18?self.history.count-18:0;
-    for(NSUInteger i=start;i<self.history.count;i++) [messages addObject:self.history[i]];
+    NSUInteger start=self.history.count>12?self.history.count-12:0;
+    NSUInteger totalChars=0;
+    NSMutableArray *recent=[NSMutableArray array];
+    for(NSUInteger i=self.history.count;i>start;i--) {
+        NSDictionary *old=self.history[i-1];
+        NSString *text=[old[@"content"] isKindOfClass:[NSString class]]?old[@"content"]:nil;
+        if(!text.length)continue;
+        NSUInteger clip=MIN((NSUInteger)3500,text.length);
+        if(totalChars+clip>16000)break;
+        totalChars+=clip;
+        [recent insertObject:@{@"role":old[@"role"]?:@"user",
+          @"content":[text substringToIndex:clip]} atIndex:0];
+    }
+    [messages addObjectsFromArray:recent];
     if(self.pendingImage) {
         UIImage *image=self.pendingImage;
         CGFloat maxDimension=640;
@@ -447,7 +466,13 @@
         [image drawInRect:CGRectMake(0,0,target.width,target.height)];
         UIImage *resized=UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
-        NSString *encoded=[UIImageJPEGRepresentation(resized,0.64) base64EncodedStringWithOptions:0];
+        NSData *jpeg=UIImageJPEGRepresentation(resized,0.60);
+        NSString *encoded=[jpeg base64EncodedStringWithOptions:0];
+        if(!encoded.length){
+            self.status.text=@"图片编码失败，请换一张图片";
+            [XFDiagnostics record:@"图片编码失败" code:0 detail:@"JPEG 编码结果为空"];
+            return;
+        }
         NSString *uri=[@"data:image/jpeg;base64," stringByAppendingString:encoded];
         [messages addObject:@{@"role":@"user",@"content":@[
             @{@"type":@"text",@"text":msg},
@@ -598,6 +623,10 @@
     if(self.usingCompatibilityMode && self.lastChatProfile) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:[self compatibilityKeyFor:self.lastChatProfile]];
     }
+    if(self.lastSubmittedDraft.length && [self.message.text isEqualToString:self.lastSubmittedDraft]){
+        self.message.text=@"";
+        [self textViewDidChange:self.message];
+    }
     self.lastSubmittedDraft=nil;
     self.status.text=self.usingCompatibilityMode?@"兼容模式成功，下次将自动使用":@"回复完成，已保存到历史对话";
 }
@@ -640,9 +669,11 @@
     NSString *detail=[NSString stringWithFormat:@"服务：%@\n模型：%@\n接口：%@\n\n服务端原因：\n%@",
         p[@"provider"]?:@"未知",p[@"model"]?:@"未知",endpoint,reason?:@"未知"];
     NSString *report=[NSString stringWithFormat:@"HTTP %ld\n%@",(long)status,detail];
+    NSString *shortDetail=detail.length>430?
+        [[detail substringToIndex:430] stringByAppendingString:@"…\n可点「复制诊断」查看全部信息。"]:detail;
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:
         [NSString stringWithFormat:@"API 错误 · HTTP %ld",(long)status]
-        message:detail preferredStyle:UIAlertControllerStyleAlert];
+        message:shortDetail preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"复制诊断（不含密钥）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         [UIPasteboard generalPasteboard].string=report;
@@ -685,6 +716,7 @@
     self.streamBuffer=[NSMutableData data];
     self.streamText=[NSMutableString string];
     self.httpCode=0;
+    self.chatPayloadExceeded=NO;
     [self setWorking:YES];
     self.status.text=@"兼容模式重试：关闭流式输出与额外参数…";
     self.connection=[[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
