@@ -855,7 +855,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     BOOL favorite=[item[@"favorite"] boolValue],active=[item[@"active"] boolValue];
     NSString *status=item[@"probe"][@"status"];
     BOOL passed=[status isEqualToString:@"ok"],failed=[status isEqualToString:@"bad"];
-    BOOL uncertain=[status isEqualToString:@"unknown"];
+
     BOOL probeCapable=[XFModelProbe canProbeCategory:item[@"category"]];
     NSString *state=[self statusLabel:status.length?status:(probeCapable?@"untested":@"notprobed")];
     NSString *name=model[@"name"]?:model[@"id"];
