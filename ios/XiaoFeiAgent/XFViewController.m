@@ -48,18 +48,67 @@
     query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
     CFTypeRef found=NULL;
     OSStatus result=SecItemCopyMatching((__bridge CFDictionaryRef)query,&found);
-    if(result!=errSecSuccess || !found) return nil;
+    if(result!=errSecSuccess || !found) return [self fallbackKey:provider];
     NSData *data=(__bridge_transfer NSData *)found;
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
 }
 
 - (BOOL)saveKey:(NSString *)key forProvider:(NSString *)provider {
-    SecItemDelete((__bridge CFDictionaryRef)[self keychainQueryForProvider:provider]);
-    if (!key.length) return YES;
+    if (!key.length) { SecItemDelete((__bridge CFDictionaryRef)[self keychainQueryForProvider:provider]); [self saveFallbackKey:@"" provider:provider]; return YES; }
     NSMutableDictionary *query=[self keychainQueryForProvider:provider];
     query[(__bridge id)kSecValueData]=[key dataUsingEncoding:NSUTF8StringEncoding];
     query[(__bridge id)kSecAttrAccessible]=(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-    return SecItemAdd((__bridge CFDictionaryRef)query,NULL)==errSecSuccess;
+    OSStatus result=SecItemAdd((__bridge CFDictionaryRef)query,NULL);
+    if (result==errSecDuplicateItem) {
+        NSMutableDictionary *update=[NSMutableDictionary dictionary];
+        update[(__bridge id)kSecValueData]=[key dataUsingEncoding:NSUTF8StringEncoding];
+        result=SecItemUpdate((__bridge CFDictionaryRef)[self keychainQueryForProvider:provider],(__bridge CFDictionaryRef)update);
+    }
+    if(result!=errSecSuccess) NSLog(@"XiaoFei Keychain SecItemAdd error %ld",(long)result);
+    return result==errSecSuccess;
+}
+
+
+// Legacy jailbreak compatibility: an explicit user opt-in is required before
+// storing the key in the app's private file. Never send secrets to a third party.
+- (NSString *)fallbackPath {
+    NSString *dir=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/XiaoFeiAgent"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} error:NULL];
+    return [dir stringByAppendingPathComponent:@"keys.plist"];
+}
+- (NSString *)fallbackKey:(NSString *)pid {
+    NSDictionary *keys=[NSDictionary dictionaryWithContentsOfFile:[self fallbackPath]];
+    id value=[keys objectForKey:pid];
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+- (BOOL)saveFallbackKey:(NSString *)key provider:(NSString *)pid {
+    NSString *path=[self fallbackPath];
+    NSMutableDictionary *keys=[NSMutableDictionary dictionaryWithContentsOfFile:path];
+    if(!keys) keys=[NSMutableDictionary dictionary];
+    if (key.length) keys[pid]=key;
+    else [keys removeObjectForKey:pid];
+    if(![keys writeToFile:path atomically:YES]) return NO;
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions:@0600,NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:path error:NULL];
+    return YES;
+}
+- (void)askFallbackForKey:(NSString *)key provider:(NSString *)pid model:(NSString *)model url:(NSString *)url {
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"旧系统钥匙串不可用"
+    message:@"可以把密钥保存在 App 私有文件中，文件权限设为仅所有者可读写。越狱环境下安全性低于钥匙串，请只在你信任的设备上使用。"
+    preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"取消，不保存" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"使用本机兼容存储" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        if (![self saveFallbackKey:key provider:pid]) { self.status.text=@"兼容存储也失败了"; return; }
+        NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
+        [d setObject:@"direct" forKey:@"connect_mode"];
+        [d setObject:pid forKey:@"direct_provider"];
+        [d setObject:model forKey:[@"model_" stringByAppendingString:pid]];
+        if([pid isEqualToString:@"custom"]) [d setObject:url forKey:@"direct_url_custom"];
+        [d synchronize];
+        [self.history removeAllObjects];
+        self.status.text=@"兼容模式已保存密钥";
+        self.chat.text=[self.chat.text stringByAppendingString:@"\\n\\n密钥已保存在本机私有文件中，可以发送消息。"];
+    }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 
 - (void)refreshStatus {
@@ -142,7 +191,7 @@
     NSString *storedURL=[defaults stringForKey:@"direct_url_custom"];
     BOOL custom=[pid isEqualToString:@"custom"];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"配置 %@",name]
-       message:@"API Key 存储在手机钥匙串中，不会显示在聊天记录里。"
+       message:@"优先存到系统钥匙串；如果旧系统拒绝，可自行选择私有文件兼容模式。"
        preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
        f.placeholder=@"模型名称"; f.text=storedModel.length?storedModel:provider[@"model"];
@@ -178,7 +227,8 @@
            self.status.text=@"模型不能为空，接口必须使用 HTTPS"; return;
         }
         if (newKey.length && ![self saveKey:newKey forProvider:pid]) {
-           self.status.text=@"保存密钥失败，请检查系统钥匙串"; return;
+           self.status.text=@"钥匙串无法写入，正在使用兼容模式";
+           [self askFallbackForKey:newKey provider:pid model:model url:url]; return;
         }
         if (![self keyForProvider:pid].length) {
            self.status.text=@"请先填写 API Key"; return;
