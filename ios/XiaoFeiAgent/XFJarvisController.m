@@ -70,7 +70,7 @@
     [self.view addSubview:self.subtitle];
 
     self.timeLabel=[[UILabel alloc] init];
-    self.timeLabel.font=[UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightMedium];
+    self.timeLabel.font=[UIFont boldSystemFontOfSize:13];
     self.timeLabel.textAlignment=NSTextAlignmentCenter;
     self.timeLabel.textColor=[self accent];
     self.timeLabel.text=@"00:00";
