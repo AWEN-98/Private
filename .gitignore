@@ -4,3 +4,6 @@ windows/data/
 **/__pycache__/
 **/*.pyc
 *.deb
+
+# Explicitly published, CI-verified install packages
+!downloads/*.deb
