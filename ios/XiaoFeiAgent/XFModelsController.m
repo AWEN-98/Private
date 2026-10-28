@@ -494,13 +494,42 @@ static void XFDropAccount(NSString *aid){
 }
 @end
 
+
+// Favorites are references to models, never copies of API credentials.
+// Persist them independently so refreshing the provider's model list preserves favorites.
+static NSString *const XFFavoriteKey=@"xf_model_favorites_v1";
+static NSString *XFFavoriteID(NSDictionary *account,NSDictionary *model) {
+    return [NSString stringWithFormat:@"%@|%@",account[@"id"]?:@"",model[@"id"]?:@""];
+}
+static NSSet *XFFavorites(void) {
+    NSArray *saved=[[NSUserDefaults standardUserDefaults] arrayForKey:XFFavoriteKey];
+    return [NSSet setWithArray:saved?:@[]];
+}
+static BOOL XFIsFavorite(NSDictionary *account,NSDictionary *model) {
+    return [XFFavorites() containsObject:XFFavoriteID(account,model)];
+}
+static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorite) {
+    NSMutableSet *all=[XFFavorites() mutableCopy];
+    NSString *key=XFFavoriteID(account,model);
+    if(favorite)[all addObject:key];else [all removeObject:key];
+    [[NSUserDefaults standardUserDefaults] setObject:[[all allObjects] sortedArrayUsingSelector:@selector(compare:)] forKey:XFFavoriteKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
 @interface XFModelsController () <UISearchBarDelegate>
-@property(nonatomic,strong) NSArray *sections;
-@property(nonatomic,strong) NSDictionary *categoryModels;
 @property(nonatomic,strong) UISearchBar *search;
+@property(nonatomic,strong) UIView *filterPanel;
+@property(nonatomic,strong) UIButton *providerButton;
+@property(nonatomic,strong) UIScrollView *categoryScroll;
+@property(nonatomic,strong) NSMutableArray *categoryButtons;
+@property(nonatomic,copy) NSString *selectedCategory;
+@property(nonatomic,copy) NSString *selectedProviderID;
 @property(nonatomic,copy) NSString *term;
+@property(nonatomic,strong) NSArray *visibleModels;
 @end
+
 @implementation XFModelsController
+
 + (NSDictionary *)activeProfile {return [self activeProfileForCapability:@"chat"];}
 + (NSDictionary *)activeProfileForCapability:(NSString *)capability {
     NSDictionary *selected=XFSelected(capability);
@@ -521,116 +550,275 @@ static void XFDropAccount(NSString *aid){
 + (NSString *)secretForProfile:(NSDictionary *)profile {
     return XFSecret(profile[@"account_id"]?:profile[@"id"]);
 }
+
+- (NSArray *)filterCategories {
+    return @[@"常用",@"全部",@"文字对话",@"深度推理",@"图片理解",@"图片生成",
+       @"语音识别",@"语音朗读",@"联网搜索",@"其他模型"];
+}
+- (NSString *)shortCategoryName:(NSString *)name {
+    NSDictionary *display=@{@"文字对话":@"对话",@"深度推理":@"推理",@"图片理解":@"视觉",
+       @"图片生成":@"生图",@"语音识别":@"语音输入",@"语音朗读":@"语音输出",@"联网搜索":@"联网",
+       @"其他模型":@"其他"};
+    return display[name]?:name;
+}
 - (void)viewDidLoad {
-    [super viewDidLoad];XFMigrate();self.title=@"选择模型";
+    [super viewDidLoad];XFMigrate();
+    self.title=@"模型库";
     XFStyleNav(self.navigationController);
     self.tableView.backgroundColor=XFUIBackground();
-    self.tableView.rowHeight=64;
     self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
-    self.tableView.sectionHeaderHeight=29;
+    self.tableView.rowHeight=62;
+    self.tableView.sectionHeaderHeight=27;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
       target:self action:@selector(closeTapped)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"API 管理"
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
-    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,44)];
-    self.search.placeholder=@"搜索模型名称或服务";
+
+    CGFloat width=self.view.bounds.size.width;
+    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,126)];
+    self.filterPanel.backgroundColor=XFUIBackground();
+    self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.providerButton.frame=CGRectMake(11,5,width-22,32);
+    self.providerButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.providerButton.backgroundColor=[UIColor whiteColor];
+    self.providerButton.layer.cornerRadius=8;
+    self.providerButton.layer.borderWidth=0.5;
+    self.providerButton.layer.borderColor=[UIColor colorWithWhite:0.86 alpha:1].CGColor;
+    [self.providerButton setTitleColor:XFUIText() forState:UIControlStateNormal];
+    self.providerButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
+    [self.providerButton addTarget:self action:@selector(chooseProvider) forControlEvents:UIControlEventTouchUpInside];
+    [self.filterPanel addSubview:self.providerButton];
+
+    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,42,width,39)];
+    self.categoryScroll.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.categoryScroll.showsHorizontalScrollIndicator=NO;
+    self.categoryScroll.alwaysBounceHorizontal=YES;
+    [self.filterPanel addSubview:self.categoryScroll];
+    self.categoryButtons=[NSMutableArray array];
+    CGFloat x=11;
+    NSArray *cats=[self filterCategories];
+    for(NSUInteger index=0;index<cats.count;index++) {
+        NSString *category=cats[index];
+        NSString *label=[self shortCategoryName:category];
+        CGFloat bw=MAX(52,MIN(85,label.length*14+21));
+        UIButton *btn=[UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame=CGRectMake(x,2,bw,33);
+        btn.tag=(NSInteger)index;
+        btn.titleLabel.font=[UIFont systemFontOfSize:12.5];
+        btn.layer.cornerRadius=8;
+        [btn setTitle:label forState:UIControlStateNormal];
+        [btn addTarget:self action:@selector(categoryTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.categoryScroll addSubview:btn];
+        [self.categoryButtons addObject:btn];
+        x+=bw+7;
+    }
+    self.categoryScroll.contentSize=CGSizeMake(x+5,39);
+
+    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,82,width,44)];
+    self.search.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.search.placeholder=@"搜索模型名称、ID 或服务";
     self.search.tintColor=XFUIAccent();
     self.search.delegate=self;
-    self.tableView.tableHeaderView=self.search;
+    [self.filterPanel addSubview:self.search];
+    self.tableView.tableHeaderView=self.filterPanel;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
+
+    NSString *saved=[[NSUserDefaults standardUserDefaults] stringForKey:@"xf_model_last_filter"];
+    self.selectedCategory=[[self filterCategories] containsObject:saved]?saved:@"全部";
     [self refresh];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self refresh];
+}
+- (void)closeTapped {[self.search resignFirstResponder];[self dismissViewControllerAnimated:YES completion:nil];}
+- (void)accountsTapped {
+    [self.search resignFirstResponder];
+    XFAPIAccountsController *controller=[[XFAPIAccountsController alloc] initWithStyle:UITableViewStyleGrouped];
+    __weak XFModelsController *weakSelf=self;
+    controller.changed=^{[weakSelf refresh];};
+    [self.navigationController pushViewController:controller animated:YES];
+}
+- (void)categoryTapped:(UIButton *)sender {
+    NSArray *options=[self filterCategories];
+    if(sender.tag<0 || (NSUInteger)sender.tag>=options.count)return;
+    [self.search resignFirstResponder];
+    self.selectedCategory=options[(NSUInteger)sender.tag];
+    [[NSUserDefaults standardUserDefaults] setObject:self.selectedCategory forKey:@"xf_model_last_filter"];
+    [self refresh];
+}
+- (void)updateFilterButtons {
+    for(UIButton *button in self.categoryButtons){
+        NSString *category=[self filterCategories][(NSUInteger)button.tag];
+        BOOL on=[category isEqualToString:self.selectedCategory];
+        button.backgroundColor=on?XFUIAccent():[UIColor whiteColor];
+        [button setTitleColor:on?[UIColor whiteColor]:XFUIHint() forState:UIControlStateNormal];
+        button.titleLabel.font=on?[UIFont boldSystemFontOfSize:12.5]:[UIFont systemFontOfSize:12.5];
+    }
+    NSString *name=@"全部 API 服务";
+    if(self.selectedProviderID.length){
+        NSDictionary *a=XFAccountForID(self.selectedProviderID);
+        name=a[@"name"]?:@"全部 API 服务";
+        if(!a)self.selectedProviderID=nil;
+    }
+    [self.providerButton setTitle:[NSString stringWithFormat:@"服务：%@  ▾",name] forState:UIControlStateNormal];
+}
+- (void)chooseProvider {
+    [self.search resignFirstResponder];
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"筛选 API 服务"
+      message:@"只显示所选服务下的模型" preferredStyle:UIAlertControllerStyleAlert];
+    [menu addAction:[UIAlertAction actionWithTitle:@"全部服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
+        self.selectedProviderID=nil;[self refresh];
+    }]];
+    for(NSDictionary *account in XFAccounts()){
+        NSString *aid=account[@"id"];
+        [menu addAction:[UIAlertAction actionWithTitle:account[@"name"]?:@"未命名服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
+            self.selectedProviderID=aid;[self refresh];
+        }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)searchBar:(UISearchBar *)bar textDidChange:(NSString *)text {
     self.term=[text lowercaseString];[self refresh];
 }
 - (void)searchBarSearchButtonClicked:(UISearchBar *)bar {[bar resignFirstResponder];}
-- (void)closeTapped {[self dismissViewControllerAnimated:YES completion:nil];}
-- (void)accountsTapped {
-    [self.search resignFirstResponder];
-    XFAPIAccountsController *c=[[XFAPIAccountsController alloc] initWithStyle:UITableViewStyleGrouped];
-    c.changed=^{[self refresh];};
-    [self.navigationController pushViewController:c animated:YES];
-}
 - (void)refresh {
-    NSMutableDictionary *grouped=[NSMutableDictionary dictionary];
-    for(NSString *name in XFCategories())grouped[name]=[NSMutableArray array];
-    for(NSDictionary *a in XFAccounts())for(NSDictionary *m in a[@"models"]){
-        NSString *idText=m[@"id"]?:@"";
-        NSString *name=m[@"name"]?:idText;
-        NSString *text=[[NSString stringWithFormat:@"%@ %@ %@",idText,name,a[@"name"]] lowercaseString];
-        if(self.term.length && [text rangeOfString:self.term].location==NSNotFound)continue;
-        NSString *group=XFKind(m);
-        [(NSMutableArray *)grouped[group] addObject:@{@"account":a,@"model":m}];
+    [self updateFilterButtons];
+    NSString *category=self.selectedCategory?:@"全部";
+    BOOL favoritesOnly=[category isEqualToString:@"常用"];
+    BOOL all=[category isEqualToString:@"全部"];
+    NSSet *favorites=XFFavorites();
+    NSMutableArray *matching=[NSMutableArray array];
+    for(NSDictionary *account in XFAccounts()){
+        if(self.selectedProviderID.length && ![self.selectedProviderID isEqualToString:account[@"id"]])continue;
+        for(NSDictionary *model in account[@"models"]){
+            if(![model isKindOfClass:[NSDictionary class]])continue;
+            NSString *mid=model[@"id"];
+            if(![mid isKindOfClass:[NSString class]] || !mid.length)continue;
+            NSString *kind=XFKind(model);
+            NSString *identifier=XFFavoriteID(account,model);
+            BOOL favorite=[favorites containsObject:identifier];
+            BOOL selected=NO;
+            NSString *cap=XFCapability(kind);
+            NSDictionary *current=XFSelected(cap);
+            if([current[@"account"] isEqualToString:account[@"id"]] && [current[@"model"] isEqualToString:mid])
+                selected=YES;
+            if(favoritesOnly && !favorite && !selected)continue;
+            if(!all && !favoritesOnly && ![category isEqualToString:kind])continue;
+            NSString *name=[model[@"name"] isKindOfClass:[NSString class]]?model[@"name"]:mid;
+            NSString *searchText=[[NSString stringWithFormat:@"%@ %@ %@",name,mid,account[@"name"]?:@""] lowercaseString];
+            if(self.term.length && [searchText rangeOfString:self.term].location==NSNotFound)continue;
+            [matching addObject:@{@"account":account,@"model":model,@"category":kind,
+              @"favorite":@(favorite),@"active":@(selected)}];
+        }
     }
-    NSMutableArray *groups=[NSMutableArray array];
-    for(NSString *name in XFCategories())if([grouped[name] count]) [groups addObject:name];
-    self.sections=groups;self.categoryModels=grouped;
+    [matching sortUsingComparator:^NSComparisonResult(NSDictionary *lhs,NSDictionary *rhs) {
+        BOOL l=[lhs[@"favorite"] boolValue],r=[rhs[@"favorite"] boolValue];
+        if(l!=r)return l?NSOrderedAscending:NSOrderedDescending;
+        BOOL la=[lhs[@"active"] boolValue],ra=[rhs[@"active"] boolValue];
+        if(la!=ra)return la?NSOrderedAscending:NSOrderedDescending;
+        NSString *ln=lhs[@"model"][@"name"]?:lhs[@"model"][@"id"];
+        NSString *rn=rhs[@"model"][@"name"]?:rhs[@"model"][@"id"];
+        return [ln localizedCaseInsensitiveCompare:rn];
+    }];
+    self.visibleModels=matching;
     [self.tableView reloadData];
 }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)t{return MAX((NSInteger)self.sections.count,1);}
-- (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
-    if(!self.sections.count)return @"暂无模型：点击右上角「API 管理」添加服务";
-    return [NSString stringWithFormat:@"%@（%lu）",self.sections[s],(unsigned long)[self.categoryModels[self.sections[s]] count]];
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {return 1;}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return MAX((NSInteger)self.visibleModels.count,1);
 }
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
-    return self.sections.count?[self.categoryModels[self.sections[s]] count]:1;
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if(!self.visibleModels.count)return @"没有符合筛选条件的模型";
+    return [NSString stringWithFormat:@"共 %lu 个模型 · 点击切换，右侧管理",(unsigned long)self.visibleModels.count];
 }
-- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
-    UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:@"model"];
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {
+    UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"model"];
     if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"model"];
-    if(!self.sections.count){
-        cell.textLabel.text=@"请先添加 API 服务并同步模型";cell.detailTextLabel.text=@"支持自动获取模型列表";
-        cell.accessoryType=UITableViewCellAccessoryNone;return cell;
-    }
-    NSDictionary *entry=self.categoryModels[self.sections[ip.section]][ip.row];
-    NSDictionary *a=entry[@"account"],*m=entry[@"model"];
-    NSString *category=self.sections[ip.section],*cap=XFCapability(category);
-    NSDictionary *selected=XFSelected(cap);
-    BOOL active=[selected[@"account"] isEqualToString:a[@"id"]] && [selected[@"model"] isEqualToString:m[@"id"]];
     cell.backgroundColor=[UIColor whiteColor];
     cell.tintColor=XFUIAccent();
-    cell.textLabel.text=m[@"name"]?:m[@"id"];
-    cell.textLabel.font=active?[UIFont boldSystemFontOfSize:15]:[UIFont systemFontOfSize:15];
-    cell.textLabel.textColor=active?XFUIAccent():XFUIText();
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@  ·  %@",a[@"name"],m[@"id"]];
+    cell.textLabel.font=[UIFont systemFontOfSize:14.5];
     cell.detailTextLabel.font=[UIFont systemFontOfSize:11.5];
     cell.detailTextLabel.textColor=XFUIHint();
-    cell.accessoryType=active?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDetailButton;
+    if(!self.visibleModels.count){
+        cell.textLabel.text=XFAccounts().count?@"换个分类，或选择「全部」":@"先点击右上角添加 API 服务";
+        cell.detailTextLabel.text=@"收藏常用模型后，可在「常用」快速切换";
+        cell.accessoryType=UITableViewCellAccessoryNone;return cell;
+    }
+    NSDictionary *item=self.visibleModels[(NSUInteger)index.row];
+    NSDictionary *model=item[@"model"],*account=item[@"account"];
+    BOOL favorite=[item[@"favorite"] boolValue],active=[item[@"active"] boolValue];
+    NSString *name=model[@"name"]?:model[@"id"];
+    cell.textLabel.text=[NSString stringWithFormat:@"%@%@%@",active?@"✓  ":@"",favorite?@"★  ":@"",name];
+    cell.textLabel.textColor=active?XFUIAccent():XFUIText();
+    cell.textLabel.font=active?[UIFont boldSystemFontOfSize:14.5]:[UIFont systemFontOfSize:14.5];
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",account[@"name"]?:@"", [self shortCategoryName:item[@"category"]]];
+    cell.accessoryType=UITableViewCellAccessoryDetailButton;
     return cell;
 }
-- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
-    [t deselectRowAtIndexPath:ip animated:YES];if(!self.sections.count){[self accountsTapped];return;}
-    NSDictionary *entry=self.categoryModels[self.sections[ip.section]][ip.row];
-    NSString *category=self.sections[ip.section],*cap=XFCapability(category);
-    if([cap isEqualToString:@"other"]){
-        [self editCategoryForEntry:entry];
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)index {
+    [tableView deselectRowAtIndexPath:index animated:YES];
+    if(!self.visibleModels.count){
+        if(!XFAccounts().count)[self accountsTapped];
+        else {self.selectedCategory=@"全部";[self refresh];}
         return;
     }
-    XFSelect(cap,entry[@"account"][@"id"],entry[@"model"][@"id"]);
-    [self.tableView reloadData];self.title=@"已切换模型";
-    // Keep the picker open for quick comparison, with an obvious selected checkmark.
+    NSDictionary *item=self.visibleModels[(NSUInteger)index.row];
+    NSDictionary *account=item[@"account"],*model=item[@"model"];
+    NSString *capability=XFCapability(item[@"category"]);
+    if([capability isEqualToString:@"other"]){[self editCategoryForEntry:item];return;}
+    XFSelect(capability,account[@"id"],model[@"id"]);
+    [self refresh];
+    self.title=@"已切换";
 }
-- (void)tableView:(UITableView *)t accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)ip {
-    if(!self.sections.count)return;
-    NSDictionary *entry=self.categoryModels[self.sections[ip.section]][ip.row];
-    [self editCategoryForEntry:entry];
+- (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)index {
+    if(self.visibleModels.count && (NSUInteger)index.row<self.visibleModels.count)
+        [self manageModel:self.visibleModels[(NSUInteger)index.row]];
+}
+- (void)manageModel:(NSDictionary *)item {
+    NSDictionary *account=item[@"account"],*model=item[@"model"];
+    BOOL favorite=XFIsFavorite(account,model);
+    NSString *name=model[@"name"]?:model[@"id"];
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:name
+      message:[NSString stringWithFormat:@"%@\n当前分类：%@",account[@"name"]?:@"",item[@"category"]]
+      preferredStyle:UIAlertControllerStyleAlert];
+    [menu addAction:[UIAlertAction actionWithTitle:favorite?@"取消收藏":@"★ 加入常用"
+      style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        XFSetFavorite(account,model,!favorite);[self refresh];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"修改分类" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self editCategoryForEntry:item];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)editCategoryForEntry:(NSDictionary *)entry {
-    NSDictionary *a=entry[@"account"],*m=entry[@"model"];
-    UIAlertController *pick=[UIAlertController alertControllerWithTitle:m[@"id"] message:@"修改此模型的分类（优先使用手动分类）"
-      preferredStyle:UIAlertControllerStyleAlert];
+    NSDictionary *account=entry[@"account"],*model=entry[@"model"];
+    UIAlertController *picker=[UIAlertController alertControllerWithTitle:model[@"id"]
+        message:@"自动分类仅供参考，手动分类会在同步后保留"
+        preferredStyle:UIAlertControllerStyleAlert];
     for(NSString *category in XFCategories()){
-        [pick addAction:[UIAlertAction actionWithTitle:category style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
-            NSMutableDictionary *updated=[a mutableCopy];
-            NSMutableArray *models=[a[@"models"] mutableCopy];
-            for(NSUInteger i=0;i<models.count;i++)if([models[i][@"id"] isEqualToString:m[@"id"]]){
-                NSMutableDictionary *new=[models[i] mutableCopy];
-                new[@"user_category"]=category;models[i]=new;break;
+        [picker addAction:[UIAlertAction actionWithTitle:category style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            // Read latest account data to avoid overwriting a newer model sync.
+            NSDictionary *latest=XFAccountForID(account[@"id"]);
+            NSMutableDictionary *changed=[latest mutableCopy]?:[account mutableCopy];
+            NSMutableArray *models=[changed[@"models"] mutableCopy]?:[NSMutableArray array];
+            for(NSUInteger i=0;i<models.count;i++){
+                NSDictionary *old=models[i];
+                if([old[@"id"] isEqualToString:model[@"id"]]){
+                    NSMutableDictionary *updatedModel=[old mutableCopy];
+                    updatedModel[@"user_category"]=category;
+                    models[i]=updatedModel;break;
+                }
             }
-            updated[@"models"]=models;XFReplaceAccount(updated);[self refresh];
+            changed[@"models"]=models;
+            XFReplaceAccount(changed);
+            [self refresh];
         }]];
     }
-    [pick addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:pick animated:YES completion:nil];
+    [picker addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:picker animated:YES completion:nil];
 }
 @end
