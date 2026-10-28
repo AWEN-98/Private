@@ -524,6 +524,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 @property(nonatomic,strong) UISearchBar *search;
 @property(nonatomic,strong) UIView *filterPanel;
 @property(nonatomic,strong) UIButton *providerButton;
+@property(nonatomic,strong) UIButton *statusFilterButton;
+@property(nonatomic,copy) NSString *selectedStatus;
 @property(nonatomic,strong) UIScrollView *categoryScroll;
 @property(nonatomic,strong) NSMutableArray *categoryButtons;
 @property(nonatomic,copy) NSString *selectedCategory;
@@ -586,7 +588,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
 
     CGFloat width=self.view.bounds.size.width;
-    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,126)];
+    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,162)];
     self.filterPanel.backgroundColor=XFUIBackground();
     self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -636,17 +638,29 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     }
     self.categoryScroll.contentSize=CGSizeMake(x+5,39);
 
-    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,82,width,44)];
+    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,118,width,44)];
     self.search.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.search.placeholder=@"搜索模型名称、ID 或服务";
     self.search.tintColor=XFUIAccent();
     self.search.delegate=self;
     [self.filterPanel addSubview:self.search];
+    self.statusFilterButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.statusFilterButton.frame=CGRectMake(11,83,width-22,31);
+    self.statusFilterButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.statusFilterButton.backgroundColor=[UIColor whiteColor];
+    self.statusFilterButton.layer.cornerRadius=8;
+    self.statusFilterButton.layer.borderWidth=0.5;
+    self.statusFilterButton.layer.borderColor=[UIColor colorWithWhite:0.86 alpha:1].CGColor;
+    self.statusFilterButton.titleLabel.font=[UIFont boldSystemFontOfSize:12];
+    [self.statusFilterButton setTitleColor:XFUIText() forState:UIControlStateNormal];
+    [self.statusFilterButton addTarget:self action:@selector(filterStatusTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.filterPanel addSubview:self.statusFilterButton];
     self.tableView.tableHeaderView=self.filterPanel;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
 
     NSString *saved=[[NSUserDefaults standardUserDefaults] stringForKey:@"xf_model_last_filter"];
     self.selectedCategory=[[self filterCategories] containsObject:saved]?saved:@"全部";
+    self.selectedStatus=@"all";
     [self refresh];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -685,6 +699,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         if(!a)self.selectedProviderID=nil;
     }
     [self.providerButton setTitle:[NSString stringWithFormat:@"服务：%@  ▾",name] forState:UIControlStateNormal];
+    [self.statusFilterButton setTitle:[NSString stringWithFormat:@"检测：%@  ▾",[self statusLabel:self.selectedStatus?:@"all"]] forState:UIControlStateNormal];
 }
 - (void)chooseProvider {
     [self.search resignFirstResponder];
@@ -708,12 +723,35 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.term=[text lowercaseString];[self refresh];
 }
 - (void)searchBarSearchButtonClicked:(UISearchBar *)bar {[bar resignFirstResponder];}
+- (NSString *)statusLabel:(NSString *)status {
+    NSDictionary *names=@{@"all":@"全部状态",@"ok":@"● 可用",@"bad":@"● 模型无效",
+      @"unactivated":@"未开通",@"balance":@"余额不足",@"rate":@"限流",
+      @"incompatible":@"接口不兼容",@"auth":@"鉴权失败",@"unknown":@"待确认",
+      @"untested":@"未检测",@"notprobed":@"未验证"};
+    return names[status]?:@"待确认";
+}
+- (void)filterStatusTapped {
+    [self.search resignFirstResponder];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"筛选检测状态"
+        message:@"账号、额度、接口和模型错误分开显示。测试结果不会永久有效。"
+        preferredStyle:UIAlertControllerStyleAlert];
+    for(NSString *status in @[@"all",@"ok",@"unactivated",@"balance",@"rate",@"incompatible",@"auth",@"bad",@"unknown",@"untested"]){
+        [alert addAction:[UIAlertAction actionWithTitle:[self statusLabel:status]
+          style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            self.selectedStatus=status;
+            [self refresh];
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 - (void)refresh {
     [self updateFilterButtons];
     NSString *category=self.selectedCategory?:@"全部";
     BOOL favoritesOnly=[category isEqualToString:@"常用"];
     BOOL all=[category isEqualToString:@"全部"];
     NSSet *favorites=XFFavorites();
+    NSString *filter=self.selectedStatus?:@"all";
     NSMutableArray *matching=[NSMutableArray array];
     for(NSDictionary *account in XFAccounts()){
         if(self.selectedProviderID.length && ![self.selectedProviderID isEqualToString:account[@"id"]])continue;
@@ -735,6 +773,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
             NSString *searchText=[[NSString stringWithFormat:@"%@ %@ %@",name,mid,account[@"name"]?:@""] lowercaseString];
             if(self.term.length && [searchText rangeOfString:self.term].location==NSNotFound)continue;
             NSDictionary *result=[XFModelProbe cachedForAccount:account model:model];
+            NSString *status=result[@"status"]?:@"untested";
+            if(![filter isEqualToString:@"all"] && ![filter isEqualToString:status])continue;
             [matching addObject:@{@"account":account,@"model":model,@"category":kind,
               @"favorite":@(favorite),@"active":@(selected),
               @"probe":result?:@{}}];
@@ -743,8 +783,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     [matching sortUsingComparator:^NSComparisonResult(NSDictionary *lhs,NSDictionary *rhs) {
         // Keep verified working models near the top, followed by untested and finally failed.
         NSString *ls=lhs[@"probe"][@"status"],*rs=rhs[@"probe"][@"status"];
-        NSInteger lx=[ls isEqualToString:@"ok"]?0:([ls isEqualToString:@"bad"]?2:1);
-        NSInteger rx=[rs isEqualToString:@"ok"]?0:([rs isEqualToString:@"bad"]?2:1);
+        NSInteger lx=[ls isEqualToString:@"ok"]?0:([ls isEqualToString:@"bad"]?3:([ls isEqualToString:@"unactivated"]||[ls isEqualToString:@"balance"]?2:1));
+        NSInteger rx=[rs isEqualToString:@"ok"]?0:([rs isEqualToString:@"bad"]?3:([rs isEqualToString:@"unactivated"]||[rs isEqualToString:@"balance"]?2:1));
         if(lx!=rx)return lx<rx?NSOrderedAscending:NSOrderedDescending;
         BOOL l=[lhs[@"favorite"] boolValue],r=[rhs[@"favorite"] boolValue];
         if(l!=r)return l?NSOrderedAscending:NSOrderedDescending;
@@ -769,7 +809,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         NSString *status=item[@"probe"][@"status"];
         if([status isEqualToString:@"ok"])good++;
         else if([status isEqualToString:@"bad"])bad++;
-        else if([status isEqualToString:@"unknown"])unknown++;
+        else if(status.length)unknown++;
     }
     return [NSString stringWithFormat:@"%lu 个模型 · 可用 %lu · 不可用 %lu · 待确认 %lu",
       (unsigned long)self.visibleModels.count,(unsigned long)good,(unsigned long)bad,(unsigned long)unknown];
@@ -794,12 +834,15 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     BOOL passed=[status isEqualToString:@"ok"],failed=[status isEqualToString:@"bad"];
     BOOL uncertain=[status isEqualToString:@"unknown"];
     BOOL probeCapable=[XFModelProbe canProbeCategory:item[@"category"]];
-    NSString *state=passed?@"● 可用":(failed?@"● 不可用":(uncertain?@"○ 待确认":(probeCapable?@"○ 未测":@"○ 未验证")));
+    NSString *state=[self statusLabel:status.length?status:(probeCapable?@"untested":@"notprobed")];
     NSString *name=model[@"name"]?:model[@"id"];
     cell.textLabel.text=[NSString stringWithFormat:@"%@%@%@",active?@"✓  ":@"",favorite?@"★  ":@"",name];
     cell.textLabel.textColor=failed?[UIColor colorWithWhite:0.70 alpha:1]:(active?XFUIAccent():XFUIText());
     cell.textLabel.font=active?[UIFont boldSystemFontOfSize:14.5]:[UIFont systemFontOfSize:14.5];
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@ · %@",state,account[@"name"]?:@"",
+    NSNumber *latency=item[@"probe"][@"latency_ms"];
+    NSString *speed=latency && [latency integerValue]>0 && passed?
+        [NSString stringWithFormat:@" · %.1fs",[latency doubleValue]/1000.0]:@"";
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@ · %@ · %@",state,speed,account[@"name"]?:@"",
       [self shortCategoryName:item[@"category"]]];
     cell.detailTextLabel.textColor=passed?[UIColor colorWithRed:0.24 green:0.57 blue:0.40 alpha:1]:
       (failed?[UIColor colorWithWhite:0.73 alpha:1]:XFUIHint());
@@ -835,6 +878,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     if([capability isEqualToString:@"vision"]) XFSelect(@"chat",account[@"id"],model[@"id"]);
     [self refresh];
     self.title=@"已切换";
+    // No success popup; return directly to chat after choosing a verified model.
+    if([probe[@"status"] isEqualToString:@"ok"]) [self dismissViewControllerAnimated:YES completion:nil];
 }
 - (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)index {
     if(self.visibleModels.count && (NSUInteger)index.row<self.visibleModels.count)
@@ -855,6 +900,17 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         [self testSingleItem:item];
     }]];
     NSDictionary *record=item[@"probe"];
+    NSNumber *latency=record[@"latency_ms"];
+    if([latency integerValue]>0){
+        [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"测速：%.2f 秒 · 查看原因",[latency doubleValue]/1000.0]
+         style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            NSString *detail=[NSString stringWithFormat:@"状态：%@\n响应耗时：%.2f 秒\n服务端信息：%@",
+              [self statusLabel:record[@"status"]],[latency doubleValue]/1000.0,record[@"reason"]?:@""];
+            UIAlertController *popup=[UIAlertController alertControllerWithTitle:@"模型检测详情" message:detail preferredStyle:UIAlertControllerStyleAlert];
+            [popup addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+            [self presentViewController:popup animated:YES completion:nil];
+        }]];
+    }
     if([record[@"reason"] length]){
         [menu addAction:[UIAlertAction actionWithTitle:@"查看检测原因" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
             UIAlertController *details=[UIAlertController alertControllerWithTitle:@"检测详情"
