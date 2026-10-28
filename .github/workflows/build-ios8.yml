@@ -19,7 +19,9 @@ jobs:
           THEOS: /home/runner/theos
         run: |
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
-          mkdir -p "$HOME/theos/sdks"
+          mkdir -p "$HOME/theos/sdks" "$HOME/theos/toolchain"
+          curl -fsSL --retry 3 https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz | tar -xJ -C "$HOME/theos/toolchain"
+          test -x "$HOME/theos/toolchain/linux/iphone/bin/clang"
           "$HOME/theos/bin/install-sdk" iPhoneOS9.3
           test -f "$HOME/theos/sdks/iPhoneOS9.3.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
       - name: Compile armv7 and package
