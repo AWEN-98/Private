@@ -360,6 +360,7 @@ static void XFDropAccount(NSString *aid){
     __weak XFAPIEditor *weakEditor=editor;
     editor.onSaved=^(NSDictionary *newAccount,NSString *newKey) {
         if(newKey.length) {
+            [XFModelProbe clearAccount:newAccount[@"id"]];
             OSStatus error=XFSaveKey(newAccount[@"id"],newKey);
             if(error!=errSecSuccess) {
                 [self fallbackForAccount:newAccount key:newKey error:error];
@@ -387,6 +388,8 @@ static void XFDropAccount(NSString *aid){
     [self.navigationController.topViewController presentViewController:a animated:YES completion:nil];
 }
 - (void)completeAccount:(NSDictionary *)a {
+    NSDictionary *old=XFAccountForID(a[@"id"]);
+    if(old && ![old[@"base"] isEqualToString:a[@"base"]]) [XFModelProbe clearAccount:a[@"id"]];
     XFReplaceAccount(a);
     [self.navigationController popViewControllerAnimated:YES];
     [self.tableView reloadData];if(self.changed)self.changed();
