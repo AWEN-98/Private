@@ -1,408 +1,516 @@
 #import "XFViewController.h"
 #import "XFModelsController.h"
-#import <Security/Security.h>
+#import "XFChatStore.h"
+#import "XFHistoryController.h"
+#import <AVFoundation/AVFoundation.h>
+#import <MobileCoreServices/MobileCoreServices.h>
+#import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 
-@interface XFViewController ()
+@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,UIDocumentPickerDelegate,NSURLConnectionDataDelegate>
 @property(nonatomic,strong) UITextView *chat;
 @property(nonatomic,strong) UITextField *message;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
+@property(nonatomic,strong) UIScrollView *tools;
 @property(nonatomic,strong) NSMutableArray *history;
+@property(nonatomic,copy) NSString *conversationID;
+@property(nonatomic,strong) UIImage *pendingImage;
+@property(nonatomic,copy) NSString *pendingFileText;
+@property(nonatomic,copy) NSString *lastAnswer;
+@property(nonatomic,strong) AVAudioRecorder *recorder;
+@property(nonatomic,strong) AVAudioPlayer *player;
+@property(nonatomic,strong) NSURLConnection *connection;
+@property(nonatomic,strong) NSMutableData *streamBuffer;
+@property(nonatomic,strong) NSMutableString *streamText;
+@property(nonatomic,copy) NSString *sendingContent;
+@property(nonatomic,assign) NSInteger httpCode;
+@property(nonatomic,assign) BOOL isWorking;
+@property(nonatomic,assign) BOOL isRecording;
 @end
 
 @implementation XFViewController
 
-- (NSArray *)providers {
-    return @[
-      @{@"id":@"deepseek", @"name":@"DeepSeek", @"url":@"https://api.deepseek.com/chat/completions", @"model":@"deepseek-chat"},
-      @{@"id":@"qwen", @"name":@"通义千问", @"url":@"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", @"model":@"qwen-plus"},
-      @{@"id":@"kimi", @"name":@"Kimi", @"url":@"https://api.moonshot.cn/v1/chat/completions", @"model":@"moonshot-v1-8k"},
-      @{@"id":@"glm", @"name":@"智谱 GLM", @"url":@"https://open.bigmodel.cn/api/paas/v4/chat/completions", @"model":@"glm-4-flash"},
-      @{@"id":@"minimax", @"name":@"MiniMax", @"url":@"https://api.minimax.io/v1/chat/completions", @"model":@"MiniMax-M2"},
-      @{@"id":@"custom", @"name":@"自定义兼容 API", @"url":@"", @"model":@""}
-    ];
-}
-
-- (NSDictionary *)selectedProvider {
-    NSDictionary *profile=[XFModelsController activeProfile];
-    if(profile) return @{@"id":profile[@"id"],@"name":profile[@"name"],@"url":profile[@"endpoint"],@"model":profile[@"model"]};
-    NSString *providerId = [[NSUserDefaults standardUserDefaults] stringForKey:@"direct_provider"];
-    for (NSDictionary *provider in [self providers]) {
-        if ([provider[@"id"] isEqualToString:providerId]) return provider;
-    }
-    return [self providers][0];
-}
-
-- (BOOL)isDirect {
-    return [[[NSUserDefaults standardUserDefaults] stringForKey:@"connect_mode"] isEqualToString:@"direct"];
-}
-
-- (NSMutableDictionary *)keychainQueryForProvider:(NSString *)provider {
-    return [@{
-       (__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword,
-       (__bridge id)kSecAttrService:@"com.finn.xiaofeiagent.api",
-       (__bridge id)kSecAttrAccount:provider
-    } mutableCopy];
-}
-
-- (NSString *)keyForProvider:(NSString *)provider {
-    NSMutableDictionary *query=[self keychainQueryForProvider:provider];
-    query[(__bridge id)kSecReturnData]=@YES;
-    query[(__bridge id)kSecMatchLimit]=(__bridge id)kSecMatchLimitOne;
-    CFTypeRef found=NULL;
-    OSStatus result=SecItemCopyMatching((__bridge CFDictionaryRef)query,&found);
-    if(result!=errSecSuccess || !found) return [self fallbackKey:provider];
-    NSData *data=(__bridge_transfer NSData *)found;
-    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-}
-
-- (BOOL)saveKey:(NSString *)key forProvider:(NSString *)provider {
-    if (!key.length) { SecItemDelete((__bridge CFDictionaryRef)[self keychainQueryForProvider:provider]); [self saveFallbackKey:@"" provider:provider]; return YES; }
-    NSMutableDictionary *query=[self keychainQueryForProvider:provider];
-    query[(__bridge id)kSecValueData]=[key dataUsingEncoding:NSUTF8StringEncoding];
-    query[(__bridge id)kSecAttrAccessible]=(__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-    OSStatus result=SecItemAdd((__bridge CFDictionaryRef)query,NULL);
-    if (result==errSecDuplicateItem) {
-        NSMutableDictionary *update=[NSMutableDictionary dictionary];
-        update[(__bridge id)kSecValueData]=[key dataUsingEncoding:NSUTF8StringEncoding];
-        result=SecItemUpdate((__bridge CFDictionaryRef)[self keychainQueryForProvider:provider],(__bridge CFDictionaryRef)update);
-    }
-    if(result!=errSecSuccess) NSLog(@"XiaoFei Keychain SecItemAdd error %ld",(long)result);
-    return result==errSecSuccess;
-}
-
-
-// Legacy jailbreak compatibility: an explicit user opt-in is required before
-// storing the key in the app's private file. Never send secrets to a third party.
-- (NSString *)fallbackPath {
-    NSString *dir=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/XiaoFeiAgent"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} error:NULL];
-    return [dir stringByAppendingPathComponent:@"keys.plist"];
-}
-- (NSString *)fallbackKey:(NSString *)pid {
-    NSDictionary *keys=[NSDictionary dictionaryWithContentsOfFile:[self fallbackPath]];
-    id value=[keys objectForKey:pid];
-    return [value isKindOfClass:[NSString class]] ? value : nil;
-}
-- (BOOL)saveFallbackKey:(NSString *)key provider:(NSString *)pid {
-    NSString *path=[self fallbackPath];
-    NSMutableDictionary *keys=[NSMutableDictionary dictionaryWithContentsOfFile:path];
-    if(!keys) keys=[NSMutableDictionary dictionary];
-    if (key.length) keys[pid]=key;
-    else [keys removeObjectForKey:pid];
-    if(![keys writeToFile:path atomically:YES]) return NO;
-    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions:@0600,NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:path error:NULL];
-    return YES;
-}
-- (void)askFallbackForKey:(NSString *)key provider:(NSString *)pid model:(NSString *)model url:(NSString *)url {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"旧系统钥匙串不可用"
-    message:@"可以把密钥保存在 App 私有文件中，文件权限设为仅所有者可读写。越狱环境下安全性低于钥匙串，请只在你信任的设备上使用。"
-    preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"取消，不保存" style:UIAlertActionStyleCancel handler:nil]];
-    [a addAction:[UIAlertAction actionWithTitle:@"使用本机兼容存储" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        if (![self saveFallbackKey:key provider:pid]) { self.status.text=@"兼容存储也失败了"; return; }
-        NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-        [d setObject:@"direct" forKey:@"connect_mode"];
-        [d setObject:pid forKey:@"direct_provider"];
-        [d setObject:model forKey:[@"model_" stringByAppendingString:pid]];
-        if([pid isEqualToString:@"custom"]) [d setObject:url forKey:@"direct_url_custom"];
-        [d synchronize];
-        [self.history removeAllObjects];
-        self.status.text=@"兼容模式已保存密钥";
-        self.chat.text=[self.chat.text stringByAppendingString:@"\\n\\n密钥已保存在本机私有文件中，可以发送消息。"];
-    }]];
-    [self presentViewController:a animated:YES completion:nil];
-}
-
-- (void)refreshStatus {
-    if ([self isDirect]) {
-       NSDictionary *p=[self selectedProvider];
-       NSString *key=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:p[@"id"]];
-       self.status.text=[NSString stringWithFormat:@"直连：%@ · %@",p[@"name"],key.length?@"已保存密钥":@"请填写密钥"];
-    } else {
-       self.status.text=@"电脑服务端模式 · 点击设置连接";
-    }
-}
-
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.view.backgroundColor=[UIColor colorWithRed:0.96 green:0.97 blue:0.985 alpha:1];
     self.history=[NSMutableArray array];
-    self.view.backgroundColor=[UIColor colorWithWhite:0.96 alpha:1];
-    UILabel *heading=[[UILabel alloc] initWithFrame:CGRectMake(14,25,180,37)];
-    heading.text=@"小斐 AI"; heading.font=[UIFont boldSystemFontOfSize:23]; [self.view addSubview:heading];
-    UIButton *settings=[UIButton buttonWithType:UIButtonTypeSystem];
-    settings.frame=CGRectMake(self.view.bounds.size.width-78,25,70,37);
-    settings.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
-    [settings setTitle:@"设置" forState:UIControlStateNormal];
-    [settings addTarget:self action:@selector(settingsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:settings];
-    self.status=[[UILabel alloc] initWithFrame:CGRectMake(14,64,self.view.bounds.size.width-28,22)];
+    CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
+
+    UIButton *sessions=[UIButton buttonWithType:UIButtonTypeSystem];
+    sessions.frame=CGRectMake(5,24,62,40);
+    [sessions setTitle:@"会话" forState:UIControlStateNormal];
+    [sessions addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:sessions];
+
+    UILabel *title=[[UILabel alloc] initWithFrame:CGRectMake(69,24,w-138,40)];
+    title.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    title.font=[UIFont boldSystemFontOfSize:19];
+    title.textAlignment=NSTextAlignmentCenter;title.text=@"小斐 AI";
+    [self.view addSubview:title];
+
+    UIButton *models=[UIButton buttonWithType:UIButtonTypeSystem];
+    models.frame=CGRectMake(w-70,24,68,40);
+    models.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
+    [models setTitle:@"模型" forState:UIControlStateNormal];
+    [models addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:models];
+
+    self.status=[[UILabel alloc] initWithFrame:CGRectMake(12,65,w-24,20)];
     self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.status.font=[UIFont systemFontOfSize:12]; [self.view addSubview:self.status];
-    self.chat=[[UITextView alloc] initWithFrame:CGRectMake(10,91,self.view.bounds.size.width-20,self.view.bounds.size.height-165)];
+    self.status.font=[UIFont systemFontOfSize:11];self.status.textColor=[UIColor darkGrayColor];
+    [self.view addSubview:self.status];
+
+    self.chat=[[UITextView alloc] initWithFrame:CGRectMake(9,89,w-18,h-237)];
     self.chat.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    self.chat.editable=NO; self.chat.font=[UIFont systemFontOfSize:16];
-    self.chat.text=@"欢迎使用小斐 AI。\n点击「设置」，选择国产模型直连。只需配置一次密钥，以后直接打开就能聊天。";
+    self.chat.editable=NO;self.chat.font=[UIFont systemFontOfSize:15];
+    self.chat.backgroundColor=[UIColor whiteColor];
+    self.chat.layer.cornerRadius=7;
+    self.chat.text=@"欢迎使用小斐 AI。\n先到「模型」添加文字模型，再发送问题。\n图片、语音、联网、绘图可配置不同的 API。";
     [self.view addSubview:self.chat];
-    self.message=[[UITextField alloc] initWithFrame:CGRectMake(10,self.view.bounds.size.height-64,self.view.bounds.size.width-87,42)];
+
+    self.tools=[[UIScrollView alloc] initWithFrame:CGRectMake(5,h-139,w-10,48)];
+    self.tools.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
+    self.tools.showsHorizontalScrollIndicator=NO;
+    [self.view addSubview:self.tools];
+    NSArray *items=@[@[@"新对话",@"new"],@[@"图片",@"photo"],@[@"文本",@"file"],
+      @[@"录音",@"record"],@[@"朗读",@"tts"],@[@"生图",@"image"],@[@"联网",@"web"]];
+    CGFloat x=2;
+    for(NSArray *it in items) {
+        UIButton *btn=[UIButton buttonWithType:UIButtonTypeSystem];
+        btn.frame=CGRectMake(x,4,59,37);
+        btn.titleLabel.font=[UIFont systemFontOfSize:14];
+        [btn setTitle:it[0] forState:UIControlStateNormal];
+        btn.layer.borderWidth=0.5;
+        btn.layer.borderColor=[UIColor lightGrayColor].CGColor;
+        btn.layer.cornerRadius=6;
+        [btn setAccessibilityIdentifier:it[1]];
+        [btn addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.tools addSubview:btn];
+        x+=63;
+    }
+    self.tools.contentSize=CGSizeMake(x+2,48);
+
+    self.message=[[UITextField alloc] initWithFrame:CGRectMake(10,h-83,w-93,49)];
     self.message.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
-    self.message.borderStyle=UITextBorderStyleRoundedRect; self.message.placeholder=@"输入中文问题";
-    self.message.delegate=self; [self.view addSubview:self.message];
+    self.message.borderStyle=UITextBorderStyleRoundedRect;
+    self.message.font=[UIFont systemFontOfSize:15];
+    self.message.placeholder=@"输入问题或生图描述";
+    self.message.delegate=self;
+    [self.view addSubview:self.message];
+
     self.sendButton=[UIButton buttonWithType:UIButtonTypeSystem];
-    self.sendButton.frame=CGRectMake(self.view.bounds.size.width-73,self.view.bounds.size.height-64,66,42);
+    self.sendButton.frame=CGRectMake(w-76,h-83,69,49);
     self.sendButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleTopMargin;
     [self.sendButton setTitle:@"发送" forState:UIControlStateNormal];
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.sendButton];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
+      name:UIKeyboardWillShowNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillHide:)
+      name:UIKeyboardWillHideNotification object:nil];
+
+    NSArray *existing=[XFChatStore conversations];
+    self.conversationID=existing.count?existing[0][@"id"]:[XFChatStore createConversation];
+    [self loadConversation:self.conversationID];
     [self refreshStatus];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refreshStatus) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
-
-- (BOOL)textFieldShouldReturn:(UITextField *)field {
-    [self sendTapped]; return NO;
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self.connection cancel];
 }
-
-- (void)settingsTapped {
-    XFModelsController *vc=[[XFModelsController alloc] initWithStyle:UITableViewStyleGrouped];
-    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:vc];
-    [self presentViewController:nav animated:YES completion:nil];
-    return;
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"连接方式"
-       message:@"推荐国产 AI 直连：无需电脑，使用手机网络即可聊天"
-       preferredStyle:UIAlertControllerStyleAlert];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"国产 AI 直连（推荐）"
-       style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self selectProvider];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"电脑服务端（旧方式）"
-       style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){[self showComputerSettings];}]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self refreshStatus];
 }
-
-- (void)selectProvider {
-    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"选择 AI 模型"
-       message:@"需要对应厂商的 API Key，API 调用可能收费。"
-       preferredStyle:UIAlertControllerStyleAlert];
-    for (NSDictionary *provider in [self providers]) {
-        [sheet addAction:[UIAlertAction actionWithTitle:provider[@"name"]
-          style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            [self configureProvider:provider];
-        }]];
-    }
-    [sheet addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:sheet animated:YES completion:nil];
+- (void)refreshStatus {
+    NSDictionary *profile=[XFModelsController activeProfileForCapability:@"chat"];
+    NSString *name=profile[@"name"];
+    self.status.text=name.length?[NSString stringWithFormat:@"聊天模型：%@ · %@",name,self.isWorking?@"处理中":@"已就绪"]:@"尚未选择聊天模型，点击右上角「模型」";
 }
-
-- (void)configureProvider:(NSDictionary *)provider {
-    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
-    NSString *pid=provider[@"id"];
-    NSString *name=provider[@"name"];
-    NSString *storedModel=[defaults stringForKey:[@"model_" stringByAppendingString:pid]];
-    NSString *storedURL=[defaults stringForKey:@"direct_url_custom"];
-    BOOL custom=[pid isEqualToString:@"custom"];
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"配置 %@",name]
-       message:@"优先存到系统钥匙串；如果旧系统拒绝，可自行选择私有文件兼容模式。"
-       preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
-       f.placeholder=@"模型名称"; f.text=storedModel.length?storedModel:provider[@"model"];
-       f.autocorrectionType=UITextAutocorrectionTypeNo;
-       f.autocapitalizationType=UITextAutocapitalizationTypeNone;
-    }];
-    if (custom) {
-       [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
-          f.placeholder=@"https://域名/v1/chat/completions";
-          f.text=storedURL; f.autocorrectionType=UITextAutocorrectionTypeNo;
-          f.autocapitalizationType=UITextAutocapitalizationTypeNone;
-          f.keyboardType=UIKeyboardTypeURL;
-       }];
-    }
-    BOOL already=[self keyForProvider:pid].length>0;
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
-        f.placeholder=already?@"已保存密钥，留空则不修改":@"粘贴 API Key";
-        f.secureTextEntry=YES; f.autocapitalizationType=UITextAutocapitalizationTypeNone;
-        f.autocorrectionType=UITextAutocorrectionTypeNo;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    if (already) {
-       [alert addAction:[UIAlertAction actionWithTitle:@"删除此模型密钥" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-          [self saveKey:@"" forProvider:pid];
-          [self refreshStatus];
-       }]];
-    }
-    [alert addAction:[UIAlertAction actionWithTitle:@"保存并使用" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *model=[alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *url=custom?[alert.textFields[1].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]:provider[@"url"];
-        NSString *newKey=alert.textFields[custom?2:1].text;
-        if (!model.length || ![url hasPrefix:@"https://"]) {
-           self.status.text=@"模型不能为空，接口必须使用 HTTPS"; return;
-        }
-        if (newKey.length && ![self saveKey:newKey forProvider:pid]) {
-           self.status.text=@"钥匙串无法写入，正在使用兼容模式";
-           [self askFallbackForKey:newKey provider:pid model:model url:url]; return;
-        }
-        if (![self keyForProvider:pid].length) {
-           self.status.text=@"请先填写 API Key"; return;
-        }
-        [defaults setObject:@"direct" forKey:@"connect_mode"];
-        [defaults setObject:pid forKey:@"direct_provider"];
-        [defaults setObject:model forKey:[@"model_" stringByAppendingString:pid]];
-        if(custom) [defaults setObject:url forKey:@"direct_url_custom"];
-        [defaults synchronize];
-        [self.history removeAllObjects];
-        [self refreshStatus];
-        self.chat.text=[self.chat.text stringByAppendingFormat:@"\n\n已选择 %@，现在可以直接发送消息。",name];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+- (void)keyboardWillShow:(NSNotification *)n {
+    CGRect key=[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGFloat keyboardHeight=MIN(key.size.height,self.view.bounds.size.height/2);
+    [self layoutForKeyboard:keyboardHeight];
 }
-
-- (void)showComputerSettings {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"连接 Windows AI 服务端"
-       message:@"仅限可信的家庭 Wi-Fi；密钥保存在电脑端。"
-       preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
-        f.placeholder=@"http://192.168.1.2:8765";
-        f.text=[[NSUserDefaults standardUserDefaults] stringForKey:@"server"];
-        f.autocapitalizationType=UITextAutocapitalizationTypeNone;
-    }];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *f) {
-        f.placeholder=@"配对码";
-        f.text=[[NSUserDefaults standardUserDefaults] stringForKey:@"pair"];
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"保存" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        NSString *url=[alert.textFields[0].text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        NSString *pair=alert.textFields[1].text;
-        if (![url hasPrefix:@"http://"] || !pair.length) {
-            self.status.text=@"需要电脑局域网地址和配对码"; return;
-        }
-        NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-        [d setObject:url forKey:@"server"];
-        [d setObject:pair forKey:@"pair"];
-        [d setObject:@"computer" forKey:@"connect_mode"];
-        [d synchronize];
-        [self.history removeAllObjects];
-        [self refreshStatus];
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+- (void)keyboardWillHide:(NSNotification *)n {[self layoutForKeyboard:0];}
+- (void)layoutForKeyboard:(CGFloat)height {
+    CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
+    self.tools.frame=CGRectMake(5,h-139-height,w-10,48);
+    self.message.frame=CGRectMake(10,h-83-height,w-93,49);
+    self.sendButton.frame=CGRectMake(w-76,h-83-height,69,49);
+    self.chat.frame=CGRectMake(9,89,w-18,MAX(100,h-237-height));
 }
-
-- (void)sendTapped {
-    NSString *content=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (!content.length) return;
-    if (![self isDirect] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"server"] length]) {
-        [self settingsTapped]; return;
-    }
-    NSString *activeKey=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:[self selectedProvider][@"id"]];
-    if ([self isDirect] && !activeKey.length) {
-        [self settingsTapped]; return;
-    }
+- (BOOL)textFieldShouldReturn:(UITextField *)field { [self sendTapped];return NO;}
+- (void)showAlert:(NSString *)title detail:(NSString *)detail {
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+- (void)modelsTapped {
     [self.message resignFirstResponder];
-    self.message.text=@"";
-    self.chat.text=[self.chat.text stringByAppendingFormat:@"\n\n我：%@",content];
-    self.status.text=@"正在请求 AI…";
-    self.sendButton.enabled=NO;
-    if ([self isDirect]) [self sendDirect:content];
-    else [self sendComputer:content];
+    XFModelsController *m=[[XFModelsController alloc] initWithStyle:UITableViewStyleGrouped];
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:m];
+    [self presentViewController:nav animated:YES completion:nil];
 }
-
-- (void)request:(NSMutableURLRequest *)request finishedForMessage:(NSString *)content direct:(BOOL)direct {
-    [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
-        completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
-        self.sendButton.enabled=YES;
-        if (error) {
-           if (error.code==NSURLErrorSecureConnectionFailed ||
-               error.code==NSURLErrorServerCertificateUntrusted ||
-               error.code==NSURLErrorServerCertificateHasBadDate ||
-               error.code==NSURLErrorServerCertificateHasUnknownRoot) {
-               self.status.text=@"iOS 8 无法验证 HTTPS 证书，请使用电脑服务端模式";
-           } else {
-               self.status.text=[NSString stringWithFormat:@"网络错误：%ld",(long)error.code];
-           }
-           return;
-        }
-        NSError *parseError=nil;
-        id parsed=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:&parseError]:nil;
-        if (![parsed isKindOfClass:[NSDictionary class]]) {
-            self.status.text=@"服务器返回了无效数据"; return;
-        }
-        NSDictionary *json=(NSDictionary *)parsed;
-        NSInteger status=[response isKindOfClass:[NSHTTPURLResponse class]]?[(NSHTTPURLResponse *)response statusCode]:200;
-        NSString *reply=nil;
-        if (direct) {
-            id choices=json[@"choices"];
-            if ([choices isKindOfClass:[NSArray class]] && [choices count]>0) {
-                id first=[choices objectAtIndex:0];
-                if ([first isKindOfClass:[NSDictionary class]]) {
-                    id message=first[@"message"];
-                    if ([message isKindOfClass:[NSDictionary class]]) {
-                        id body=message[@"content"];
-                        if ([body isKindOfClass:[NSString class]]) reply=body;
-                    }
-                }
+- (void)historyTapped {
+    [self.message resignFirstResponder];
+    XFHistoryController *controller=[[XFHistoryController alloc] initWithStyle:UITableViewStylePlain];
+    controller.onChoose=^(NSString *cid){[self loadConversation:cid];};
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:controller];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+- (void)loadConversation:(NSString *)cid {
+    self.conversationID=cid;
+    NSDictionary *item=[XFChatStore conversationForID:cid];
+    self.history=[item[@"messages"] mutableCopy]?:[NSMutableArray array];
+    self.lastAnswer=nil;
+    NSMutableString *display=[NSMutableString string];
+    for(NSDictionary *m in self.history) {
+        NSString *role=[m[@"role"] isEqualToString:@"user"]?@"我":@"小斐";
+        [display appendFormat:@"%@：%@\n\n",role,m[@"content"]];
+        if([m[@"role"] isEqualToString:@"assistant"]) self.lastAnswer=m[@"content"];
+    }
+    self.chat.text=display.length?display:@"新对话已创建，可以开始聊天。";
+    self.pendingFileText=nil;self.pendingImage=nil;
+}
+- (void)appendLine:(NSString *)line {
+    self.chat.text=[self.chat.text stringByAppendingFormat:@"\n\n%@",line];
+    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+}
+- (void)addExchange:(NSString *)question answer:(NSString *)answer {
+    if(question.length) [self.history addObject:@{@"role":@"user",@"content":question}];
+    if(answer.length) [self.history addObject:@{@"role":@"assistant",@"content":answer}];
+    [XFChatStore saveConversationID:self.conversationID messages:self.history];
+    if(answer.length) self.lastAnswer=answer;
+}
+- (void)setWorking:(BOOL)value {
+    self.isWorking=value;
+    [self.sendButton setTitle:value?@"停止":@"发送" forState:UIControlStateNormal];
+}
+- (void)toolTapped:(UIButton *)button {
+    NSString *name=[button accessibilityIdentifier];
+    [self.message resignFirstResponder];
+    if([name isEqualToString:@"new"]) {[self loadConversation:[XFChatStore createConversation]];return;}
+    if([name isEqualToString:@"photo"]) {[self pickImage];return;}
+    if([name isEqualToString:@"file"]) {[self pickFile];return;}
+    if([name isEqualToString:@"record"]) {[self toggleRecord];return;}
+    if([name isEqualToString:@"tts"]) {[self speakLastAnswer];return;}
+    if([name isEqualToString:@"image"]) {[self generateImage];return;}
+    if([name isEqualToString:@"web"]) {[self sendAsSearch];return;}
+}
+- (NSDictionary *)profileFor:(NSString *)capability {
+    NSDictionary *p=[XFModelsController activeProfileForCapability:capability];
+    if(!p) [self showAlert:@"尚未配置" detail:[NSString stringWithFormat:@"请点击「模型」，添加并选择 %@ 的 API。",capability]];
+    return p;
+}
+- (NSString *)secretFor:(NSDictionary *)profile {
+    return [XFModelsController secretForProfile:profile];
+}
+- (NSMutableURLRequest *)requestForProfile:(NSDictionary *)p {
+    NSURL *url=[NSURL URLWithString:p[@"endpoint"]];
+    if(![[url scheme] isEqualToString:@"https"] || !url.host.length) {
+        [self showAlert:@"接口地址无效" detail:@"请在模型管理中填写完整 HTTPS 接口地址。"];return nil;
+    }
+    NSString *key=[self secretFor:p];
+    if(!key.length){[self showAlert:@"缺少密钥" detail:@"请编辑模型配置并填写 API Key。"];return nil;}
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod=@"POST";req.timeoutInterval=120;
+    [req setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
+    return req;
+}
+- (void)sendTapped {
+    if(self.isWorking) {
+        [self.connection cancel];self.connection=nil;
+        [self setWorking:NO];self.status.text=@"已停止请求";
+        return;
+    }
+    [self sendChat:NO];
+}
+- (void)sendAsSearch {
+    if(self.isWorking)return;
+    [self sendChat:YES];
+}
+- (void)sendChat:(BOOL)web {
+    NSDictionary *profile=[self profileFor:web?@"web":(self.pendingImage?@"vision":@"chat")];
+    if(!profile)return;
+    NSString *msg=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if(!msg.length && self.pendingImage) msg=@"请详细描述这张图片";
+    if(!msg.length && self.pendingFileText.length) msg=@"请分析这份文档";
+    if(!msg.length) {self.status.text=@"请先输入问题";return;}
+    NSString *sent=msg;
+    if(self.pendingFileText.length) {
+        msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
+        sent=[sent stringByAppendingString:@" [文本文件]"];
+    }
+    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":@"你是小斐，中文智能助手。准确回答问题，信息不确定时如实说明。"}];
+    NSUInteger start=self.history.count>18?self.history.count-18:0;
+    for(NSUInteger i=start;i<self.history.count;i++) [messages addObject:self.history[i]];
+    if(self.pendingImage) {
+        UIImage *image=self.pendingImage;
+        CGFloat maxDimension=640;
+        CGFloat scale=MIN(1.0,maxDimension/MAX(image.size.width,image.size.height));
+        CGSize target=CGSizeMake(MAX(1,image.size.width*scale),MAX(1,image.size.height*scale));
+        UIGraphicsBeginImageContextWithOptions(target,YES,1);
+        [image drawInRect:CGRectMake(0,0,target.width,target.height)];
+        UIImage *resized=UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        NSString *encoded=[UIImageJPEGRepresentation(resized,0.64) base64EncodedStringWithOptions:0];
+        NSString *uri=[@"data:image/jpeg;base64," stringByAppendingString:encoded];
+        [messages addObject:@{@"role":@"user",@"content":@[
+            @{@"type":@"text",@"text":msg},
+            @{@"type":@"image_url",@"image_url":@{@"url":uri}}
+        ]}];
+        sent=[sent stringByAppendingString:@" [图片]"];
+    } else {
+        [messages addObject:@{@"role":@"user",@"content":msg}];
+    }
+    NSMutableURLRequest *req=[self requestForProfile:profile];if(!req)return;
+    NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":@YES} mutableCopy];
+    if(web) payload[@"web_search_options"]=@{};
+    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    self.sendingContent=sent;
+    [self.message resignFirstResponder];self.message.text=@"";
+    self.pendingFileText=nil;self.pendingImage=nil;
+    [self appendLine:[NSString stringWithFormat:@"我：%@",sent]];
+    self.streamBuffer=[NSMutableData data];self.streamText=[NSMutableString string];self.httpCode=0;
+    [self setWorking:YES];self.status.text=web?@"正在联网搜索…":@"正在生成回复…";
+    self.connection=[[NSURLConnection alloc] initWithRequest:req delegate:self startImmediately:YES];
+}
+- (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
+    self.httpCode=[response isKindOfClass:[NSHTTPURLResponse class]]?[(NSHTTPURLResponse *)response statusCode]:0;
+    [self.streamBuffer setLength:0];
+}
+- (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
+    [self.streamBuffer appendData:data];
+    if(self.httpCode>=400)return;
+    NSData *separator=[@"\n\n" dataUsingEncoding:NSUTF8StringEncoding];
+    while(self.streamBuffer.length) {
+        NSRange boundary=[self.streamBuffer rangeOfData:separator options:0 range:NSMakeRange(0,self.streamBuffer.length)];
+        if(boundary.location==NSNotFound) break;
+        NSData *part=[self.streamBuffer subdataWithRange:NSMakeRange(0,boundary.location)];
+        NSUInteger consumed=boundary.location+boundary.length;
+        NSData *remaining=[self.streamBuffer subdataWithRange:NSMakeRange(consumed,self.streamBuffer.length-consumed)];
+        self.streamBuffer=[remaining mutableCopy];
+        NSString *event=[[NSString alloc] initWithData:part encoding:NSUTF8StringEncoding];
+        NSArray *lines=[event componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+        for(NSString *line in lines) {
+            if(![line hasPrefix:@"data:"])continue;
+            NSString *raw=[[line substringFromIndex:5] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+            if([raw isEqualToString:@"[DONE]"])continue;
+            NSData *jsonData=[raw dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *json=[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
+            NSArray *choices=[json isKindOfClass:[NSDictionary class]]?json[@"choices"]:nil;
+            if(![choices isKindOfClass:[NSArray class]] || !choices.count)continue;
+            NSDictionary *choice=choices[0];
+            NSDictionary *delta=[choice[@"delta"] isKindOfClass:[NSDictionary class]]?choice[@"delta"]:nil;
+            NSString *chunk=[delta[@"content"] isKindOfClass:[NSString class]]?delta[@"content"]:nil;
+            if(chunk.length){
+                [self.streamText appendString:chunk];
+                [self showStreamingAnswer];
             }
-        } else {
-            if ([json[@"reply"] isKindOfClass:[NSString class]]) reply=json[@"reply"];
         }
-        if (status<200 || status>=300) {
-            NSString *details=nil;
-            id e=json[@"error"];
-            if ([e isKindOfClass:[NSDictionary class]]) details=e[@"message"];
-            if (![details isKindOfClass:[NSString class]]) details=json[@"detail"];
-            self.status.text=[NSString stringWithFormat:@"接口错误 HTTP %ld：%@",(long)status,
-                [details isKindOfClass:[NSString class]]?[details substringToIndex:MIN((NSUInteger)36,details.length)]:@"请检查模型和密钥"];
-            return;
+    }
+}
+- (void)showStreamingAnswer {
+    NSString *txt=[self.chat.text copy];
+    NSRange r=[txt rangeOfString:@"\n\n小斐（回复中）："];
+    if(r.location!=NSNotFound) txt=[txt substringToIndex:r.location];
+    self.chat.text=[txt stringByAppendingFormat:@"\n\n小斐（回复中）：%@",self.streamText];
+    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+}
+- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
+    if(connection!=self.connection)return;
+    self.connection=nil;[self setWorking:NO];
+    self.status.text=[NSString stringWithFormat:@"网络失败 %ld；旧 iOS 可能不兼容厂商 HTTPS",(long)error.code];
+}
+- (void)connectionDidFinishLoading:(NSURLConnection *)connection {
+    if(connection!=self.connection)return;
+    self.connection=nil;[self setWorking:NO];
+    if(self.httpCode>=400) {
+        NSDictionary *error=[NSJSONSerialization JSONObjectWithData:self.streamBuffer options:0 error:NULL];
+        NSString *reason=nil;
+        if([error isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *details=error[@"error"];
+            if([details isKindOfClass:[NSDictionary class]])reason=details[@"message"];
         }
-        if (![reply isKindOfClass:[NSString class]] || !reply.length) {
-            self.status.text=@"模型没有返回可用的文本"; return;
+        self.status.text=[NSString stringWithFormat:@"API 错误 HTTP %ld %@",(long)self.httpCode,
+            [reason isKindOfClass:[NSString class]]?[reason substringToIndex:MIN((NSUInteger)70,reason.length)]:@""];
+        return;
+    }
+    NSString *answer=[self.streamText copy];
+    if(!answer.length) {
+        NSDictionary *json=[NSJSONSerialization JSONObjectWithData:self.streamBuffer options:0 error:NULL];
+        NSArray *choices=[json isKindOfClass:[NSDictionary class]]?json[@"choices"]:nil;
+        if([choices isKindOfClass:[NSArray class]] && choices.count) {
+            NSDictionary *first=choices[0];
+            NSDictionary *message=first[@"message"];
+            if([message isKindOfClass:[NSDictionary class]] && [message[@"content"] isKindOfClass:[NSString class]])
+                answer=message[@"content"];
         }
-        if (direct) {
-            [self.history addObject:@{@"role":@"user",@"content":content}];
-            [self.history addObject:@{@"role":@"assistant",@"content":reply}];
-            while (self.history.count>12) [self.history removeObjectAtIndex:0];
-        }
-        self.chat.text=[self.chat.text stringByAppendingFormat:@"\n\n小斐：%@",reply];
-        self.status.text=@"完成";
-        [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+    }
+    if(!answer.length) {self.status.text=@"API 未返回可用文字，请检查模型是否支持 Chat Completions";return;}
+    NSString *txt=[self.chat.text copy];
+    NSRange r=[txt rangeOfString:@"\n\n小斐（回复中）："];
+    if(r.location!=NSNotFound) txt=[txt substringToIndex:r.location];
+    self.chat.text=[txt stringByAppendingFormat:@"\n\n小斐：%@",answer];
+    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+    [self addExchange:self.sendingContent answer:answer];
+    self.status.text=@"回复完成，已保存到历史对话";
+}
+- (void)pickImage {
+    UIImagePickerController *picker=[[UIImagePickerController alloc] init];
+    picker.delegate=self;
+    picker.sourceType=UIImagePickerControllerSourceTypePhotoLibrary;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info {
+    UIImage *img=info[UIImagePickerControllerOriginalImage];
+    self.pendingImage=img;
+    [picker dismissViewControllerAnimated:YES completion:nil];
+    self.status.text=img?@"已选择图片，发送问题时将使用视觉模型":@"图片读取失败";
+}
+- (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
+    [picker dismissViewControllerAnimated:YES completion:nil];
+}
+- (void)pickFile {
+    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc]
+         initWithDocumentTypes:@[@"public.plain-text",@"public.text"] inMode:UIDocumentPickerModeImport];
+    picker.delegate=self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
+    NSData *bytes=[NSData dataWithContentsOfURL:url options:0 error:NULL];
+    if(!bytes || bytes.length>512*1024) {
+        [self showAlert:@"文件过大或无法读取" detail:@"目前只支持 TXT / MD 等纯文本文件，单文件不得超过 512KB。"];return;
+    }
+    NSString *text=[[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding];
+    if(!text) text=[[NSString alloc] initWithData:bytes encoding:NSUTF16StringEncoding];
+    if(!text) {[self showAlert:@"文件格式不支持" detail:@"当前版本暂不支持 PDF 的文本提取。"];return;}
+    if(text.length>12000) text=[text substringToIndex:12000];
+    self.pendingFileText=text;self.status.text=@"文本已添加，发送问题即可分析";
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {}
+
+- (void)toggleRecord {
+    if(self.isRecording) {
+        [self.recorder stop];self.isRecording=NO;
+        [self transcribeRecording];return;
+    }
+    NSDictionary *p=[self profileFor:@"stt"];if(!p)return;
+    AVAudioSession *session=[AVAudioSession sharedInstance];
+    [session setCategory:AVAudioSessionCategoryPlayAndRecord error:NULL];
+    [session setActive:YES error:NULL];
+    [session requestRecordPermission:^(BOOL granted) {
+        [[NSOperationQueue mainQueue] addOperationWithBlock:^{
+            if(!granted){[self showAlert:@"没有麦克风权限" detail:@"请在系统设置中允许小斐 AI 录音。"];return;}
+            NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"xf-recording.m4a"];
+            NSDictionary *settings=@{AVFormatIDKey:@(kAudioFormatMPEG4AAC),
+                AVSampleRateKey:@16000,AVNumberOfChannelsKey:@1,
+                AVEncoderAudioQualityKey:@(AVAudioQualityMedium)};
+            self.recorder=[[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:path] settings:settings error:NULL];
+            if(![self.recorder prepareToRecord] || ![self.recorder recordForDuration:60]){
+                [self showAlert:@"录音失败" detail:@"请检查系统麦克风权限与存储空间。"];return;
+            }
+            self.isRecording=YES;self.status.text=@"正在录音，点击「录音」结束，最长 60 秒";
+        }];
     }];
 }
-
-- (void)sendDirect:(NSString *)content {
-    NSDictionary *provider=[self selectedProvider];
-    NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-    NSString *pid=provider[@"id"];
-    NSString *urlStr=[XFModelsController activeProfile]?provider[@"url"]:([pid isEqualToString:@"custom"]?[d stringForKey:@"direct_url_custom"]:provider[@"url"]);
-    NSString *model=[d stringForKey:[@"model_" stringByAppendingString:pid]];
-    if ([XFModelsController activeProfile]) model=provider[@"model"];
-    else if (!model.length) model=provider[@"model"];
-    NSURL *url=[NSURL URLWithString:urlStr];
-    if (!url || ![[url scheme] isEqualToString:@"https"] || !model.length) {
-        self.status.text=@"模型接口地址无效"; self.sendButton.enabled=YES; return;
-    }
-    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":@"你是小斐，用简洁自然的中文回答用户。"}];
-    [messages addObjectsFromArray:self.history];
-    [messages addObject:@{@"role":@"user",@"content":content}];
-    NSDictionary *body=@{@"model":model,@"messages":messages,@"stream":@NO};
-    NSData *json=[NSJSONSerialization dataWithJSONObject:body options:0 error:NULL];
-    if (!json) { self.status.text=@"消息编码失败"; self.sendButton.enabled=YES; return; }
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod=@"POST"; req.timeoutInterval=100; req.HTTPBody=json;
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    NSString *secret=[XFModelsController activeProfile]?[XFModelsController secretForProfile:[XFModelsController activeProfile]]:[self keyForProvider:pid];
-    [req setValue:[@"Bearer " stringByAppendingString:secret?:@""] forHTTPHeaderField:@"Authorization"];
-    [self request:req finishedForMessage:content direct:YES];
+- (void)transcribeRecording {
+    NSDictionary *p=[self profileFor:@"stt"];if(!p)return;
+    NSData *audio=[NSData dataWithContentsOfURL:self.recorder.url];
+    if(!audio.length) {self.status.text=@"录音文件为空";return;}
+    NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
+    NSString *boundary=[[NSUUID UUID] UUIDString];
+    [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
+    NSMutableData *body=[NSMutableData data];
+    [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n%@\r\n",boundary,p[@"model"]] dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:audio];
+    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    req.HTTPBody=body;
+    self.status.text=@"正在语音识别…";
+    [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
+        if(err){self.status.text=[NSString stringWithFormat:@"语音请求失败 %ld",(long)err.code];return;}
+        NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
+        NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        NSString *text=[json isKindOfClass:[NSDictionary class]]?json[@"text"]:nil;
+        if(code>=300 || ![text isKindOfClass:[NSString class]]){
+            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld",(long)code];return;
+        }
+        self.message.text=text;self.status.text=@"已识别语音，点击发送";
+    }];
 }
-
-- (void)sendComputer:(NSString *)content {
-    NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-    NSString *base=[d stringForKey:@"server"];
-    NSString *code=[d stringForKey:@"pair"];
-    if (!base.length || !code.length) { self.status.text=@"先填写电脑地址和配对码"; self.sendButton.enabled=YES; return; }
-    NSURL *url=[NSURL URLWithString:[base stringByAppendingString:@"/api/chat"]];
-    if (!url) { self.status.text=@"电脑地址无效"; self.sendButton.enabled=YES; return; }
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod=@"POST"; req.timeoutInterval=100;
+- (void)speakLastAnswer {
+    if(!self.lastAnswer.length){self.status.text=@"当前没有可朗读的回答";return;}
+    NSDictionary *p=[self profileFor:@"tts"];if(!p)return;
+    NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [req setValue:code forHTTPHeaderField:@"X-Access-Token"];
-    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"text":content,@"mode":@"chat"} options:0 error:NULL];
-    [self request:req finishedForMessage:content direct:NO];
+    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"model":p[@"model"],@"input":[self.lastAnswer substringToIndex:MIN((NSUInteger)2500,self.lastAnswer.length)],
+       @"voice":@"alloy",@"response_format":@"mp3"} options:0 error:NULL];
+    self.status.text=@"生成语音…";
+    [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
+        if(err){self.status.text=[NSString stringWithFormat:@"朗读连接失败 %ld",(long)err.code];return;}
+        NSInteger status=[(NSHTTPURLResponse *)resp statusCode];
+        if(status>=300 || !data.length){self.status.text=[NSString stringWithFormat:@"朗读接口 HTTP %ld",(long)status];return;}
+        [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
+        self.player=[[AVAudioPlayer alloc] initWithData:data error:NULL];
+        if(![self.player play]) {self.status.text=@"语音格式无法播放";return;}
+        self.status.text=@"正在朗读";
+    }];
+}
+- (void)generateImage {
+    if(self.isWorking) return;
+    NSDictionary *p=[self profileFor:@"image"];if(!p)return;
+    NSString *prompt=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if(!prompt.length) {self.status.text=@"请先输入生图描述";return;}
+    NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"model":p[@"model"],@"prompt":prompt,
+       @"n":@1,@"size":@"1024x1024"} options:0 error:NULL];
+    self.status.text=@"正在生成图片…";
+    [self setWorking:YES];
+    [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
+        [self setWorking:NO];
+        if(err){self.status.text=[NSString stringWithFormat:@"生图网络失败 %ld",(long)err.code];return;}
+        NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
+        NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        NSArray *results=[json isKindOfClass:[NSDictionary class]]?json[@"data"]:nil;
+        NSDictionary *first=[results isKindOfClass:[NSArray class]] && results.count?results[0]:nil;
+        NSString *base64=first[@"b64_json"];
+        if(code>=300 || ![base64 isKindOfClass:[NSString class]]) {
+            self.status.text=[NSString stringWithFormat:@"生图失败 HTTP %ld（要求返回 b64_json）",(long)code];return;
+        }
+        NSData *bytes=[[NSData alloc] initWithBase64EncodedString:base64 options:0];
+        UIImage *image=[UIImage imageWithData:bytes];
+        if(!image){self.status.text=@"图片解码失败";return;}
+        [self showGeneratedImage:image];
+        [self appendLine:[NSString stringWithFormat:@"已生成图片：%@",prompt]];
+        self.status.text=@"图片已生成，可保存到相册";
+    }];
+}
+- (void)showGeneratedImage:(UIImage *)image {
+    UIViewController *viewer=[[UIViewController alloc] init];
+    viewer.view.backgroundColor=[UIColor blackColor];
+    UIImageView *iv=[[UIImageView alloc] initWithFrame:viewer.view.bounds];
+    iv.image=image;iv.contentMode=UIViewContentModeScaleAspectFit;
+    iv.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    [viewer.view addSubview:iv];
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:viewer];
+    viewer.title=@"生成图片";
+    viewer.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+        target:self action:@selector(closeImageViewer)];
+    viewer.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存相册" style:UIBarButtonItemStylePlain
+        target:self action:@selector(saveGeneratedImage)];
+    objc_setAssociatedObject(viewer,@"XFGeneratedImage",image,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self presentViewController:nav animated:YES completion:nil];
+}
+- (void)closeImageViewer {[self dismissViewControllerAnimated:YES completion:nil];}
+- (void)saveGeneratedImage {
+    UIViewController *vc=((UINavigationController *)self.presentedViewController).topViewController;
+    UIImage *image=objc_getAssociatedObject(vc,@"XFGeneratedImage");
+    if(image){UIImageWriteToSavedPhotosAlbum(image,nil,NULL,NULL);vc.title=@"已请求保存到相册";}
 }
 @end
