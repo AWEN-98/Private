@@ -11,11 +11,16 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
 
 @implementation XFModelsController
 
-+ (NSDictionary *)activeProfile {
-    NSString *active = [[NSUserDefaults standardUserDefaults] stringForKey:kXFActive];
-    NSArray *profiles = [[NSUserDefaults standardUserDefaults] arrayForKey:kXFProfiles];
++ (NSString *)activeKey:(NSString *)capability {return [@"xf_active_profile_" stringByAppendingString:capability?:@"chat"];}
++ (NSDictionary *)activeProfile {return [self activeProfileForCapability:@"chat"];}
++ (NSDictionary *)activeProfileForCapability:(NSString *)capability {
+    NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
+    NSString *active=[d stringForKey:[self activeKey:capability]];
+    if(!active.length && [capability isEqualToString:@"chat"]) active=[d stringForKey:kXFActive];
+    NSArray *profiles=[d arrayForKey:kXFProfiles];
     for (NSDictionary *p in profiles) {
-        if ([p[@"id"] isEqualToString:active]) return p;
+        if([p[@"id"] isEqualToString:active] &&
+            [(p[@"capability"]?:@"chat") isEqualToString:capability]) return p;
     }
     return nil;
 }
@@ -94,7 +99,7 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return 2; }
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s { return s==0?self.profiles.count:1; }
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
-    return s==0?@"点击一行选择模型，点击右侧编辑":@"使用说明";
+    return s==0?@"点击启用模型；右侧编辑；左滑删除":@"使用说明";
 }
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)index {
     UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:@"profile"];
@@ -108,10 +113,11 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
         return cell;
     }
     NSDictionary *p=self.profiles[index.row];
-    NSString *active=[[NSUserDefaults standardUserDefaults] stringForKey:kXFActive];
+    NSString *active=[[NSUserDefaults standardUserDefaults] stringForKey:[XFModelsController activeKey:(p[@"capability"]?:@"chat")]];
+    if(!active.length) active=[[NSUserDefaults standardUserDefaults] stringForKey:kXFActive];
     BOOL chosen=[p[@"id"] isEqualToString:active];
     cell.textLabel.text=[NSString stringWithFormat:@"%@%@",chosen?@"✓  ":@"",p[@"name"]];
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",p[@"provider"],p[@"model"]];
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@ · %@",p[@"capability"]?:@"chat",p[@"provider"],p[@"model"]];
     cell.accessoryType=UITableViewCellAccessoryDetailButton;
     cell.selectionStyle=UITableViewCellSelectionStyleDefault;
     return cell;
@@ -125,8 +131,9 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
         return;
     }
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-    [d setObject:p[@"id"] forKey:kXFActive];
-    [d setObject:@"direct" forKey:@"connect_mode"];
+    NSString *cap=p[@"capability"]?:@"chat";
+    [d setObject:p[@"id"] forKey:[XFModelsController activeKey:cap]];
+    if([cap isEqualToString:@"chat"]) { [d setObject:p[@"id"] forKey:kXFActive]; [d setObject:@"direct" forKey:@"connect_mode"]; }
     [d synchronize];
     [self.tableView reloadData];
 }
@@ -140,25 +147,54 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
     [XFModelsController removeSecretForID:p[@"id"]];
     [self.profiles removeObjectAtIndex:index.row];
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
+    NSString *cap=p[@"capability"]?:@"chat";
+    if([[d stringForKey:[XFModelsController activeKey:cap]] isEqualToString:p[@"id"]]) [d removeObjectForKey:[XFModelsController activeKey:cap]];
     if([[d stringForKey:kXFActive] isEqualToString:p[@"id"]]) [d removeObjectForKey:kXFActive];
     [self saveProfiles];
 }
 - (NSArray *)presets {
     return @[
-      @{@"provider":@"DeepSeek",@"endpoint":@"https://api.deepseek.com/chat/completions",@"model":@"deepseek-flash"},
-      @{@"provider":@"通义千问",@"endpoint":@"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",@"model":@"qwen-plus"},
-      @{@"provider":@"Kimi",@"endpoint":@"https://api.moonshot.cn/v1/chat/completions",@"model":@"kimi-k2.6"},
-      @{@"provider":@"智谱 GLM",@"endpoint":@"https://open.bigmodel.cn/api/paas/v4/chat/completions",@"model":@"glm-4-flash"},
-      @{@"provider":@"MiniMax",@"endpoint":@"https://api.minimax.io/v1/chat/completions",@"model":@"MiniMax-M2"},
-      @{@"provider":@"自定义兼容接口",@"endpoint":@"https://",@"model":@""}
+      @{@"capability":@"chat",@"provider":@"DeepSeek",@"endpoint":@"https://api.deepseek.com/chat/completions",@"model":@"deepseek-chat"},
+      @{@"capability":@"chat",@"provider":@"通义千问",@"endpoint":@"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",@"model":@"qwen-plus"},
+      @{@"capability":@"chat",@"provider":@"Kimi",@"endpoint":@"https://api.moonshot.cn/v1/chat/completions",@"model":@"moonshot-v1-8k"},
+      @{@"capability":@"chat",@"provider":@"智谱 GLM",@"endpoint":@"https://open.bigmodel.cn/api/paas/v4/chat/completions",@"model":@"glm-4-flash"},
+      @{@"capability":@"chat",@"provider":@"MiniMax",@"endpoint":@"https://api.minimax.io/v1/chat/completions",@"model":@"MiniMax-M2"},
+      @{@"capability":@"chat",@"provider":@"自定义兼容接口",@"endpoint":@"https://",@"model":@""},
+      @{@"capability":@"vision",@"provider":@"视觉模型 API",@"endpoint":@"https://api.openai.com/v1/chat/completions",@"model":@"gpt-4.1-mini"},
+      @{@"capability":@"image",@"provider":@"图片生成 API",@"endpoint":@"https://api.openai.com/v1/images/generations",@"model":@"gpt-image-2.5-flare"},
+      @{@"capability":@"stt",@"provider":@"语音转文字 API",@"endpoint":@"https://api.openai.com/v1/audio/transcriptions",@"model":@"gpt-4o-mini-transcribe"},
+      @{@"capability":@"tts",@"provider":@"文字转语音 API",@"endpoint":@"https://api.openai.com/v1/audio/speech",@"model":@"gpt-4o-mini-tts"},
+      @{@"capability":@"web",@"provider":@"联网搜索 API",@"endpoint":@"https://api.openai.com/v1/chat/completions",@"model":@"gpt-5-search-api"}
     ];
 }
+- (NSString *)displayForCapability:(NSString *)type {
+    NSDictionary *names=@{@"chat":@"文字聊天",@"vision":@"图片理解",@"image":@"图片生成",@"stt":@"语音识别",@"tts":@"语音朗读",@"web":@"联网搜索"};
+    return names[type]?:type;
+}
 - (void)addTapped {
-    UIAlertController *a=[UIAlertController alertControllerWithTitle:@"添加模型" message:@"选择厂商，之后可修改模型 ID 和完整接口地址"
+    UIAlertController *pick=[UIAlertController alertControllerWithTitle:@"添加 AI 能力"
+        message:@"选择一种用途，每种用途都能保存多个模型" preferredStyle:UIAlertControllerStyleAlert];
+    for(NSString *type in @[@"chat",@"vision",@"image",@"stt",@"tts",@"web"]) {
+        [pick addAction:[UIAlertAction actionWithTitle:[self displayForCapability:type] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            [self pickPresetForCapability:type];
+        }]];
+    }
+    [pick addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:pick animated:YES completion:nil];
+}
+- (void)pickPresetForCapability:(NSString *)type {
+    UIAlertController *a=[UIAlertController alertControllerWithTitle:[self displayForCapability:type]
+        message:@"选择模板，也可以添加任意兼容 API 并修改地址"
         preferredStyle:UIAlertControllerStyleAlert];
     for(NSDictionary *preset in [self presets]) {
+        if(![preset[@"capability"] isEqualToString:type]) continue;
         [a addAction:[UIAlertAction actionWithTitle:preset[@"provider"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
             [self editProfile:preset index:-1];
+        }]];
+    }
+    if(![type isEqualToString:@"chat"]) {
+        [a addAction:[UIAlertAction actionWithTitle:@"自定义该类型的接口" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act){
+            [self editProfile:@{@"capability":type,@"provider":@"自定义 API",@"endpoint":@"https://",@"model":@""} index:-1];
         }]];
     }
     [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -200,7 +236,8 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
             return;
         }
         NSDictionary *saved=@{@"id":pid,@"name":name,@"model":model,@"endpoint":endpoint,
-                               @"provider":profile[@"provider"]?:@"自定义"};
+                               @"provider":profile[@"provider"]?:@"自定义",
+                               @"capability":profile[@"capability"]?:@"chat"};
         if(key.length) {
             OSStatus code=[XFModelsController writeKeychain:key forID:pid];
             if(code!=errSecSuccess) {
@@ -248,7 +285,10 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
     if(index>=0 && index<self.profiles.count) self.profiles[index]=profile;
     else [self.profiles addObject:profile];
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
-    if(![d stringForKey:kXFActive]){
+    NSString *cap=profile[@"capability"]?:@"chat";
+    NSString *key=[XFModelsController activeKey:cap];
+    if(![d stringForKey:key]) [d setObject:profile[@"id"] forKey:key];
+    if([cap isEqualToString:@"chat"] && ![d stringForKey:kXFActive]){
         [d setObject:profile[@"id"] forKey:kXFActive];
         [d setObject:@"direct" forKey:@"connect_mode"];
     }
