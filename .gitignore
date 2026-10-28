@@ -1,0 +1,6 @@
+windows/.env
+windows/.pair_code
+windows/data/
+**/__pycache__/
+**/*.pyc
+*.deb
