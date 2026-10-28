@@ -128,7 +128,7 @@ static NSTimeInterval const XFProbeFreshness=24*60*60;
     req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{
         @"model":mid,
         @"messages":@[@{@"role":@"user",@"content":@"请回答：好"}],
-        @"stream":@NO
+        @"stream":[NSNumber numberWithBool:NO]
     } options:0 error:NULL];
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue]
       completionHandler:^(NSURLResponse *response,NSData *data,NSError *error) {
