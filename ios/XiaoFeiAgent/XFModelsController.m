@@ -563,6 +563,29 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 + (NSString *)secretForProfile:(NSDictionary *)profile {
     return XFSecret(profile[@"account_id"]?:profile[@"id"]);
 }
++ (NSArray *)allChatProfiles {
+    NSMutableArray *profiles=[NSMutableArray array];
+    for(NSDictionary *account in XFAccounts()){
+        for(NSDictionary *model in account[@"models"]){
+            NSString *kind=XFKind(model);
+            if(![@[@"文字对话",@"深度推理",@"图片理解"] containsObject:kind])continue;
+            NSString *mid=model[@"id"];
+            if(![mid isKindOfClass:[NSString class]] || !mid.length)continue;
+            NSString *endpoint=XFEndpoint(account,@"chat");
+            NSString *legacy=account[@"legacy_endpoint"];
+            if(legacy.length && [account[@"models"] count]==1)endpoint=legacy;
+            [profiles addObject:@{@"id":mid,@"model":mid,
+                @"name":model[@"name"]?:mid,@"provider":account[@"name"]?:@"API",
+                @"endpoint":endpoint,@"account_id":account[@"id"]}];
+            if(profiles.count>=700)break;
+        }
+        if(profiles.count>=700)break;
+    }
+    [profiles sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+        return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+    }];
+    return profiles;
+}
 
 - (NSArray *)filterCategories {
     return @[@"常用",@"全部",@"文字对话",@"深度推理",@"图片理解",@"图片生成",
