@@ -2,12 +2,19 @@
 #import "XFModelsController.h"
 #import "XFChatStore.h"
 #import "XFHistoryController.h"
+#import "XFChatView.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
 @interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,UIDocumentPickerDelegate,NSURLConnectionDataDelegate>
-@property(nonatomic,strong) UITextView *chat;
+@property(nonatomic,strong) XFChatView *chat;
+@property(nonatomic,strong) UIView *headerBar;
+@property(nonatomic,strong) UIView *footerBar;
+@property(nonatomic,strong) UILabel *brandTitle;
+@property(nonatomic,strong) UIButton *modelsButton;
+@property(nonatomic,strong) UIButton *sessionsButton;
+@property(nonatomic,assign) CGFloat keyboardOffset;
 @property(nonatomic,strong) UITextField *message;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
@@ -30,80 +37,123 @@
 
 @implementation XFViewController
 
+- (UIColor *)accent {
+    return [UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];
+}
+- (UIColor *)ink {
+    return [UIColor colorWithRed:0.14 green:0.19 blue:0.30 alpha:1];
+}
+- (void)styleNavigationButton:(UIButton *)button filled:(BOOL)filled {
+    button.backgroundColor=filled?[self accent]:[UIColor colorWithRed:0.94 green:0.95 blue:0.99 alpha:1];
+    [button setTitleColor:filled?[UIColor whiteColor]:[self accent] forState:UIControlStateNormal];
+    button.titleLabel.font=[UIFont boldSystemFontOfSize:13];
+    button.layer.cornerRadius=9;
+}
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=[UIColor colorWithRed:0.96 green:0.97 blue:0.985 alpha:1];
+    self.view.backgroundColor=[UIColor colorWithRed:0.966 green:0.973 blue:0.987 alpha:1];
     self.history=[NSMutableArray array];
-    CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
+    CGFloat w=self.view.bounds.size.width;
+    self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,88)];
+    self.headerBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.headerBar.backgroundColor=[UIColor whiteColor];
+    [self.view addSubview:self.headerBar];
+    UIView *rule=[[UIView alloc] initWithFrame:CGRectMake(0,87,w,0.5)];
+    rule.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    rule.backgroundColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
+    [self.headerBar addSubview:rule];
 
-    UIButton *sessions=[UIButton buttonWithType:UIButtonTypeSystem];
-    sessions.frame=CGRectMake(5,24,62,40);
-    [sessions setTitle:@"会话" forState:UIControlStateNormal];
-    [sessions addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:sessions];
+    self.sessionsButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.sessionsButton.frame=CGRectMake(12,27,62,33);
+    [self.sessionsButton setTitle:@"会话" forState:UIControlStateNormal];
+    [self styleNavigationButton:self.sessionsButton filled:NO];
+    [self.sessionsButton addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.headerBar addSubview:self.sessionsButton];
 
-    UILabel *title=[[UILabel alloc] initWithFrame:CGRectMake(69,24,w-138,40)];
-    title.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    title.font=[UIFont boldSystemFontOfSize:19];
-    title.textAlignment=NSTextAlignmentCenter;title.text=@"小斐 AI";
-    [self.view addSubview:title];
+    self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(80,25,w-160,38)];
+    self.brandTitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.brandTitle.text=@"小斐 AI";
+    self.brandTitle.font=[UIFont boldSystemFontOfSize:20];
+    self.brandTitle.textColor=[self ink];
+    self.brandTitle.textAlignment=NSTextAlignmentCenter;
+    [self.headerBar addSubview:self.brandTitle];
 
-    UIButton *models=[UIButton buttonWithType:UIButtonTypeSystem];
-    models.frame=CGRectMake(w-70,24,68,40);
-    models.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
-    [models setTitle:@"模型" forState:UIControlStateNormal];
-    [models addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:models];
+    self.modelsButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.modelsButton.frame=CGRectMake(w-76,27,64,33);
+    self.modelsButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
+    [self.modelsButton setTitle:@"切换模型" forState:UIControlStateNormal];
+    [self styleNavigationButton:self.modelsButton filled:YES];
+    self.modelsButton.titleLabel.font=[UIFont boldSystemFontOfSize:11.5];
+    [self.modelsButton addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
+    [self.headerBar addSubview:self.modelsButton];
 
-    self.status=[[UILabel alloc] initWithFrame:CGRectMake(12,65,w-24,20)];
+    self.status=[[UILabel alloc] initWithFrame:CGRectMake(13,65,w-26,18)];
     self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.status.font=[UIFont systemFontOfSize:11];self.status.textColor=[UIColor darkGrayColor];
-    [self.view addSubview:self.status];
+    self.status.textColor=[UIColor colorWithRed:0.43 green:0.48 blue:0.59 alpha:1];
+    self.status.font=[UIFont systemFontOfSize:11];
+    self.status.lineBreakMode=NSLineBreakByTruncatingMiddle;
+    [self.headerBar addSubview:self.status];
 
-    self.chat=[[UITextView alloc] initWithFrame:CGRectMake(9,89,w-18,h-237)];
+    self.chat=[[XFChatView alloc] initWithFrame:CGRectZero];
     self.chat.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-    self.chat.editable=NO;self.chat.font=[UIFont systemFontOfSize:15];
-    self.chat.backgroundColor=[UIColor whiteColor];
-    self.chat.layer.cornerRadius=7;
-    self.chat.text=@"欢迎使用小斐 AI。\n先到「模型」添加文字模型，再发送问题。\n图片、语音、联网、绘图可配置不同的 API。";
     [self.view addSubview:self.chat];
 
-    self.tools=[[UIScrollView alloc] initWithFrame:CGRectMake(5,h-139,w-10,48)];
-    self.tools.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
+    self.footerBar=[[UIView alloc] initWithFrame:CGRectZero];
+    self.footerBar.backgroundColor=[UIColor whiteColor];
+    [self.view addSubview:self.footerBar];
+    UIView *topRule=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,0.5)];
+    topRule.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    topRule.backgroundColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.95 alpha:1];
+    [self.footerBar addSubview:topRule];
+
+    self.tools=[[UIScrollView alloc] initWithFrame:CGRectZero];
     self.tools.showsHorizontalScrollIndicator=NO;
-    [self.view addSubview:self.tools];
-    NSArray *items=@[@[@"新对话",@"new"],@[@"图片",@"photo"],@[@"文本",@"file"],
-      @[@"录音",@"record"],@[@"朗读",@"tts"],@[@"生图",@"image"],@[@"联网",@"web"]];
-    CGFloat x=2;
-    for(NSArray *it in items) {
-        UIButton *btn=[UIButton buttonWithType:UIButtonTypeSystem];
-        btn.frame=CGRectMake(x,4,59,37);
-        btn.titleLabel.font=[UIFont systemFontOfSize:14];
-        [btn setTitle:it[0] forState:UIControlStateNormal];
-        btn.layer.borderWidth=0.5;
-        btn.layer.borderColor=[UIColor lightGrayColor].CGColor;
-        btn.layer.cornerRadius=6;
-        [btn setAccessibilityIdentifier:it[1]];
-        [btn addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self.tools addSubview:btn];
-        x+=63;
+    self.tools.alwaysBounceHorizontal=YES;
+    [self.footerBar addSubview:self.tools];
+    NSArray *items=@[@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"]];
+    CGFloat x=1;
+    for(NSArray *item in items){
+        UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
+        CGFloat bw=[item[1] isEqualToString:@"new"]?77:65;
+        button.frame=CGRectMake(x,4,bw,34);
+        button.backgroundColor=[UIColor colorWithRed:0.954 green:0.962 blue:0.988 alpha:1];
+        [button setTitle:item[0] forState:UIControlStateNormal];
+        [button setTitleColor:[self ink] forState:UIControlStateNormal];
+        button.titleLabel.font=[UIFont systemFontOfSize:12.5];
+        button.layer.cornerRadius=9;
+        button.layer.borderWidth=0.5;
+        button.layer.borderColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.96 alpha:1].CGColor;
+        [button setAccessibilityIdentifier:item[1]];
+        [button addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [self.tools addSubview:button];
+        x+=bw+7;
     }
-    self.tools.contentSize=CGSizeMake(x+2,48);
+    self.tools.contentSize=CGSizeMake(x,42);
 
-    self.message=[[UITextField alloc] initWithFrame:CGRectMake(10,h-83,w-93,49)];
-    self.message.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
-    self.message.borderStyle=UITextBorderStyleRoundedRect;
-    self.message.font=[UIFont systemFontOfSize:15];
-    self.message.placeholder=@"输入问题或生图描述";
+    self.message=[[UITextField alloc] initWithFrame:CGRectZero];
+    self.message.borderStyle=UITextBorderStyleNone;
+    self.message.backgroundColor=[UIColor colorWithRed:0.965 green:0.973 blue:0.991 alpha:1];
+    self.message.textColor=[self ink];
+    self.message.font=[UIFont systemFontOfSize:14.5];
+    self.message.layer.cornerRadius=12;
+    self.message.layer.borderWidth=0.5;
+    self.message.layer.borderColor=[UIColor colorWithRed:0.88 green:0.90 blue:0.96 alpha:1].CGColor;
+    UIView *pad=[[UIView alloc] initWithFrame:CGRectMake(0,0,12,10)];
+    self.message.leftView=pad;self.message.leftViewMode=UITextFieldViewModeAlways;
+    self.message.placeholder=@"向 AI 提问…";
+    self.message.clearButtonMode=UITextFieldViewModeWhileEditing;
+    self.message.returnKeyType=UIReturnKeySend;
     self.message.delegate=self;
-    [self.view addSubview:self.message];
+    [self.footerBar addSubview:self.message];
 
-    self.sendButton=[UIButton buttonWithType:UIButtonTypeSystem];
-    self.sendButton.frame=CGRectMake(w-76,h-83,69,49);
-    self.sendButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleTopMargin;
+    self.sendButton=[UIButton buttonWithType:UIButtonTypeCustom];
     [self.sendButton setTitle:@"发送" forState:UIControlStateNormal];
+    self.sendButton.titleLabel.font=[UIFont boldSystemFontOfSize:14];
+    [self styleNavigationButton:self.sendButton filled:YES];
+    self.sendButton.layer.cornerRadius=11;
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.sendButton];
+    [self.footerBar addSubview:self.sendButton];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardWillShow:)
       name:UIKeyboardWillShowNotification object:nil];
@@ -114,6 +164,11 @@
     self.conversationID=existing.count?existing[0][@"id"]:[XFChatStore createConversation];
     [self loadConversation:self.conversationID];
     [self refreshStatus];
+    [self layoutForKeyboard:0];
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self layoutForKeyboard:self.keyboardOffset];
 }
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -135,11 +190,16 @@
 }
 - (void)keyboardWillHide:(NSNotification *)n {[self layoutForKeyboard:0];}
 - (void)layoutForKeyboard:(CGFloat)height {
+    self.keyboardOffset=height;
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    self.tools.frame=CGRectMake(5,h-139-height,w-10,48);
-    self.message.frame=CGRectMake(10,h-83-height,w-93,49);
-    self.sendButton.frame=CGRectMake(w-76,h-83-height,69,49);
-    self.chat.frame=CGRectMake(9,89,w-18,MAX(100,h-237-height));
+    CGFloat top=88,footerHeight=125;
+    CGFloat footerY=h-footerHeight-height;
+    if(footerY<top+96)footerY=top+96;
+    self.chat.frame=CGRectMake(0,top,w,footerY-top);
+    self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
+    self.tools.frame=CGRectMake(10,7,w-20,42);
+    self.message.frame=CGRectMake(11,60,w-94,44);
+    self.sendButton.frame=CGRectMake(w-75,60,64,44);
 }
 - (BOOL)textFieldShouldReturn:(UITextField *)field { [self sendTapped];return NO;}
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
@@ -165,18 +225,15 @@
     NSDictionary *item=[XFChatStore conversationForID:cid];
     self.history=[item[@"messages"] mutableCopy]?:[NSMutableArray array];
     self.lastAnswer=nil;
-    NSMutableString *display=[NSMutableString string];
     for(NSDictionary *m in self.history) {
-        NSString *role=[m[@"role"] isEqualToString:@"user"]?@"我":@"小斐";
-        [display appendFormat:@"%@：%@\n\n",role,m[@"content"]];
-        if([m[@"role"] isEqualToString:@"assistant"]) self.lastAnswer=m[@"content"];
+        if([m[@"role"] isEqualToString:@"assistant"])self.lastAnswer=m[@"content"];
     }
-    self.chat.text=display.length?display:@"新对话已创建，可以开始聊天。";
+    [self.chat showConversation:self.history];
     self.pendingFileText=nil;self.pendingImage=nil;
 }
 - (void)appendLine:(NSString *)line {
-    self.chat.text=[self.chat.text stringByAppendingFormat:@"\n\n%@",line];
-    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+    if([line hasPrefix:@"我："]) [self.chat addMessage:[line substringFromIndex:2] fromUser:YES];
+    else [self.chat showNotice:line];
 }
 - (void)addExchange:(NSString *)question answer:(NSString *)answer {
     if(question.length) [self.history addObject:@{@"role":@"user",@"content":question}];
@@ -314,11 +371,12 @@
     }
 }
 - (void)showStreamingAnswer {
-    NSString *txt=[self.chat.text copy];
-    NSRange r=[txt rangeOfString:@"\n\n小斐（回复中）："];
-    if(r.location!=NSNotFound) txt=[txt substringToIndex:r.location];
-    self.chat.text=[txt stringByAppendingFormat:@"\n\n小斐（回复中）：%@",self.streamText];
-    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+    // UIKit label, no HTML engine or animated blur.
+    static CFAbsoluteTime lastPaint=0;
+    CFAbsoluteTime now=CFAbsoluteTimeGetCurrent();
+    if(now-lastPaint<0.12)return;
+    lastPaint=now;
+    [self.chat updateStreaming:self.streamText];
 }
 - (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
     if(connection!=self.connection)return;
@@ -351,11 +409,7 @@
         }
     }
     if(!answer.length) {self.status.text=@"API 未返回可用文字，请检查模型是否支持 Chat Completions";return;}
-    NSString *txt=[self.chat.text copy];
-    NSRange r=[txt rangeOfString:@"\n\n小斐（回复中）："];
-    if(r.location!=NSNotFound) txt=[txt substringToIndex:r.location];
-    self.chat.text=[txt stringByAppendingFormat:@"\n\n小斐：%@",answer];
-    [self.chat scrollRangeToVisible:NSMakeRange(self.chat.text.length,0)];
+    [self.chat finishStreaming:answer];
     [self addExchange:self.sendingContent answer:answer];
     self.status.text=@"回复完成，已保存到历史对话";
 }
