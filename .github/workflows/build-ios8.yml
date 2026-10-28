@@ -15,6 +15,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git curl make clang lld perl rsync zip unzip fakeroot libxml2 xz-utils
       - name: Install Theos and iOS 9.3 SDK
+        env:
+          THEOS: /home/runner/theos
         run: |
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
           mkdir -p "$HOME/theos/sdks"
