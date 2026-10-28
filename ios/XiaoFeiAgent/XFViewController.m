@@ -13,7 +13,7 @@
 
 - (NSArray *)providers {
     return @[
-      @{@"id":@"deepseek", @"name":@"DeepSeek", @"url":@"https://api.deepseek.com/chat/completions", @"model":@"deepseek-flash"},
+      @{@"id":@"deepseek", @"name":@"DeepSeek", @"url":@"https://api.deepseek.com/chat/completions", @"model":@"deepseek-chat"},
       @{@"id":@"qwen", @"name":@"通义千问", @"url":@"https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", @"model":@"qwen-plus"},
       @{@"id":@"kimi", @"name":@"Kimi", @"url":@"https://api.moonshot.cn/v1/chat/completions", @"model":@"moonshot-v1-8k"},
       @{@"id":@"glm", @"name":@"智谱 GLM", @"url":@"https://open.bigmodel.cn/api/paas/v4/chat/completions", @"model":@"glm-4-flash"},
