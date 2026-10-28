@@ -6,7 +6,7 @@
         attributes:@{NSFilePosixPermissions:@0700,NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} error:NULL];
     return [root stringByAppendingPathComponent:@"chats.plist"];
 }
-+ (NSMutableArray *)load {
++ (NSMutableArray *)loadChats {
     NSArray *all=[NSArray arrayWithContentsOfFile:[self path]];
     return all?[all mutableCopy]:[NSMutableArray array];
 }
@@ -17,14 +17,14 @@
             ofItemAtPath:path error:NULL];
     }
 }
-+ (NSArray *)conversations {return [self load];}
++ (NSArray *)conversations {return [self loadChats];}
 + (NSDictionary *)conversationForID:(NSString *)cid {
-    for(NSDictionary *item in [self load]) if([item[@"id"] isEqualToString:cid]) return item;
+    for(NSDictionary *item in [self loadChats]) if([item[@"id"] isEqualToString:cid]) return item;
     return nil;
 }
 + (NSString *)createConversation {
     NSString *cid=[[NSUUID UUID] UUIDString];
-    NSMutableArray *all=[self load];
+    NSMutableArray *all=[self loadChats];
     [all insertObject:@{@"id":cid,@"title":@"新对话",@"messages":@[],
         @"updated":@([[NSDate date] timeIntervalSince1970])} atIndex:0];
     [self persist:all];
@@ -32,7 +32,7 @@
 }
 + (void)saveConversationID:(NSString *)cid messages:(NSArray *)messages {
     if(!cid.length) return;
-    NSMutableArray *all=[self load];
+    NSMutableArray *all=[self loadChats];
     NSInteger index=NSNotFound;
     NSDictionary *before=nil;
     for(NSUInteger i=0;i<all.count;i++) if([all[i][@"id"] isEqualToString:cid]) {index=(NSInteger)i;before=all[i];break;}
@@ -59,7 +59,7 @@
 }
 + (void)renameConversationID:(NSString *)cid title:(NSString *)title {
     if(!title.length) return;
-    NSMutableArray *all=[self load];
+    NSMutableArray *all=[self loadChats];
     for(NSInteger i=0;i<(NSInteger)all.count;i++) if([all[i][@"id"] isEqualToString:cid]) {
         NSMutableDictionary *d=[all[i] mutableCopy];d[@"title"]=title;
         all[i]=d;break;
@@ -67,7 +67,7 @@
     [self persist:all];
 }
 + (void)deleteConversationID:(NSString *)cid {
-    NSMutableArray *all=[self load];
+    NSMutableArray *all=[self loadChats];
     NSIndexSet *set=[all indexesOfObjectsPassingTest:^BOOL(NSDictionary *d,NSUInteger i,BOOL *stop){
         return [d[@"id"] isEqualToString:cid];
     }];
