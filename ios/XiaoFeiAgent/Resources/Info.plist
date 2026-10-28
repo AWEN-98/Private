@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.finn.xiaofeiagent</string>
+<key>CFBundleDisplayName</key><string>小斐 AI</string>
+<key>CFBundleName</key><string>XiaoFeiAgent</string>
+<key>CFBundleExecutable</key><string>XiaoFeiAgent</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>2</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>MinimumOSVersion</key><string>8.0</string>
+<key>LSRequiresIPhoneOS</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>用于语音输入</string>
+</dict></plist>
