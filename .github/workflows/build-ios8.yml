@@ -33,6 +33,7 @@ jobs:
           ln -s "$HOME/theos" .theos-link
           cd ios/XiaoFeiAgent
           python3 gen_icons.py
+          chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 THEOS="$HOME/theos" TARGET=iphone:clang:9.3:8.0 ARCHS=armv7
           ls -lh packages/*.deb
       - name: Upload installable package
