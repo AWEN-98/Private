@@ -1,0 +1,36 @@
+name: Build iOS 8 rootful DEB
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl make clang lld perl rsync zip unzip fakeroot libxml2 xz-utils
+      - name: Install Theos and iOS 9.3 SDK
+        run: |
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/sdks"
+          "$HOME/theos/bin/install-sdk" iPhoneOS9.3
+          test -f "$HOME/theos/sdks/iPhoneOS9.3.sdk/System/Library/Frameworks/UIKit.framework/Headers/UIKit.h"
+      - name: Compile armv7 and package
+        env:
+          THEOS: ${{ github.workspace }}/.theos-link
+        run: |
+          ln -s "$HOME/theos" .theos-link
+          cd ios/XiaoFeiAgent
+          make package FINALPACKAGE=1 THEOS="$HOME/theos" TARGET=iphone:clang:9.3:8.0 ARCHS=armv7
+          ls -lh packages/*.deb
+      - name: Upload installable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaofei-agent-rootful-deb
+          path: ios/XiaoFeiAgent/packages/*.deb
+          if-no-files-found: error
