@@ -499,6 +499,7 @@
         return;
     }
     NSString *sent=msg;
+    NSString *imageName=nil;
     if(self.pendingFileText.length) {
         msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
         sent=[sent stringByAppendingString:@" [文本文件]"];
@@ -534,6 +535,11 @@
             [XFDiagnostics record:@"图片编码失败" code:0 detail:@"JPEG 编码结果为空"];
             return;
         }
+        imageName=[XFChatStore saveImage:resized];
+        if(!imageName.length){
+            self.status.text=@"保存图片预览失败，请检查剩余空间";
+            return;
+        }
         NSString *uri=[@"data:image/jpeg;base64," stringByAppendingString:encoded];
         [messages addObject:@{@"role":@"user",@"content":@[
             @{@"type":@"text",@"text":msg},
@@ -562,11 +568,14 @@
     self.usingCompatibilityMode=compatible;
     self.lastChatUsedSearch=web;
     self.sendingContent=sent;
+    self.sendingImageName=imageName;
     self.lastSubmittedDraft=self.message.text?:@"";
     [self.message resignFirstResponder];self.message.text=@"";
     [self textViewDidChange:self.message];
     self.pendingFileText=nil;self.pendingImage=nil;
-    [self appendLine:[NSString stringWithFormat:@"我：%@",sent]];
+    [self layoutForKeyboard:self.keyboardOffset];
+    if(imageName.length)[self.chat addImageMessage:sent imageName:imageName];
+    else [self appendLine:[NSString stringWithFormat:@"我：%@",sent]];
     self.streamBuffer=[NSMutableData data];self.streamText=[NSMutableString string];self.httpCode=0;
     self.chatPayloadExceeded=NO;
     [self setWorking:YES];self.status.text=web?@"正在联网搜索…":@"正在生成回复…";
@@ -790,9 +799,19 @@
 }
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info {
     UIImage *img=info[UIImagePickerControllerOriginalImage];
-    self.pendingImage=img;
+    if(img.size.width>0 && img.size.height>0){
+        // UIImagePickerController can return huge camera originals on iOS 8.
+        // Keep only a 640px copy in memory on the 512MB iPhone 4S.
+        CGFloat scale=MIN(1.0,640.0/MAX(img.size.width,img.size.height));
+        CGSize size=CGSizeMake(MAX(1,round(img.size.width*scale)),MAX(1,round(img.size.height*scale)));
+        UIGraphicsBeginImageContextWithOptions(size,YES,1.0);
+        [img drawInRect:CGRectMake(0,0,size.width,size.height)];
+        self.pendingImage=UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+    }else self.pendingImage=nil;
     [picker dismissViewControllerAnimated:YES completion:nil];
-    self.status.text=img?@"已选择图片，发送问题时将使用视觉模型":@"图片读取失败";
+    [self layoutForKeyboard:self.keyboardOffset];
+    self.status.text=self.pendingImage?@"图片已附加，缩略图可预览或移除":@"图片读取失败";
 }
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
     [picker dismissViewControllerAnimated:YES completion:nil];
