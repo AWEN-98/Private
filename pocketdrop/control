@@ -1,0 +1,8 @@
+Package: com.finn.pocketdrop
+Name: PocketDrop
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: Lightweight WiFi file and clipboard transfer for jailbroken iOS 8
+Maintainer: Finn
+Author: Finn
+Section: Utilities
