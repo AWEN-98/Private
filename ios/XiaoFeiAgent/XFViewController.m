@@ -6,11 +6,12 @@
 #import "XFTextImportController.h"
 #import "XFPromptToolsController.h"
 #import "XFCompareController.h"
+#import "XFDiagnostics.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate>
+@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate,UITextViewDelegate>
 @property(nonatomic,strong) XFChatView *chat;
 @property(nonatomic,strong) UIView *headerBar;
 @property(nonatomic,strong) UIView *footerBar;
@@ -18,7 +19,9 @@
 @property(nonatomic,strong) UIButton *modelsButton;
 @property(nonatomic,strong) UIButton *sessionsButton;
 @property(nonatomic,assign) CGFloat keyboardOffset;
-@property(nonatomic,strong) UITextField *message;
+@property(nonatomic,strong) UITextView *message;
+@property(nonatomic,strong) UILabel *messagePlaceholder;
+@property(nonatomic,assign) BOOL chatPayloadExceeded;
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
 @property(nonatomic,strong) UIButton *pasteButton;
@@ -133,7 +136,7 @@
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
     NSArray *items=@[@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"]];
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
     CGFloat x=1;
     for(NSArray *item in items){
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -154,21 +157,24 @@
     }
     self.tools.contentSize=CGSizeMake(x,42);
 
-    self.message=[[UITextField alloc] initWithFrame:CGRectZero];
-    self.message.borderStyle=UITextBorderStyleNone;
+    self.message=[[UITextView alloc] initWithFrame:CGRectZero];
+    self.message.scrollEnabled=YES;
     self.message.backgroundColor=[UIColor colorWithRed:0.965 green:0.973 blue:0.991 alpha:1];
     self.message.textColor=[self ink];
     self.message.font=[UIFont systemFontOfSize:14.5];
     self.message.layer.cornerRadius=12;
     self.message.layer.borderWidth=0.5;
     self.message.layer.borderColor=[UIColor colorWithRed:0.88 green:0.90 blue:0.96 alpha:1].CGColor;
-    UIView *pad=[[UIView alloc] initWithFrame:CGRectMake(0,0,12,10)];
-    self.message.leftView=pad;self.message.leftViewMode=UITextFieldViewModeAlways;
-    self.message.placeholder=@"向 AI 提问…";
-    self.message.clearButtonMode=UITextFieldViewModeWhileEditing;
-    self.message.returnKeyType=UIReturnKeySend;
+    self.message.textContainerInset=UIEdgeInsetsMake(8,7,7,7);
+    self.message.returnKeyType=UIReturnKeyDefault;
     self.message.delegate=self;
     [self.footerBar addSubview:self.message];
+    self.messagePlaceholder=[[UILabel alloc] initWithFrame:CGRectZero];
+    self.messagePlaceholder.text=@"向 AI 提问…";
+    self.messagePlaceholder.textColor=[UIColor colorWithWhite:0.60 alpha:1];
+    self.messagePlaceholder.font=[UIFont systemFontOfSize:14.5];
+    self.messagePlaceholder.userInteractionEnabled=NO;
+    [self.footerBar addSubview:self.messagePlaceholder];
 
     self.sendButton=[UIButton buttonWithType:UIButtonTypeCustom];
     [self.sendButton setTitle:@"发送" forState:UIControlStateNormal];
@@ -257,11 +263,13 @@
         CGFloat inputW=MAX(60,w-2*margin-2*gap-pasteW-sendW);
         CGFloat y=MAX(2,(footerHeight-44)/2);
         self.message.frame=CGRectMake(margin,y,inputW,MIN(44,footerHeight));
+        self.messagePlaceholder.frame=CGRectMake(margin+11,y+6,inputW-17,27);
         self.pasteButton.frame=CGRectMake(margin+inputW+gap,y,pasteW,MIN(44,footerHeight));
         self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,MIN(44,footerHeight));
     } else {
         self.tools.frame=CGRectMake(10,7,w-20,42);
-        self.message.frame=CGRectMake(11,60,w-94,44);
+        self.message.frame=CGRectMake(11,57,w-94,53);
+        self.messagePlaceholder.frame=CGRectMake(22,65,w-110,26);
         self.sendButton.frame=CGRectMake(w-75,60,64,44);
     }
 }
@@ -275,8 +283,21 @@
     if(selection) [self.message replaceRange:selection withText:clip];
     else self.message.text=[(self.message.text?:@"") stringByAppendingString:clip];
     [self.message becomeFirstResponder];
+    [self textViewDidChange:self.message];
 }
-- (BOOL)textFieldShouldReturn:(UITextField *)field { [self sendTapped];return NO;}
+- (void)textViewDidChange:(UITextView *)view {
+    if(view!=self.message)return;
+    self.messagePlaceholder.hidden=view.text.length>0;
+    if(self.conversationID.length){
+        NSString *value=view.text?:@"";
+        if(value.length>5000)value=[value substringToIndex:5000];
+        [[NSUserDefaults standardUserDefaults] setObject:value
+          forKey:[self draftKeyForConversation:self.conversationID]];
+    }
+}
+- (NSString *)draftKeyForConversation:(NSString *)cid {
+    return [@"xf_draft_" stringByAppendingString:cid?:@"default"];
+}
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
@@ -305,6 +326,8 @@
     }
     [self.chat showConversation:self.history];
     self.pendingFileText=nil;self.pendingImage=nil;
+    self.message.text=[[NSUserDefaults standardUserDefaults] stringForKey:[self draftKeyForConversation:cid]]?:@"";
+    self.messagePlaceholder.hidden=self.message.text.length>0;
 }
 - (void)appendLine:(NSString *)line {
     if([line hasPrefix:@"我："]) [self.chat addMessage:[line substringFromIndex:2] fromUser:YES];
@@ -333,10 +356,27 @@
     if([name isEqualToString:@"file"]) {[self pickFile];return;}
     if([name isEqualToString:@"prompts"]) {[self showPromptToolbox];return;}
     if([name isEqualToString:@"compare"]) {[self showComparison];return;}
+    if([name isEqualToString:@"diagnostics"]) {[self showDiagnostics];return;}
     if([name isEqualToString:@"record"]) {[self toggleRecord];return;}
     if([name isEqualToString:@"tts"]) {[self speakLastAnswer];return;}
     if([name isEqualToString:@"image"]) {[self generateImage];return;}
     if([name isEqualToString:@"web"]) {[self sendAsSearch];return;}
+}
+- (void)showDiagnostics {
+    NSString *report=[XFDiagnostics report];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"运行诊断"
+      message:report.length>1300?[[report substringToIndex:1300] stringByAppendingString:@"…"]:report
+      preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"复制全部" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [UIPasteboard generalPasteboard].string=report;
+        self.status.text=@"已复制诊断日志（不含 API Key 或聊天正文）";
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清空记录" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
+        [XFDiagnostics clear];
+        self.status.text=@"诊断记录已清空";
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (NSDictionary *)profileFor:(NSString *)capability {
     NSDictionary *p=[XFModelsController activeProfileForCapability:capability];
@@ -353,8 +393,8 @@
     }
     NSString *key=[self secretFor:p];
     if(!key.length){[self showAlert:@"缺少密钥" detail:@"请编辑模型配置并填写 API Key。"];return nil;}
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod=@"POST";req.timeoutInterval=120;
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:75];
+    req.HTTPMethod=@"POST";
     [req setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
     return req;
 }
@@ -424,9 +464,11 @@
     self.lastChatUsedSearch=web;
     self.sendingContent=sent;
     [self.message resignFirstResponder];self.message.text=@"";
+    [self textViewDidChange:self.message];
     self.pendingFileText=nil;self.pendingImage=nil;
     [self appendLine:[NSString stringWithFormat:@"我：%@",sent]];
     self.streamBuffer=[NSMutableData data];self.streamText=[NSMutableString string];self.httpCode=0;
+    self.chatPayloadExceeded=NO;
     [self setWorking:YES];self.status.text=web?@"正在联网搜索…":@"正在生成回复…";
     self.connection=[[NSURLConnection alloc] initWithRequest:req delegate:self startImmediately:YES];
 }
@@ -629,6 +671,7 @@
     __weak XFViewController *weakSelf=self;
     tools.onUsePrompt=^(NSString *text){
         weakSelf.message.text=text;
+        [weakSelf textViewDidChange:weakSelf.message];
         weakSelf.status.text=@"提示词已填入；可编辑后发送";
     };
     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:tools];
@@ -740,7 +783,7 @@
         if(code>=300 || ![text isKindOfClass:[NSString class]]){
             self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld",(long)code];return;
         }
-        self.message.text=text;self.status.text=@"已识别语音，点击发送";
+        self.message.text=text;[self textViewDidChange:self.message];self.status.text=@"已识别语音，点击发送";
     }];
 }
 - (void)speakLastAnswer {
