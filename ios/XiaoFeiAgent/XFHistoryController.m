@@ -7,6 +7,14 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title=@"历史对话";
+    self.tableView.rowHeight=66;
+    self.tableView.backgroundColor=[UIColor colorWithRed:0.964 green:0.972 blue:0.986 alpha:1];
+    self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
+    self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
+    self.navigationController.navigationBar.translucent=NO;
+    self.navigationController.navigationBar.barTintColor=[UIColor whiteColor];
+    self.navigationController.navigationBar.tintColor=[UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];
+    self.navigationController.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:[UIColor colorWithRed:0.15 green:0.20 blue:0.31 alpha:1]};
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(doneTapped)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(newTapped)];
     [self reload];
@@ -23,9 +31,15 @@
     UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:@"history"];
     if(!cell) cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"history"];
     NSDictionary *item=self.items[ip.row];
+    cell.backgroundColor=[UIColor whiteColor];
+    cell.tintColor=[UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];
     cell.textLabel.text=item[@"title"]?:@"新对话";
+    cell.textLabel.font=[UIFont boldSystemFontOfSize:15];
+    cell.textLabel.textColor=[UIColor colorWithRed:0.15 green:0.20 blue:0.31 alpha:1];
     NSDate *date=[NSDate dateWithTimeIntervalSince1970:[item[@"updated"] doubleValue]];
     cell.detailTextLabel.text=[NSDateFormatter localizedStringFromDate:date dateStyle:NSDateFormatterShortStyle timeStyle:NSDateFormatterShortStyle];
+    cell.detailTextLabel.font=[UIFont systemFontOfSize:12];
+    cell.detailTextLabel.textColor=[UIColor colorWithRed:0.48 green:0.51 blue:0.61 alpha:1];
     cell.accessoryType=UITableViewCellAccessoryDetailButton;
     return cell;
 }
