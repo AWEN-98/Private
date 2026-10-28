@@ -329,6 +329,7 @@ static void XFDropAccount(NSString *aid){
 - (void)editor:(NSDictionary *)account {
     XFAPIEditor *editor=[[XFAPIEditor alloc] init];
     editor.account=account;
+    __weak XFAPIEditor *weakEditor=editor;
     editor.onSaved=^(NSDictionary *newAccount,NSString *newKey) {
         if(newKey.length) {
             OSStatus error=XFSaveKey(newAccount[@"id"],newKey);
@@ -340,7 +341,7 @@ static void XFDropAccount(NSString *aid){
             UIAlertController *e=[UIAlertController alertControllerWithTitle:@"未填写密钥"
               message:@"首次添加这个 API 服务需要填写 API Key。" preferredStyle:UIAlertControllerStyleAlert];
             [e addAction:[UIAlertAction actionWithTitle:@"继续填写" style:UIAlertActionStyleDefault handler:nil]];
-            [editor presentViewController:e animated:YES completion:nil];return;
+            [weakEditor presentViewController:e animated:YES completion:nil];return;
         }
         [self completeAccount:newAccount];
     };
