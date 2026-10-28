@@ -248,7 +248,11 @@ static NSString * const kXFService = @"com.finn.xiaofeiagent.profiles";
             // One provider may have multiple model profiles sharing one API key.
             NSString *reuse=nil;
             for(NSDictionary *other in self.profiles) {
-                if([other[@"provider"] isEqualToString:saved[@"provider"]]) {
+                NSString *newHost=[[NSURL URLWithString:saved[@"endpoint"]] host];
+                NSString *otherHost=[[NSURL URLWithString:other[@"endpoint"]] host];
+                BOOL safeProvider=![saved[@"provider"] hasPrefix:@"自定义"];
+                if(safeProvider && newHost.length && [newHost isEqualToString:otherHost] &&
+                   [other[@"provider"] isEqualToString:saved[@"provider"]]) {
                     reuse=[XFModelsController secretForProfile:other];
                     if(reuse.length) break;
                 }
