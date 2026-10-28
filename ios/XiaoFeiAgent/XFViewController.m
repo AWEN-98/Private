@@ -3,11 +3,14 @@
 #import "XFChatStore.h"
 #import "XFHistoryController.h"
 #import "XFChatView.h"
+#import "XFTextImportController.h"
+#import "XFPromptToolsController.h"
+#import "XFCompareController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,UIDocumentPickerDelegate,NSURLConnectionDataDelegate>
+@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate>
 @property(nonatomic,strong) XFChatView *chat;
 @property(nonatomic,strong) UIView *headerBar;
 @property(nonatomic,strong) UIView *footerBar;
@@ -19,6 +22,10 @@
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIButton *sendButton;
 @property(nonatomic,strong) UIButton *pasteButton;
+@property(nonatomic,strong) UIButton *recordButton;
+@property(nonatomic,strong) UILabel *recordingBadge;
+@property(nonatomic,strong) NSTimer *recordTimer;
+@property(nonatomic,strong) NSDate *recordStarted;
 @property(nonatomic,strong) UIScrollView *tools;
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,copy) NSString *conversationID;
@@ -102,6 +109,16 @@
     self.chat=[[XFChatView alloc] initWithFrame:CGRectZero];
     self.chat.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.chat];
+    self.recordingBadge=[[UILabel alloc] initWithFrame:CGRectMake(6,94,w-12,30)];
+    self.recordingBadge.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.recordingBadge.font=[UIFont boldSystemFontOfSize:13];
+    self.recordingBadge.textAlignment=NSTextAlignmentCenter;
+    self.recordingBadge.layer.cornerRadius=7;
+    self.recordingBadge.layer.masksToBounds=YES;
+    self.recordingBadge.backgroundColor=[UIColor colorWithRed:.86 green:.19 blue:.23 alpha:1];
+    self.recordingBadge.textColor=[UIColor whiteColor];
+    self.recordingBadge.hidden=YES;
+    [self.view addSubview:self.recordingBadge];
 
     self.footerBar=[[UIView alloc] initWithFrame:CGRectZero];
     self.footerBar.backgroundColor=[UIColor whiteColor];
@@ -116,7 +133,7 @@
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
     NSArray *items=@[@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"]];
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"]];
     CGFloat x=1;
     for(NSArray *item in items){
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -130,6 +147,7 @@
         button.layer.borderWidth=0.5;
         button.layer.borderColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.96 alpha:1].CGColor;
         [button setAccessibilityIdentifier:item[1]];
+        if([item[1] isEqualToString:@"record"])self.recordButton=button;
         [button addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self.tools addSubview:button];
         x+=bw+7;
@@ -190,6 +208,7 @@
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.connection cancel];
+    [self.recordTimer invalidate];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -232,6 +251,7 @@
     CGFloat footerY=MAX(0,availableBottom-footerHeight);
     self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
+    self.recordingBadge.frame=CGRectMake(6,typing?4:94,w-12,30);
     if(typing){
         CGFloat margin=8,gap=6,pasteW=46,sendW=58;
         CGFloat inputW=MAX(60,w-2*margin-2*gap-pasteW-sendW);
@@ -311,6 +331,8 @@
     }
     if([name isEqualToString:@"photo"]) {[self pickImage];return;}
     if([name isEqualToString:@"file"]) {[self pickFile];return;}
+    if([name isEqualToString:@"prompts"]) {[self showPromptToolbox];return;}
+    if([name isEqualToString:@"compare"]) {[self showComparison];return;}
     if([name isEqualToString:@"record"]) {[self toggleRecord];return;}
     if([name isEqualToString:@"tts"]) {[self speakLastAnswer];return;}
     if([name isEqualToString:@"image"]) {[self generateImage];return;}
@@ -383,7 +405,14 @@
         [messages addObject:@{@"role":@"user",@"content":msg}];
     }
     NSMutableURLRequest *req=[self requestForProfile:profile];if(!req)return;
-    BOOL compatible=[[NSUserDefaults standardUserDefaults] boolForKey:[self compatibilityKeyFor:profile]];
+    NSString *probeKey=[NSString stringWithFormat:@"%@|%@",profile[@"account_id"]?:@"",profile[@"model"]?:@""];
+    NSDictionary *probe=[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"xf_model_probe_results_v1"] objectForKey:probeKey];
+    NSTimeInterval elapsed=[[NSDate date] timeIntervalSince1970]-[probe[@"time"] doubleValue];
+    BOOL selfTestedOK=([probe[@"status"] isEqualToString:@"ok"] && elapsed>=0 && elapsed<24*3600);
+    // A successful self-check used a minimal non-streaming chat payload.
+    // Reuse that format for this model, instead of immediately making a
+    // stream=true request which some providers reject with HTTP 400.
+    BOOL compatible=[[NSUserDefaults standardUserDefaults] boolForKey:[self compatibilityKeyFor:profile]] || selfTestedOK;
     if(compatible && messages.count && [messages[0][@"role"] isEqualToString:@"system"])[messages removeObjectAtIndex:0];
     NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":@( !compatible )} mutableCopy];
     if(web && !compatible) payload[@"web_search_options"]=@{};
@@ -583,45 +612,109 @@
     [picker dismissViewControllerAnimated:YES completion:nil];
 }
 - (void)pickFile {
-    UIDocumentPickerViewController *picker=[[UIDocumentPickerViewController alloc]
-         initWithDocumentTypes:@[@"public.plain-text",@"public.text"] inMode:UIDocumentPickerModeImport];
-    picker.delegate=self;
-    [self presentViewController:picker animated:YES completion:nil];
+    // Legacy iOS 8 devices may not have a working document provider.
+    // Use native in-app paste/edit instead of launching UIDocumentPicker.
+    XFTextImportController *editor=[[XFTextImportController alloc] init];
+    __weak XFViewController *weakSelf=self;
+    editor.onUseText=^(NSString *text){
+        weakSelf.pendingFileText=text;
+        weakSelf.status.text=[NSString stringWithFormat:@"已添加文本（%lu 字），输入问题后发送",(unsigned long)text.length];
+        [weakSelf.chat showNotice:@"文本已经添加到当前问题"];
+    };
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:editor];
+    [self presentViewController:nav animated:YES completion:nil];
 }
-- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentAtURL:(NSURL *)url {
-    NSData *bytes=[NSData dataWithContentsOfURL:url options:0 error:NULL];
-    if(!bytes || bytes.length>512*1024) {
-        [self showAlert:@"文件过大或无法读取" detail:@"目前只支持 TXT / MD 等纯文本文件，单文件不得超过 512KB。"];return;
-    }
-    NSString *text=[[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding];
-    if(!text) text=[[NSString alloc] initWithData:bytes encoding:NSUTF16StringEncoding];
-    if(!text) {[self showAlert:@"文件格式不支持" detail:@"当前版本暂不支持 PDF 的文本提取。"];return;}
-    if(text.length>12000) text=[text substringToIndex:12000];
-    self.pendingFileText=text;self.status.text=@"文本已添加，发送问题即可分析";
+- (void)showPromptToolbox {
+    XFPromptToolsController *tools=[[XFPromptToolsController alloc] initWithStyle:UITableViewStyleGrouped];
+    __weak XFViewController *weakSelf=self;
+    tools.onUsePrompt=^(NSString *text){
+        weakSelf.message.text=text;
+        weakSelf.status.text=@"提示词已填入；可编辑后发送";
+    };
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:tools];
+    [self presentViewController:nav animated:YES completion:nil];
 }
-- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {}
+- (void)showComparison {
+    XFCompareController *controller=[[XFCompareController alloc] init];
+    controller.initialPrompt=self.message.text;
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:controller];
+    controller.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc]
+       initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(closeComparison)];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+- (void)closeComparison {[self dismissViewControllerAnimated:YES completion:nil];}
 
-- (void)toggleRecord {
-    if(self.isRecording) {
-        [self.recorder stop];self.isRecording=NO;
-        [self transcribeRecording];return;
+- (void)setRecordingDisplay:(BOOL)recording {
+    self.recordingBadge.hidden=!recording;
+    if(recording){
+        self.recordButton.backgroundColor=[UIColor colorWithRed:.84 green:.18 blue:.21 alpha:1];
+        [self.recordButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self.recordButton setTitle:@"■ 停止录音" forState:UIControlStateNormal];
+        [self.recordingBadge setText:@"● 正在录音 00:00 · 点击停止"];
+    } else {
+        self.recordButton.backgroundColor=[UIColor colorWithRed:.954 green:.962 blue:.988 alpha:1];
+        [self.recordButton setTitleColor:[self ink] forState:UIControlStateNormal];
+        [self.recordButton setTitle:@"● 录音" forState:UIControlStateNormal];
     }
+}
+- (void)updateRecordingClock:(NSTimer *)timer {
+    if(!self.isRecording)return;
+    if(![self.recorder isRecording]) {
+        [self finishRecording];
+        return;
+    }
+    NSTimeInterval elapsed=[[NSDate date] timeIntervalSinceDate:self.recordStarted];
+    NSInteger seconds=MAX(0,(NSInteger)elapsed);
+    self.recordingBadge.text=[NSString stringWithFormat:@"● 正在录音 %02ld:%02ld · 点击停止",
+         (long)(seconds/60),(long)(seconds%60)];
+    self.status.text=@"录音中，点红色「停止录音」结束";
+    if(seconds>=60)[self finishRecording];
+}
+- (void)finishRecording {
+    if(!self.isRecording)return;
+    self.isRecording=NO;
+    [self.recorder stop];
+    [self.recordTimer invalidate];self.recordTimer=nil;
+    [self setRecordingDisplay:NO];
+    self.status.text=@"录音结束，正在识别语音…";
+    [self transcribeRecording];
+}
+- (void)toggleRecord {
+    if(self.isRecording){[self finishRecording];return;}
     NSDictionary *p=[self profileFor:@"stt"];if(!p)return;
     AVAudioSession *session=[AVAudioSession sharedInstance];
-    [session setCategory:AVAudioSessionCategoryPlayAndRecord error:NULL];
-    [session setActive:YES error:NULL];
+    NSError *sessionError=nil;
+    [session setCategory:AVAudioSessionCategoryPlayAndRecord error:&sessionError];
+    [session setActive:YES error:&sessionError];
+    if(sessionError){
+        [self showAlert:@"无法启动录音" detail:sessionError.localizedDescription];
+        return;
+    }
+    self.status.text=@"正在请求麦克风权限…";
     [session requestRecordPermission:^(BOOL granted) {
         [[NSOperationQueue mainQueue] addOperationWithBlock:^{
-            if(!granted){[self showAlert:@"没有麦克风权限" detail:@"请在系统设置中允许小斐 AI 录音。"];return;}
+            if(!granted){
+                self.status.text=@"未获得麦克风权限";
+                [self showAlert:@"没有麦克风权限" detail:@"请到系统设置允许小斐 AI 使用麦克风。"];return;
+            }
             NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"xf-recording.m4a"];
             NSDictionary *settings=@{AVFormatIDKey:@(kAudioFormatMPEG4AAC),
                 AVSampleRateKey:@16000,AVNumberOfChannelsKey:@1,
                 AVEncoderAudioQualityKey:@(AVAudioQualityMedium)};
-            self.recorder=[[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:path] settings:settings error:NULL];
-            if(![self.recorder prepareToRecord] || ![self.recorder recordForDuration:60]){
-                [self showAlert:@"录音失败" detail:@"请检查系统麦克风权限与存储空间。"];return;
+            NSError *error=nil;
+            self.recorder=[[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:path]
+                                                       settings:settings error:&error];
+            if(error || ![self.recorder prepareToRecord] || ![self.recorder recordForDuration:60]){
+                self.status.text=@"录音无法开始";
+                [self showAlert:@"录音失败" detail:error.localizedDescription?:@"检查麦克风权限及设备剩余空间。"];return;
             }
-            self.isRecording=YES;self.status.text=@"正在录音，点击「录音」结束，最长 60 秒";
+            self.isRecording=YES;
+            self.recordStarted=[NSDate date];
+            [self setRecordingDisplay:YES];
+            [self.recordTimer invalidate];
+            self.recordTimer=[NSTimer scheduledTimerWithTimeInterval:1.0 target:self
+                  selector:@selector(updateRecordingClock:) userInfo:nil repeats:YES];
+            self.status.text=@"正在录音，点击红色停止按钮结束";
         }];
     }];
 }
