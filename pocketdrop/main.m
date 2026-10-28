@@ -21,7 +21,7 @@ static NSString *PDIP(void){
     if(getifaddrs(&all)!=0)return @"无 Wi-Fi";
     NSString *out=@"无 Wi-Fi";
     for(struct ifaddrs *it=all;it;it=it->ifa_next){
-        if(it->ifa_addr && it->ifa_addr->sa_family==AF_INET && strcmp(it->ifa_name,"en0")==0){
+        if(it->ifa_addr && it->ifa_addr->sa_family==AF_INET && [[NSString stringWithUTF8String:it->ifa_name] isEqualToString:@"en0"]){
             char addr[INET_ADDRSTRLEN]={0};
             inet_ntop(AF_INET,&((struct sockaddr_in *)it->ifa_addr)->sin_addr,addr,sizeof(addr));
             out=[NSString stringWithUTF8String:addr];break;
