@@ -203,8 +203,9 @@
 
 
     NSArray *existing=[XFChatStore conversations];
-    self.conversationID=existing.count?existing[0][@"id"]:[XFChatStore createConversation];
-    [self loadConversation:self.conversationID];
+    NSString *firstConversation=existing.count?existing[0][@"id"]:[XFChatStore createConversation];
+    // Do not overwrite a saved draft before the first conversation is restored.
+    [self loadConversation:firstConversation];
     [self refreshStatus];
     [self layoutForKeyboard:0];
 }
