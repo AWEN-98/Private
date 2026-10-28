@@ -1,4 +1,5 @@
 name: Publish PocketDrop Direct Downloads
+# Verified packages in downloads/ are intentionally tracked
 on:
   push:
     paths:
