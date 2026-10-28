@@ -35,6 +35,17 @@ jobs:
           python3 gen_icons.py
           chmod 755 layout/DEBIAN/postinst
           make package FINALPACKAGE=1 THEOS="$HOME/theos" TARGET=iphone:clang:9.3:8.0 ARCHS=armv7
+          # Legacy Cydia/dpkg may reject .xz control.tar; repack both tar members as gzip.
+          original_deb="$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$original_deb"
+          mkdir -p repack_legacy
+          dpkg-deb -R "$original_deb" repack_legacy
+          chmod 755 repack_legacy/DEBIAN/postinst
+          dpkg-deb -Zgzip -z6 --build repack_legacy "$original_deb"
+          ar t "$original_deb" | grep -qx "control.tar.gz"
+          ar t "$original_deb" | grep -qx "data.tar.gz"
+          dpkg-deb -c "$original_deb" | grep -q 'XiaoFeiAgent.app/XiaoFeiAgent'
+          dpkg-deb -c "$original_deb" | grep -q 'XiaoFeiAgent.app/Info.plist'
           ls -lh packages/*.deb
       - name: Upload installable package
         uses: actions/upload-artifact@v4
