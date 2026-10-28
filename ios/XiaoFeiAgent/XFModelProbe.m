@@ -111,6 +111,7 @@ static NSTimeInterval const XFProbeFreshness=48*60*60;
             return;
         }
         NSString *reason=[self safeReason:data];
+        if(key.length) reason=[reason stringByReplacingOccurrencesOfString:key withString:@"[密钥已隐藏]"];
         NSString *lower=[reason lowercaseString];
         BOOL badModel=([lower containsString:@"model_not_found"] ||
           [lower containsString:@"model not found"] ||
