@@ -59,15 +59,25 @@ jobs:
           test -n "$original_deb"
           mkdir -p repack_legacy
           dpkg-deb -R "$original_deb" repack_legacy
-          dpkg-deb -Zgzip -z6 --build repack_legacy "$original_deb"
+          cp scripts/postinst repack_legacy/DEBIAN/postinst
+          chmod 755 repack_legacy/DEBIAN/postinst
+          # Theos files compiled as runner must install as root:wheel/root on iOS 8.
+          dpkg-deb --root-owner-group -Zgzip -z6 --build repack_legacy "$original_deb"
+          test "$(dpkg-deb -f "$original_deb" Version)" = "0.1.1"
           ar t "$original_deb" | grep -qx "control.tar.gz"
           ar t "$original_deb" | grep -qx "data.tar.gz"
+          dpkg-deb --ctrl-tarfile "$original_deb" | tar -tf - | grep -q 'postinst'
           dpkg-deb -c "$original_deb" | grep -q 'PocketDrop.app/PocketDrop'
+          mkdir -p manual
+          dpkg-deb -x "$original_deb" manual
+          (cd manual/Applications && zip -qr -X ../../packages/PocketDrop-iFile-manual.app.zip PocketDrop.app)
       - name: Upload PocketDrop package
         uses: actions/upload-artifact@v4
         with:
           name: pocketdrop-ios8-deb
-          path: pocketdrop/packages/*.deb
+          path: |
+            pocketdrop/packages/*.deb
+            pocketdrop/packages/*-manual.app.zip
           if-no-files-found: error
       - name: Upload installable package
         uses: actions/upload-artifact@v4
