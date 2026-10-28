@@ -119,6 +119,10 @@ static NSString *PDHTML(void){
 @property(nonatomic,copy) NSString *code;
 @property(nonatomic,assign) int listener;
 @property(nonatomic,assign) BOOL serving;
+@property(nonatomic,strong) UIScrollView *page;
+@property(nonatomic,assign) UIBackgroundTaskIdentifier backgroundTask;
+@property(nonatomic,assign) BOOL keepScreenAwake;
+
 @end
 @implementation PDApp
 - (void)notice:(NSString *)message {
@@ -155,7 +159,7 @@ static NSString *PDHTML(void){
 }
 - (void)serveClient:(int)client {
     @autoreleasepool {
-        struct timeval timeout={20,0};
+        struct timeval timeout={120,0};
         setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
         NSMutableData *received=[NSMutableData data];
         NSRange boundary=NSMakeRange(NSNotFound,0);
@@ -278,12 +282,14 @@ static NSString *PDHTML(void){
     if(bind(fd,(struct sockaddr *)&a,sizeof(a))!=0 || listen(fd,3)!=0){
         close(fd);self.state.text=@"端口 8765 已被占用";return;
     }
-    self.code=[NSString stringWithFormat:@"%06u",100000+arc4random_uniform(900000)];
+    // Keep one pairing code during an active app session; do not make the code permanent.
+    if(!self.code.length) self.code=[NSString stringWithFormat:@"%06u",100000+arc4random_uniform(900000)];
     self.codeLabel.text=[@"配对码  " stringByAppendingString:self.code];
     self.address.text=[NSString stringWithFormat:@"http://%@:%d",ip,PD_PORT];
     self.listener=fd;self.serving=YES;
+    [UIApplication sharedApplication].idleTimerDisabled=YES;
     [self.toggle setTitle:@"停止传输" forState:UIControlStateNormal];
-    self.state.text=@"已启动。电脑浏览器打开上方地址。";
+    self.state.text=@"已连接：保持此页打开可持续传输；暂时切到后台也会尽可能保持，iOS 8 到期会停止。";
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^{
         while(self.serving && self.listener==fd){
             struct sockaddr_in remote;socklen_t len=sizeof(remote);
@@ -296,6 +302,7 @@ static NSString *PDHTML(void){
 }
 - (void)stop {
     self.serving=NO;
+    [UIApplication sharedApplication].idleTimerDisabled=NO;
     if(self.listener>=0){int fd=self.listener;self.listener=-1;shutdown(fd,SHUT_RDWR);close(fd);}
     self.code=@"";
     self.codeLabel.text=@"配对码  ••••••";
@@ -332,13 +339,15 @@ static NSString *PDHTML(void){
 }
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opts {
     signal(SIGPIPE,SIG_IGN);
-    self.listener=-1;self.sharedText=@"";
+    self.listener=-1;self.sharedText=@"";self.backgroundTask=UIBackgroundTaskInvalid;
     PDDir();
     self.window=[[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     self.root=[UIViewController new];
     self.root.view.backgroundColor=[UIColor colorWithRed:.96 green:.97 blue:.99 alpha:1];
     CGFloat w=self.window.bounds.size.width;
     UIScrollView *scroll=[[UIScrollView alloc] initWithFrame:self.root.view.bounds];
+    self.page=scroll;
+    scroll.keyboardDismissMode=UIScrollViewKeyboardDismissModeInteractive;
     scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.root.view addSubview:scroll];
     [self label:@"PocketDrop" frame:CGRectMake(15,23,w-30,40) font:[UIFont boldSystemFontOfSize:25] on:scroll];
@@ -358,6 +367,10 @@ static NSString *PDHTML(void){
     self.table=[[UITableView alloc] initWithFrame:CGRectMake(15,460,w-30,190) style:UITableViewStylePlain];
     self.table.layer.cornerRadius=8;self.table.dataSource=self;self.table.delegate=self;self.table.rowHeight=47;
     [scroll addSubview:self.table];scroll.contentSize=CGSizeMake(w,688);
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardChanged:)
+      name:UIKeyboardWillChangeFrameNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardHidden:)
+      name:UIKeyboardWillHideNotification object:nil];
     [self reloadFiles];self.window.rootViewController=self.root;[self.window makeKeyAndVisible];
     return YES;
 }
@@ -378,7 +391,42 @@ static NSString *PDHTML(void){
     if(![self.document presentOptionsMenuFromRect:[t rectForRowAtIndexPath:p] inView:t animated:YES])
         self.state.text=@"可通过 iFile 打开 /var/mobile/Documents/PocketDrop";
 }
-- (void)applicationWillTerminate:(UIApplication *)app {[self stop];}
-- (void)applicationDidEnterBackground:(UIApplication *)app {[self stop];}
+- (void)keyboardChanged:(NSNotification *)n {
+    CGRect screen=[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
+    CGRect local=[self.root.view convertRect:screen fromView:nil];
+    CGRect intersection=CGRectIntersection(self.root.view.bounds,local);
+    CGFloat covered=CGRectIsNull(intersection)?0:MAX(0,CGRectGetMaxY(self.root.view.bounds)-CGRectGetMinY(intersection));
+    UIEdgeInsets inset=UIEdgeInsetsMake(0,0,covered+14,0);
+    self.page.contentInset=inset;self.page.scrollIndicatorInsets=inset;
+    if([self.textBox isFirstResponder]){
+        CGRect target=[self.page convertRect:self.textBox.bounds fromView:self.textBox];
+        target=CGRectInset(target,0,-18);
+        [self.page scrollRectToVisible:target animated:YES];
+    }
+}
+- (void)keyboardHidden:(NSNotification *)n {
+    UIEdgeInsets zero=UIEdgeInsetsZero;
+    self.page.contentInset=zero;self.page.scrollIndicatorInsets=zero;
+}
+- (void)endBackgroundTask {
+    if(self.backgroundTask!=UIBackgroundTaskInvalid){
+        UIBackgroundTaskIdentifier old=self.backgroundTask;
+        self.backgroundTask=UIBackgroundTaskInvalid;
+        [[UIApplication sharedApplication] endBackgroundTask:old];
+    }
+}
+- (void)applicationWillTerminate:(UIApplication *)app {[self stop];[self endBackgroundTask];}
+- (void)applicationDidEnterBackground:(UIApplication *)app {
+    if(!self.serving)return;
+    // iOS 8 permits finite background execution, not a permanent network daemon.
+    self.backgroundTask=[app beginBackgroundTaskWithExpirationHandler:^{
+        dispatch_async(dispatch_get_main_queue(),^{[self stop];[self endBackgroundTask];});
+    }];
+    if(self.backgroundTask==UIBackgroundTaskInvalid)[self stop];
+}
+- (void)applicationWillEnterForeground:(UIApplication *)app {
+    [self endBackgroundTask];
+    if(self.serving)self.state.text=@"已恢复前台，电脑可继续使用原配对码";
+}
 @end
 int main(int argc,char **argv){@autoreleasepool{return UIApplicationMain(argc,argv,nil,NSStringFromClass([PDApp class]));}}
