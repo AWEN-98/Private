@@ -847,7 +847,12 @@
 - (void)transcribeRecording {
     NSDictionary *p=[self profileFor:@"stt"];if(!p)return;
     NSData *audio=[NSData dataWithContentsOfURL:self.recorder.url];
-    if(!audio.length) {self.status.text=@"录音文件为空";return;}
+    if(!audio.length) {self.status.text=@"录音文件为空";[XFDiagnostics record:@"录音文件为空" code:0 detail:@"无音频数据"];return;}
+    if(audio.length>3*1024*1024){
+        self.status.text=@"录音数据超过 3MB，未上传";
+        [XFDiagnostics record:@"音频超过限制" code:0 detail:@"录音超过 3MB"];
+        return;
+    }
     NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
     NSString *boundary=[[NSUUID UUID] UUIDString];
     [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
@@ -859,12 +864,16 @@
     req.HTTPBody=body;
     self.status.text=@"正在语音识别…";
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
-        if(err){self.status.text=[NSString stringWithFormat:@"语音请求失败 %ld",(long)err.code];return;}
+        if(err){
+            [XFDiagnostics record:@"语音识别网络失败" code:err.code detail:err.domain?:@""];
+            self.status.text=[NSString stringWithFormat:@"语音请求失败 %ld",(long)err.code];return;
+        }
         NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
         NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         NSString *text=[json isKindOfClass:[NSDictionary class]]?json[@"text"]:nil;
         if(code>=300 || ![text isKindOfClass:[NSString class]]){
-            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld",(long)code];return;
+            [XFDiagnostics record:@"语音识别接口失败" code:code detail:@"API 不兼容或模型权限不足"];
+            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld；查看诊断",(long)code];return;
         }
         self.message.text=text;[self textViewDidChange:self.message];self.status.text=@"已识别语音，点击发送";
     }];
@@ -878,9 +887,16 @@
        @"voice":@"alloy",@"response_format":@"mp3"} options:0 error:NULL];
     self.status.text=@"生成语音…";
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
-        if(err){self.status.text=[NSString stringWithFormat:@"朗读连接失败 %ld",(long)err.code];return;}
+        if(err){[XFDiagnostics record:@"朗读网络错误" code:err.code detail:err.domain?:@""];
+            self.status.text=[NSString stringWithFormat:@"朗读连接失败 %ld",(long)err.code];return;}
         NSInteger status=[(NSHTTPURLResponse *)resp statusCode];
-        if(status>=300 || !data.length){self.status.text=[NSString stringWithFormat:@"朗读接口 HTTP %ld",(long)status];return;}
+        if(status>=300 || !data.length){[XFDiagnostics record:@"朗读 API 失败" code:status detail:@"语音输出接口错误"];
+            self.status.text=[NSString stringWithFormat:@"朗读接口 HTTP %ld",(long)status];return;}
+        if(data.length>5*1024*1024){
+            self.status.text=@"朗读音频过大，已停止播放";
+            [XFDiagnostics record:@"朗读结果过大" code:0 detail:@"MP3 超过 5MB"];
+            return;
+        }
         [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
         self.player=[[AVAudioPlayer alloc] initWithData:data error:NULL];
         if(![self.player play]) {self.status.text=@"语音格式无法播放";return;}
@@ -900,14 +916,20 @@
     [self setWorking:YES];
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
         [self setWorking:NO];
-        if(err){self.status.text=[NSString stringWithFormat:@"生图网络失败 %ld",(long)err.code];return;}
+        if(err){[XFDiagnostics record:@"生图网络错误" code:err.code detail:err.domain?:@""];
+            self.status.text=[NSString stringWithFormat:@"生图网络失败 %ld",(long)err.code];return;}
         NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
+        if(data.length>7*1024*1024){
+            [XFDiagnostics record:@"生图响应过大" code:code detail:@"返回超过 7MB"];
+            self.status.text=@"图片返回过大，旧设备无法解码";return;
+        }
         NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         NSArray *results=[json isKindOfClass:[NSDictionary class]]?json[@"data"]:nil;
         NSDictionary *first=[results isKindOfClass:[NSArray class]] && results.count?results[0]:nil;
         NSString *base64=first[@"b64_json"];
         if(code>=300 || ![base64 isKindOfClass:[NSString class]]) {
-            self.status.text=[NSString stringWithFormat:@"生图失败 HTTP %ld（要求返回 b64_json）",(long)code];return;
+            [XFDiagnostics record:@"生图接口不兼容" code:code detail:@"需要 b64_json 字段"];
+            self.status.text=[NSString stringWithFormat:@"生图失败 HTTP %ld（需要 b64_json）",(long)code];return;
         }
         NSData *bytes=[[NSData alloc] initWithBase64EncodedString:base64 options:0];
         UIImage *image=[UIImage imageWithData:bytes];
