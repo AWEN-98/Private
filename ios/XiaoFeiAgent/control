@@ -1,6 +1,6 @@
 Package: com.finn.xiaofeiagent
 Name: XiaoFei Agent
-Version: 0.8.0
+Version: 0.8.1
 Architecture: iphoneos-arm
 Description: iPhone 4S iOS 8 Chinese AI client; direct domestic AI or optional Windows companion
 Maintainer: XiaoFei Agent
