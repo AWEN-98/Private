@@ -7,11 +7,12 @@
 #import "XFPromptToolsController.h"
 #import "XFCompareController.h"
 #import "XFDiagnostics.h"
+#import "XFJarvisController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
-@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate,UITextViewDelegate>
+@interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate,UITextViewDelegate,AVSpeechSynthesizerDelegate>
 @property(nonatomic,strong) XFChatView *chat;
 @property(nonatomic,strong) UIView *headerBar;
 @property(nonatomic,strong) UIView *footerBar;
@@ -53,6 +54,14 @@
 @property(nonatomic,strong) NSDictionary *lastChatProfile;
 @property(nonatomic,assign) BOOL usingCompatibilityMode;
 @property(nonatomic,assign) BOOL lastChatUsedSearch;
+@property(nonatomic,strong) XFJarvisController *jarvis;
+@property(nonatomic,strong) UINavigationController *jarvisNavigation;
+@property(nonatomic,strong) AVSpeechSynthesizer *speechSynth;
+@property(nonatomic,assign) BOOL voiceActive;
+@property(nonatomic,assign) BOOL voiceCapture;
+@property(nonatomic,assign) BOOL voiceAwaitingChat;
+@property(nonatomic,assign) BOOL voiceAutoSpeak;
+@property(nonatomic,assign) BOOL voiceStarting;
 @end
 
 @implementation XFViewController
@@ -73,6 +82,10 @@
     [super viewDidLoad];
     self.view.backgroundColor=[UIColor colorWithRed:0.966 green:0.973 blue:0.987 alpha:1];
     self.history=[NSMutableArray array];
+    self.voiceAutoSpeak=[[NSUserDefaults standardUserDefaults] objectForKey:@"xf_jarvis_auto_speak"]?
+        [[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_auto_speak"]:YES;
+    self.speechSynth=[[AVSpeechSynthesizer alloc] init];
+    self.speechSynth.delegate=self;
     CGFloat w=self.view.bounds.size.width;
     self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,88)];
     self.headerBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
@@ -97,6 +110,9 @@
     self.brandTitle.textColor=[self ink];
     self.brandTitle.textAlignment=NSTextAlignmentCenter;
     [self.headerBar addSubview:self.brandTitle];
+    self.brandTitle.userInteractionEnabled=YES;
+    UITapGestureRecognizer *jarvisTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openJarvis)];
+    [self.brandTitle addGestureRecognizer:jarvisTap];
 
     self.modelsButton=[UIButton buttonWithType:UIButtonTypeCustom];
     self.modelsButton.frame=CGRectMake(w-76,27,64,33);
@@ -144,7 +160,7 @@
     self.tools.showsHorizontalScrollIndicator=NO;
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
-    NSArray *items=@[@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
+    NSArray *items=@[@[@"◉ JARVIS",@"jarvis"],@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
       @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
     CGFloat x=1;
     for(NSArray *item in items){
@@ -251,6 +267,7 @@
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.connection cancel];
     [self.recordTimer invalidate];
+    [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -426,6 +443,7 @@
         else [self showAlert:@"暂无可复制的回复" detail:@"收到 AI 回复后即可复制。"];
         return;
     }
+    if([name isEqualToString:@"jarvis"]) {[self openJarvis];return;}
     if([name isEqualToString:@"photo"]) {[self pickImage];return;}
     if([name isEqualToString:@"file"]) {[self pickFile];return;}
     if([name isEqualToString:@"prompts"]) {[self showPromptToolbox];return;}
@@ -435,6 +453,115 @@
     if([name isEqualToString:@"tts"]) {[self speakLastAnswer];return;}
     if([name isEqualToString:@"image"]) {[self generateImage];return;}
     if([name isEqualToString:@"web"]) {[self sendAsSearch];return;}
+}
+- (void)voiceUpdate:(NSString *)mode message:(NSString *)message {
+    if(!self.voiceActive || !self.jarvis)return;
+    [self.jarvis updateMode:mode description:message];
+}
+- (void)voiceError:(NSString *)detail {
+    self.voiceCapture=NO;
+    self.voiceAwaitingChat=NO;
+    self.voiceStarting=NO;
+    [self voiceUpdate:@"idle" message:detail?:@"出现错误，请检查配置后重试"];
+}
+- (void)openJarvis {
+    if(self.voiceActive)return;
+    [self.message resignFirstResponder];
+    self.voiceActive=YES;
+    self.voiceCapture=NO;
+    self.voiceAwaitingChat=NO;
+    self.voiceStarting=NO;
+    XFJarvisController *controller=[[XFJarvisController alloc] init];
+    self.jarvis=controller;
+    controller.autoSpeak=self.voiceAutoSpeak;
+    __weak XFViewController *weakSelf=self;
+    controller.onPrimary=^{[weakSelf voicePrimaryTapped];};
+    controller.onStop=^{[weakSelf voiceStopTapped];};
+    controller.onClose=^{[weakSelf closeJarvis];};
+    controller.onAutoSpeak=^(BOOL on){
+        weakSelf.voiceAutoSpeak=on;
+        [[NSUserDefaults standardUserDefaults] setBool:on forKey:@"xf_jarvis_auto_speak"];
+        if(!on && [weakSelf.speechSynth isSpeaking]){
+            [weakSelf.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+            [weakSelf voiceUpdate:@"idle" message:@"已停止朗读，可以再次提问"];
+        }
+    };
+    self.jarvisNavigation=[[UINavigationController alloc] initWithRootViewController:controller];
+    [self presentViewController:self.jarvisNavigation animated:YES completion:nil];
+}
+- (void)closeJarvis {
+    if(!self.voiceActive)return;
+    self.voiceActive=NO;
+    self.voiceCapture=NO;
+    self.voiceAwaitingChat=NO;
+    self.voiceStarting=NO;
+    if(self.isRecording){
+        [self.recorder stop];
+        self.isRecording=NO;
+        [self.recordTimer invalidate];self.recordTimer=nil;
+        [self setRecordingDisplay:NO];
+    }
+    [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    [self.jarvisNavigation dismissViewControllerAnimated:YES completion:nil];
+    self.jarvisNavigation=nil;
+    self.jarvis=nil;
+}
+- (void)voicePrimaryTapped {
+    if(!self.voiceActive || self.voiceStarting)return;
+    if(self.isRecording){[self finishRecording];return;}
+    if(self.voiceAwaitingChat || self.isWorking)return;
+    if([self.speechSynth isSpeaking])
+        [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    NSDictionary *stt=[XFModelsController activeProfileForCapability:@"stt"];
+    NSDictionary *chat=[XFModelsController activeProfileForCapability:@"chat"];
+    if(!chat){[self voiceError:@"请先在模型库选择文字聊天模型"];return;}
+    if(!stt || ![XFModelsController secretForProfile:stt].length){
+        [self voiceError:@"请先在模型库配置语音识别（STT）模型与 API Key"];
+        return;
+    }
+    self.voiceCapture=YES;
+    self.voiceStarting=YES;
+    [self voiceUpdate:@"transcribing" message:@"正在申请麦克风权限…"];
+    [self toggleRecord];
+}
+- (void)voiceStopTapped {
+    self.voiceCapture=NO;
+    self.voiceAwaitingChat=NO;
+    self.voiceStarting=NO;
+    if(self.isRecording){
+        [self.recorder stop];self.isRecording=NO;
+        [self.recordTimer invalidate];self.recordTimer=nil;
+        [self setRecordingDisplay:NO];
+    }
+    if(self.isWorking){
+        [self.connection cancel];self.connection=nil;[self setWorking:NO];
+        [self restoreSubmittedDraft];
+    }
+    if([self.speechSynth isSpeaking])
+        [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    [self voiceUpdate:@"idle" message:@"已停止，点击开始说话"];
+}
+- (void)voiceReadAnswer:(NSString *)answer {
+    if(!self.voiceActive || !self.voiceAutoSpeak){
+        [self voiceUpdate:@"idle" message:@"已生成回答，可再次提问"];return;
+    }
+    NSString *plain=[answer stringByReplacingOccurrencesOfString:@"\n" withString:@"。"];
+    if(plain.length>900)plain=[plain substringToIndex:900];
+    if(!plain.length){[self voiceUpdate:@"idle" message:@"回答为空"];return;}
+    [[AVAudioSession sharedInstance] setCategory:AVAudioSessionCategoryPlayback error:NULL];
+    [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    AVSpeechUtterance *utterance=[AVSpeechUtterance speechUtteranceWithString:plain];
+    utterance.voice=[AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
+    utterance.rate=0.47;
+    [self voiceUpdate:@"speaking" message:@"正在朗读回答；点击停止可以中断"];
+    [self.speechSynth speakUtterance:utterance];
+}
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
+    if(self.voiceActive)[self voiceUpdate:@"idle" message:@"回答结束，点击开始继续提问"];
+}
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
+    if(self.voiceActive && !self.voiceCapture && !self.voiceAwaitingChat)
+        [self voiceUpdate:@"idle" message:@"已停止朗读"];
 }
 - (void)showDiagnostics {
     NSString *report=[XFDiagnostics report];
