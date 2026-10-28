@@ -1,5 +1,8 @@
-#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 @interface XFChatStore : NSObject
++ (NSString *)saveImage:(UIImage *)image;
++ (UIImage *)imageForName:(NSString *)filename;
++ (UIImage *)thumbnailForName:(NSString *)filename;
 + (NSArray *)conversations;
 + (NSDictionary *)conversationForID:(NSString *)cid;
 + (NSString *)createConversation;
