@@ -154,7 +154,7 @@
     CGFloat strength=MAX(0,MIN(1,level));
     for(NSInteger i=0;i<self.meterBars.count;i++){
         UIView *bar=self.meterBars[(NSUInteger)i];
-        CGFloat ridge=1-fabs(i-8)/10.0;
+        CGFloat ridge=1-fabs((double)i-8.0)/10.0;
         CGFloat height=4+strength*MAX(6,27*ridge)*(0.65+(i%4)*.12);
         CGRect f=bar.frame;f.origin.y=63-height/2;f.size.height=height;bar.frame=f;
     }
