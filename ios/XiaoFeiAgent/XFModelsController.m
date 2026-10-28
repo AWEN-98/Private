@@ -1,6 +1,20 @@
 #import "XFModelsController.h"
 #import <Security/Security.h>
 
+
+static UIColor *XFUIBackground(void) {return [UIColor colorWithRed:0.964 green:0.972 blue:0.986 alpha:1];}
+static UIColor *XFUIAccent(void) {return [UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];}
+static UIColor *XFUIText(void) {return [UIColor colorWithRed:0.15 green:0.20 blue:0.31 alpha:1];}
+static UIColor *XFUIHint(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:0.58 alpha:1];}
+static void XFStyleNav(UINavigationController *nav) {
+    if(!nav)return;
+    nav.navigationBar.translucent=NO;
+    nav.navigationBar.barTintColor=[UIColor whiteColor];
+    nav.navigationBar.tintColor=XFUIAccent();
+    nav.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:XFUIText(),
+        NSFontAttributeName:[UIFont boldSystemFontOfSize:17]};
+}
+
 static NSString *const XFAccountsKey=@"xf_api_accounts_v1";
 static NSString *const XFSelectionKey=@"xf_active_models_v1";
 static NSString *const XFSecretService=@"com.finn.xiaofeiagent.connections";
@@ -200,16 +214,21 @@ static void XFDropAccount(NSString *aid){
 @implementation XFAPIEditor
 - (UITextField *)fieldAt:(CGFloat)y label:(NSString *)label value:(NSString *)value {
     UILabel *t=[[UILabel alloc] initWithFrame:CGRectMake(14,y,self.view.bounds.size.width-28,22)];
-    t.text=label;t.font=[UIFont systemFontOfSize:13];[self.scroll addSubview:t];
+    t.text=label;t.font=[UIFont boldSystemFontOfSize:12.5];t.textColor=XFUIText();[self.scroll addSubview:t];
     UITextField *f=[[UITextField alloc] initWithFrame:CGRectMake(14,y+25,self.view.bounds.size.width-28,43)];
-    f.autoresizingMask=UIViewAutoresizingFlexibleWidth;f.borderStyle=UITextBorderStyleRoundedRect;
-    f.backgroundColor=[UIColor whiteColor];f.font=[UIFont systemFontOfSize:14];f.text=value;
+    f.autoresizingMask=UIViewAutoresizingFlexibleWidth;f.borderStyle=UITextBorderStyleNone;
+    f.backgroundColor=[UIColor whiteColor];f.font=[UIFont systemFontOfSize:14];f.textColor=XFUIText();f.text=value;
+    f.layer.cornerRadius=8;f.layer.borderWidth=0.5;
+    f.layer.borderColor=[UIColor colorWithRed:0.86 green:0.89 blue:0.94 alpha:1].CGColor;
+    UIView *pad=[[UIView alloc] initWithFrame:CGRectMake(0,0,10,10)];
+    f.leftView=pad;f.leftViewMode=UITextFieldViewModeAlways;
     f.autocapitalizationType=UITextAutocapitalizationTypeNone;f.autocorrectionType=UITextAutocorrectionTypeNo;
     f.delegate=self;f.returnKeyType=UIReturnKeyDone;[self.scroll addSubview:f];return f;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"API 服务配置";
-    self.view.backgroundColor=[UIColor colorWithWhite:0.96 alpha:1];
+    XFStyleNav(self.navigationController);
+    self.view.backgroundColor=XFUIBackground();
     self.scroll=[[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.scroll];
@@ -273,6 +292,10 @@ static void XFDropAccount(NSString *aid){
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"API 服务";
+    XFStyleNav(self.navigationController);
+    self.tableView.backgroundColor=XFUIBackground();
+    self.tableView.rowHeight=65;
+    self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.95 alpha:1];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(add)];
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
 }
@@ -281,8 +304,12 @@ static void XFDropAccount(NSString *aid){
     UITableViewCell *c=[t dequeueReusableCellWithIdentifier:@"account"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"account"];
     NSDictionary *a=XFAccounts()[ip.row];
-    c.textLabel.text=a[@"name"];
-    c.detailTextLabel.text=[NSString stringWithFormat:@"%lu 个模型 · 点击同步 / 编辑",(unsigned long)[a[@"models"] count]];
+    c.backgroundColor=[UIColor whiteColor];
+    c.textLabel.text=a[@"name"];c.textLabel.font=[UIFont boldSystemFontOfSize:15.5];
+    c.textLabel.textColor=XFUIText();
+    c.detailTextLabel.text=[NSString stringWithFormat:@"%lu 个可用模型  ·  点击同步与编辑",(unsigned long)[a[@"models"] count]];
+    c.detailTextLabel.font=[UIFont systemFontOfSize:12];
+    c.detailTextLabel.textColor=XFUIHint();
     c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;return c;
 }
 - (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip {return YES;}
@@ -496,12 +523,18 @@ static void XFDropAccount(NSString *aid){
 }
 - (void)viewDidLoad {
     [super viewDidLoad];XFMigrate();self.title=@"选择模型";
+    XFStyleNav(self.navigationController);
+    self.tableView.backgroundColor=XFUIBackground();
+    self.tableView.rowHeight=64;
+    self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
+    self.tableView.sectionHeaderHeight=29;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
       target:self action:@selector(closeTapped)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"API 管理"
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
     self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,44)];
-    self.search.placeholder=@"搜索模型 ID / 名称 / 服务";
+    self.search.placeholder=@"搜索模型名称或服务";
+    self.search.tintColor=XFUIAccent();
     self.search.delegate=self;
     self.tableView.tableHeaderView=self.search;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
@@ -554,9 +587,14 @@ static void XFDropAccount(NSString *aid){
     NSString *category=self.sections[ip.section],*cap=XFCapability(category);
     NSDictionary *selected=XFSelected(cap);
     BOOL active=[selected[@"account"] isEqualToString:a[@"id"]] && [selected[@"model"] isEqualToString:m[@"id"]];
+    cell.backgroundColor=[UIColor whiteColor];
+    cell.tintColor=XFUIAccent();
     cell.textLabel.text=m[@"name"]?:m[@"id"];
-    cell.textLabel.font=[UIFont systemFontOfSize:15];
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %@",a[@"name"],m[@"id"]];
+    cell.textLabel.font=active?[UIFont boldSystemFontOfSize:15]:[UIFont systemFontOfSize:15];
+    cell.textLabel.textColor=active?XFUIAccent():XFUIText();
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@  ·  %@",a[@"name"],m[@"id"]];
+    cell.detailTextLabel.font=[UIFont systemFontOfSize:11.5];
+    cell.detailTextLabel.textColor=XFUIHint();
     cell.accessoryType=active?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryDetailButton;
     return cell;
 }
@@ -570,6 +608,7 @@ static void XFDropAccount(NSString *aid){
     }
     XFSelect(cap,entry[@"account"][@"id"],entry[@"model"][@"id"]);
     [self.tableView reloadData];self.title=@"已切换模型";
+    // Keep the picker open for quick comparison, with an obvious selected checkmark.
 }
 - (void)tableView:(UITableView *)t accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)ip {
     if(!self.sections.count)return;
