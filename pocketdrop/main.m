@@ -9,7 +9,7 @@
 #import <signal.h>
 
 #define PD_PORT 8765
-#define PD_MAX_UPLOAD (25*1024*1024)
+#define PD_MAX_UPLOAD (50*1024*1024)
 
 static NSString *PDDir(void) {
     NSString *dir=@"/var/mobile/Documents/PocketDrop";
@@ -82,11 +82,11 @@ static NSString *PDHTML(void){
     "<h1>↔ PocketDrop</h1><p>电脑 ⇄ iPhone 4S · 同一 Wi-Fi · 局域网传输</p>"
     "<section><b>① 输入手机显示的 6 位配对码</b><input id='code' placeholder='配对码' maxlength='6' inputmode='numeric'>"
     "<button onclick='connect()'>连接手机</button><span id='status'></span></section>"
-    "<section><b>② 电脑发送文件到手机</b><p><small>单文件最大 25 MB，文件保存在 /var/mobile/Documents/PocketDrop/</small></p>"
+    "<section><b>② 电脑发送文件到手机</b><p><small>单文件最大 50 MB，文件保存在 /var/mobile/Documents/PocketDrop/</small></p>"
     "<input type='file' id='file'><button onclick='upload()'>上传文件</button><div id='progress'></div></section>"
     "<section><b>③ 传文字 / 链接</b><textarea id='text' rows='3' placeholder='复制文字、网址或安装说明'></textarea>"
     "<button onclick='sendText()'>发送到手机剪贴板</button><button onclick='readText()'>读取手机共享文字</button></section>"
-    "<section><b>④ 从手机下载文件</b><button onclick='refresh()'>刷新列表</button><ul id='files'></ul></section>"
+    "<section><b>④ 从手机下载文件</b><button onclick='refresh()'>刷新列表</button><ul id='files'></ul><small>删除按钮需要二次确认，只影响 PocketDrop 收件箱。</small></section>"
     "<p><small>请只在自己的可信 Wi-Fi 使用；本机 HTTP 传输未加密，退出 App 或关闭服务即可停止分享。</small></p>"
     "<script>let key=sessionStorage.getItem('pdcode')||'';document.getElementById('code').value=key;"
     "function h(){return {'X-Pocket-Key':key}}"
@@ -95,14 +95,25 @@ static NSString *PDHTML(void){
     "let data=await r.json();document.getElementById('status').textContent=' 已连接';"
     "document.getElementById('files').innerHTML='';for(let f of data.files){let li=document.createElement('li');let a=document.createElement('a');"
     "a.href='/file?name='+encodeURIComponent(f.name)+'&key='+encodeURIComponent(key);a.textContent=f.name+' ('+Math.ceil(f.size/1024)+' KB)';"
-    "li.appendChild(a);document.getElementById('files').appendChild(li)}}catch(e){document.getElementById('status').textContent=' 连接失败：'+e.message}}"
-    "async function upload(){let f=document.getElementById('file').files[0];if(!f)return alert('选择文件');if(f.size>25*1024*1024)return alert('文件不能超过25MB');"
-    "document.getElementById('progress').textContent='正在上传…';try{let r=await fetch('/upload?name='+encodeURIComponent(f.name),{method:'POST',headers:h(),body:f});"
-    "if(!r.ok)throw new Error(await r.text());document.getElementById('progress').textContent='上传成功';refresh()}catch(e){document.getElementById('progress').textContent='失败：'+e.message}}"
+    "let del=document.createElement('button');del.textContent='删除';del.style.cssText='float:right;background:#8791a8;padding:5px 8px';"
+    "del.onclick=()=>removeFile(f.name);li.appendChild(a);li.appendChild(del);document.getElementById('files').appendChild(li)}}"
+    "catch(e){document.getElementById('status').textContent=' 连接失败：'+e.message}}"
+    "function upload(){let f=document.getElementById('file').files[0];if(!f)return alert('选择文件');if(f.size>50*1024*1024)return alert('文件不能超过50MB');"
+    "let status=document.getElementById('progress');status.textContent='正在连接…';let xhr=new XMLHttpRequest();"
+    "xhr.open('POST','/upload?name='+encodeURIComponent(f.name));xhr.setRequestHeader('X-Pocket-Key',key);xhr.timeout=180000;"
+    "xhr.upload.onprogress=e=>{if(e.lengthComputable)status.textContent='上传中 '+Math.round(e.loaded/e.total*100)+'% ('+Math.round(e.loaded/1024)+' KB)'};"
+    "xhr.onload=()=>{status.textContent=xhr.status==200?'上传完成':('上传失败：HTTP '+xhr.status);if(xhr.status==200)refresh()};"
+    "xhr.onerror=()=>status.textContent='网络中断，请检查 Wi-Fi';xhr.ontimeout=()=>status.textContent='传输超时，请重试';xhr.send(f)}"
     "async function sendText(){let r=await fetch('/api/text',{method:'POST',headers:h(),body:document.getElementById('text').value});"
     "alert(r.ok?'发送成功':'发送失败：'+r.status)}"
     "async function readText(){let r=await fetch('/api/text',{headers:h()});if(r.ok)document.getElementById('text').value=await r.text();else alert('读取失败：'+r.status)}"
-    "if(key)refresh();</script></html>";
+    "async function removeFile(name){if(!confirm('确定删除手机里的 '+name+' 吗？'))return;"
+    "try{let r=await fetch('/delete?name='+encodeURIComponent(name),{method:'DELETE',headers:h()});"
+    "if(!r.ok)throw new Error('HTTP '+r.status);refresh()}catch(e){alert('删除失败：'+e.message)}}"
+    "async function ping(){if(!key||document.hidden)return;try{let r=await fetch('/ping',{headers:h()});"
+    "document.getElementById('status').textContent=r.ok?' 已连接 · 保持在线':(' 连接已失效 '+r.status)}"
+    "catch(e){document.getElementById('status').textContent=' 已断开，请确认手机保持前台'}}"
+    "setInterval(ping,30000);if(key)refresh();</script></html>";
 }
 @interface PDApp : UIResponder <UIApplicationDelegate,UITableViewDataSource,UITableViewDelegate>
 @property(nonatomic,strong) UIWindow *window;
@@ -122,6 +133,7 @@ static NSString *PDHTML(void){
 @property(nonatomic,strong) UIScrollView *page;
 @property(nonatomic,assign) UIBackgroundTaskIdentifier backgroundTask;
 @property(nonatomic,assign) BOOL keepScreenAwake;
+@property(nonatomic,assign) NSInteger activeClients;
 
 @end
 @implementation PDApp
@@ -161,6 +173,7 @@ static NSString *PDHTML(void){
     @autoreleasepool {
         struct timeval timeout={120,0};
         setsockopt(client,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
+        setsockopt(client,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
         NSMutableData *received=[NSMutableData data];
         NSRange boundary=NSMakeRange(NSNotFound,0);
         NSData *ending=[@"\r\n\r\n" dataUsingEncoding:NSASCIIStringEncoding];
@@ -193,6 +206,21 @@ static NSString *PDHTML(void){
         }
         NSString *provided=headers[@"x-pocket-key"]?:PDParam(path,@"key");
         if(!provided || ![provided isEqualToString:self.code]){PDText(client,401,@"Pairing code required");close(client);return;}
+        if([method isEqualToString:@"GET"] && [base isEqualToString:@"/ping"]){
+            PDText(client,200,@"OK");close(client);return;
+        }
+        if([method isEqualToString:@"DELETE"] && [base isEqualToString:@"/delete"]){
+            NSString *safe=PDSafeName(PDParam(path,@"name"));
+            if(!safe){PDText(client,400,@"Invalid filename");close(client);return;}
+            NSString *full=[PDDir() stringByAppendingPathComponent:safe];
+            NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:full error:NULL];
+            if(![attrs.fileType isEqualToString:NSFileTypeRegular]){PDText(client,404,@"File not found");close(client);return;}
+            NSError *removeError=nil;
+            BOOL success=[[NSFileManager defaultManager] removeItemAtPath:full error:&removeError];
+            PDText(client,success?200:500,success?@"Deleted":@"Delete failed");
+            if(success)dispatch_async(dispatch_get_main_queue(),^{[self reloadFiles];});
+            close(client);return;
+        }
         if([method isEqualToString:@"GET"] && [base isEqualToString:@"/api/files"]){
             NSMutableArray *files=[NSMutableArray array];
             NSArray *all=[[NSFileManager defaultManager] contentsOfDirectoryAtPath:PDDir() error:NULL];
@@ -216,8 +244,9 @@ static NSString *PDHTML(void){
             NSString *lengthText=headers[@"content-length"];
             NSScanner *scanner=[NSScanner scannerWithString:lengthText?:@""];
             long long total=-1;
-            if(![scanner scanLongLong:&total]||!scanner.isAtEnd||total<0||total>PD_MAX_UPLOAD){
-                PDText(client,413,@"Invalid size or >25MB");close(client);return;
+            long long maxBytes=[base isEqualToString:@"/api/text"]?262144:PD_MAX_UPLOAD;
+            if(![scanner scanLongLong:&total]||!scanner.isAtEnd||total<0||total>maxBytes){
+                PDText(client,413,@"Invalid size or size limit exceeded");close(client);return;
             }
             NSString *safe=nil,*file=nil;
             NSFileHandle *output=nil;
@@ -296,7 +325,13 @@ static NSString *PDHTML(void){
             int client=accept(fd,(struct sockaddr *)&remote,&len);
             if(client<0){if(!self.serving)break;continue;}
             if(!self.serving){close(client);break;}
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^{[self serveClient:client];});
+            BOOL admitted=NO;
+            @synchronized(self){if(self.activeClients<3){self.activeClients++;admitted=YES;}}
+            if(!admitted){PDText(client,503,@"Too many transfers, retry shortly");close(client);continue;}
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^{
+                [self serveClient:client];
+                @synchronized(self){self.activeClients=MAX(0,self.activeClients-1);}
+            });
         }
     });
 }
@@ -363,7 +398,8 @@ static NSString *PDHTML(void){
     self.textBox.font=[UIFont systemFontOfSize:14];[scroll addSubview:self.textBox];
     [self button:@"读取剪贴板" frame:CGRectMake(15,378,133,37) action:@selector(shareClipboard) on:scroll];
     [self button:@"复制文字" frame:CGRectMake(157,378,113,37) action:@selector(copyReceived) on:scroll];
-    [self label:@"传输文件（轻点可预览 / 分享）" frame:CGRectMake(15,431,w-30,25) font:[UIFont boldSystemFontOfSize:15] on:scroll];
+    [self label:@"传输文件" frame:CGRectMake(15,431,w-106,25) font:[UIFont boldSystemFontOfSize:15] on:scroll];
+    [self button:@"刷新" frame:CGRectMake(w-88,427,72,34) action:@selector(reloadFiles) on:scroll];
     self.table=[[UITableView alloc] initWithFrame:CGRectMake(15,460,w-30,190) style:UITableViewStylePlain];
     self.table.layer.cornerRadius=8;self.table.dataSource=self;self.table.delegate=self;self.table.rowHeight=47;
     [scroll addSubview:self.table];scroll.contentSize=CGSizeMake(w,688);
@@ -390,6 +426,22 @@ static NSString *PDHTML(void){
     self.document=[UIDocumentInteractionController interactionControllerWithURL:[NSURL fileURLWithPath:file]];
     if(![self.document presentOptionsMenuFromRect:[t rectForRowAtIndexPath:p] inView:t animated:YES])
         self.state.text=@"可通过 iFile 打开 /var/mobile/Documents/PocketDrop";
+}
+- (BOOL)tableView:(UITableView *)table canEditRowAtIndexPath:(NSIndexPath *)index {return YES;}
+- (void)tableView:(UITableView *)table commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)index {
+    if(style!=UITableViewCellEditingStyleDelete || index.row<0 || (NSUInteger)index.row>=self.items.count)return;
+    NSString *name=self.items[index.row];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"删除本地文件？"
+        message:name preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"删除" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){
+        NSString *file=[PDDir() stringByAppendingPathComponent:name];
+        NSDictionary *attr=[[NSFileManager defaultManager] attributesOfItemAtPath:file error:NULL];
+        if([attr.fileType isEqualToString:NSFileTypeRegular])
+            [[NSFileManager defaultManager] removeItemAtPath:file error:NULL];
+        [self reloadFiles];
+    }]];
+    [self.root presentViewController:alert animated:YES completion:nil];
 }
 - (void)keyboardChanged:(NSNotification *)n {
     CGRect screen=[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
