@@ -493,7 +493,7 @@
     // stream=true request which some providers reject with HTTP 400.
     BOOL compatible=[[NSUserDefaults standardUserDefaults] boolForKey:[self compatibilityKeyFor:profile]] || selfTestedOK;
     if(compatible && messages.count && [messages[0][@"role"] isEqualToString:@"system"])[messages removeObjectAtIndex:0];
-    NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":@( !compatible )} mutableCopy];
+    NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":[NSNumber numberWithBool:!compatible]} mutableCopy];
     if(web && !compatible) payload[@"web_search_options"]=@{};
     req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
@@ -701,7 +701,7 @@
         self.status.text=@"原请求数据已失效，请重新发送";return;
     }
     NSMutableDictionary *body=(NSMutableDictionary *)decoded;
-    body[@"stream"]=@NO;
+    body[@"stream"]=[NSNumber numberWithBool:NO];
     [body removeObjectForKey:@"web_search_options"];
     NSMutableArray *messages=body[@"messages"];
     if([messages isKindOfClass:[NSMutableArray class]] && messages.count){
