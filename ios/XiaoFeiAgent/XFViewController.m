@@ -33,6 +33,10 @@
 @property(nonatomic,assign) NSInteger httpCode;
 @property(nonatomic,assign) BOOL isWorking;
 @property(nonatomic,assign) BOOL isRecording;
+@property(nonatomic,strong) NSMutableURLRequest *lastChatRequest;
+@property(nonatomic,strong) NSDictionary *lastChatProfile;
+@property(nonatomic,assign) BOOL usingCompatibilityMode;
+@property(nonatomic,assign) BOOL lastChatUsedSearch;
 @end
 
 @implementation XFViewController
@@ -323,10 +327,16 @@
         [messages addObject:@{@"role":@"user",@"content":msg}];
     }
     NSMutableURLRequest *req=[self requestForProfile:profile];if(!req)return;
-    NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":@YES} mutableCopy];
-    if(web) payload[@"web_search_options"]=@{};
+    BOOL compatible=[[NSUserDefaults standardUserDefaults] boolForKey:[self compatibilityKeyFor:profile]];
+    if(compatible && messages.count && [messages[0][@"role"] isEqualToString:@"system"])[messages removeObjectAtIndex:0];
+    NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":@( !compatible )} mutableCopy];
+    if(web && !compatible) payload[@"web_search_options"]=@{};
     req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    self.lastChatRequest=[req mutableCopy];
+    self.lastChatProfile=profile;
+    self.usingCompatibilityMode=compatible;
+    self.lastChatUsedSearch=web;
     self.sendingContent=sent;
     [self.message resignFirstResponder];self.message.text=@"";
     self.pendingFileText=nil;self.pendingImage=nil;
@@ -340,8 +350,16 @@
     [self.streamBuffer setLength:0];
 }
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
+    if(self.httpCode>=400) {
+        // Error details are useful, but never allow an unlimited error body on 512MB RAM.
+        if(self.streamBuffer.length<65536){
+            NSUInteger length=MIN((NSUInteger)65536-self.streamBuffer.length,data.length);
+            [self.streamBuffer appendBytes:data.bytes length:length];
+        }
+        return;
+    }
     [self.streamBuffer appendData:data];
-    if(self.httpCode>=400)return;
+    if(self.usingCompatibilityMode)return;
     NSData *separator=[@"\n\n" dataUsingEncoding:NSUTF8StringEncoding];
     while(self.streamBuffer.length) {
         NSRange boundary=[self.streamBuffer rangeOfData:separator options:0 range:NSMakeRange(0,self.streamBuffer.length)];
@@ -387,14 +405,9 @@
     if(connection!=self.connection)return;
     self.connection=nil;[self setWorking:NO];
     if(self.httpCode>=400) {
-        NSDictionary *error=[NSJSONSerialization JSONObjectWithData:self.streamBuffer options:0 error:NULL];
-        NSString *reason=nil;
-        if([error isKindOfClass:[NSDictionary class]]) {
-            NSDictionary *details=error[@"error"];
-            if([details isKindOfClass:[NSDictionary class]])reason=details[@"message"];
-        }
-        self.status.text=[NSString stringWithFormat:@"API 错误 HTTP %ld %@",(long)self.httpCode,
-            [reason isKindOfClass:[NSString class]]?[reason substringToIndex:MIN((NSUInteger)70,reason.length)]:@""];
+        NSString *reason=[self explainAPIError:self.streamBuffer];
+        self.status.text=[NSString stringWithFormat:@"HTTP %ld · 点击弹窗查看原因",(long)self.httpCode];
+        [self showAPIErrorWithReason:reason status:self.httpCode];
         return;
     }
     NSString *answer=[self.streamText copy];
@@ -411,7 +424,92 @@
     if(!answer.length) {self.status.text=@"API 未返回可用文字，请检查模型是否支持 Chat Completions";return;}
     [self.chat finishStreaming:answer];
     [self addExchange:self.sendingContent answer:answer];
-    self.status.text=@"回复完成，已保存到历史对话";
+    if(self.usingCompatibilityMode && self.lastChatProfile) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:[self compatibilityKeyFor:self.lastChatProfile]];
+    }
+    self.status.text=self.usingCompatibilityMode?@"兼容模式成功，下次将自动使用":@"回复完成，已保存到历史对话";
+}
+- (NSString *)compatibilityKeyFor:(NSDictionary *)profile {
+    NSString *idText=[NSString stringWithFormat:@"%@|%@",profile[@"account_id"]?:@"",profile[@"model"]?:@""];
+    return [@"xf_compat_nonstream_" stringByAppendingString:idText];
+}
+- (NSString *)explainAPIError:(NSData *)data {
+    id json=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+    NSString *message=nil;
+    if([json isKindOfClass:[NSDictionary class]]) {
+        id err=json[@"error"];
+        if([err isKindOfClass:[NSDictionary class]]) {
+            id description=err[@"message"]?:err[@"detail"]?:err[@"description"];
+            if([description isKindOfClass:[NSString class]])message=description;
+            else if([err[@"code"] isKindOfClass:[NSString class]])message=err[@"code"];
+        } else if([err isKindOfClass:[NSString class]])message=err;
+        if(!message.length) {
+            id value=json[@"message"]?:json[@"detail"]?:json[@"error_description"]?:json[@"msg"];
+            if([value isKindOfClass:[NSString class]])message=value;
+            else if([value isKindOfClass:[NSArray class]] || [value isKindOfClass:[NSDictionary class]])
+                message=[value description];
+        }
+    }
+    if(!message.length && data.length){
+        NSString *raw=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        if(raw.length)message=raw;
+    }
+    if(!message.length)message=@"服务端没有提供详细错误。可能是模型不支持当前接口、请求参数不兼容，或模型 ID 不正确。";
+    if(message.length>850)message=[[message substringToIndex:850] stringByAppendingString:@"…"];
+    // Some reverse proxy errors echo request headers. Do not include saved API keys in diagnostics.
+    NSString *secret=[XFModelsController secretForProfile:self.lastChatProfile];
+    if(secret.length)message=[message stringByReplacingOccurrencesOfString:secret withString:@"[密钥已隐藏]"];
+    return message;
+}
+- (void)showAPIErrorWithReason:(NSString *)reason status:(NSInteger)status {
+    NSDictionary *p=self.lastChatProfile?:@{};
+    NSURL *url=[NSURL URLWithString:p[@"endpoint"]?:@""];
+    NSString *endpoint=[NSString stringWithFormat:@"%@%@",url.host?:@"未知",url.path?:@""];
+    NSString *detail=[NSString stringWithFormat:@"服务：%@\n模型：%@\n接口：%@\n\n服务端原因：\n%@",
+        p[@"provider"]?:@"未知",p[@"model"]?:@"未知",endpoint,reason?:@"未知"];
+    NSString *report=[NSString stringWithFormat:@"HTTP %ld\n%@",(long)status,detail];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:
+        [NSString stringWithFormat:@"API 错误 · HTTP %ld",(long)status]
+        message:detail preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"复制诊断（不含密钥）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [UIPasteboard generalPasteboard].string=report;
+        self.status.text=@"诊断信息已复制，可直接粘贴给我";
+    }]];
+    if(status==400 && self.lastChatRequest && !self.usingCompatibilityMode) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"兼容格式重试" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self retryWithoutStreaming];
+        }]];
+    }
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)retryWithoutStreaming {
+    if(self.isWorking || !self.lastChatRequest || !self.lastChatProfile)return;
+    NSMutableURLRequest *request=[self.lastChatRequest mutableCopy];
+    id decoded=[NSJSONSerialization JSONObjectWithData:request.HTTPBody options:NSJSONReadingMutableContainers error:NULL];
+    if(![decoded isKindOfClass:[NSMutableDictionary class]]){
+        self.status.text=@"原请求数据已失效，请重新发送";return;
+    }
+    NSMutableDictionary *body=(NSMutableDictionary *)decoded;
+    body[@"stream"]=@NO;
+    [body removeObjectForKey:@"web_search_options"];
+    NSMutableArray *messages=body[@"messages"];
+    if([messages isKindOfClass:[NSMutableArray class]] && messages.count){
+        NSDictionary *first=messages[0];
+        if([first isKindOfClass:[NSDictionary class]] && [first[@"role"] isEqualToString:@"system"])
+            [messages removeObjectAtIndex:0];
+    }
+    NSData *bytes=[NSJSONSerialization dataWithJSONObject:body options:0 error:NULL];
+    if(!bytes){self.status.text=@"兼容请求编码失败";return;}
+    request.HTTPBody=bytes;
+    self.lastChatRequest=[request mutableCopy];
+    self.usingCompatibilityMode=YES;
+    self.streamBuffer=[NSMutableData data];
+    self.streamText=[NSMutableString string];
+    self.httpCode=0;
+    [self setWorking:YES];
+    self.status.text=@"兼容模式重试：关闭流式输出与额外参数…";
+    self.connection=[[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
 }
 - (void)pickImage {
     UIImagePickerController *picker=[[UIImagePickerController alloc] init];
