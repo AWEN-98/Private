@@ -14,6 +14,7 @@
 @property(nonatomic,strong) UILabel *welcomeTitle;
 @property(nonatomic,strong) UILabel *welcomeSubtitle;
 @property(nonatomic,strong) XFChatBubble *streamBubble;
+@property(nonatomic,strong) XFChatBubble *selectedBubble;
 @end
 
 @implementation XFChatView
@@ -90,12 +91,35 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     label.text=text?:@"";
     [bubble addSubview:label];
     bubble.label=label;
+    bubble.userInteractionEnabled=YES;
+    UILongPressGestureRecognizer *longPress=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(bubbleLongPressed:)];
+    longPress.minimumPressDuration=0.45;
+    [bubble addGestureRecognizer:longPress];
     [self.scroll addSubview:bubble];
     [self.bubbles addObject:bubble];
     if(self.bubbles.count>24){
         XFChatBubble *old=self.bubbles[0];[old removeFromSuperview];[self.bubbles removeObjectAtIndex:0];
     }
     return bubble;
+}
+- (BOOL)canBecomeFirstResponder {return YES;}
+- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
+    return action==@selector(copy:) && self.selectedBubble.label.text.length>0;
+}
+- (void)copy:(id)sender {
+    NSString *text=self.selectedBubble.label.text;
+    if(text.length)[UIPasteboard generalPasteboard].string=text;
+    self.selectedBubble=nil;
+}
+- (void)bubbleLongPressed:(UILongPressGestureRecognizer *)gesture {
+    if(gesture.state!=UIGestureRecognizerStateBegan)return;
+    XFChatBubble *bubble=(XFChatBubble *)gesture.view;
+    if(!bubble.label.text.length)return;
+    self.selectedBubble=bubble;
+    [self becomeFirstResponder];
+    UIMenuController *menu=[UIMenuController sharedMenuController];
+    [menu setTargetRect:bubble.bounds inView:bubble];
+    [menu setMenuVisible:YES animated:YES];
 }
 - (void)showConversation:(NSArray *)messages {
     [self clearBubbles];
