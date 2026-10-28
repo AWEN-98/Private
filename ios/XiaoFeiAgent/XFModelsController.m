@@ -770,6 +770,9 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *capability=XFCapability(item[@"category"]);
     if([capability isEqualToString:@"other"]){[self editCategoryForEntry:item];return;}
     XFSelect(capability,account[@"id"],model[@"id"]);
+    // Vision chat models can also answer ordinary text questions.
+    // Keep the main chat selector in sync when the user selects a vision model.
+    if([capability isEqualToString:@"vision"]) XFSelect(@"chat",account[@"id"],model[@"id"]);
     [self refresh];
     self.title=@"已切换";
 }
