@@ -8,6 +8,9 @@
 @property(nonatomic,strong) UILabel *status;
 @property(nonatomic,strong) UIActivityIndicatorView *spinner;
 @property(nonatomic,strong) NSURL *initialURL;
+@property(nonatomic,assign) NSUInteger requestGeneration;
+@property(nonatomic,strong) UIView *failurePanel;
+@property(nonatomic,strong) UILabel *failureText;
 @end
 @implementation DLBrowserController
 - (instancetype)initWithURL:(NSURL *)url { if((self=[super init]))self.initialURL=url;return self; }
@@ -53,12 +56,48 @@
    [b setTitle:names[i] forState:UIControlStateNormal];b.titleLabel.font=[UIFont systemFontOfSize:14];
    [b addTarget:self action:sels[i] forControlEvents:UIControlEventTouchUpInside];[footer addSubview:b];
  }
+ [self installFailurePanel];
  [self openURL:self.initialURL];
+}
+- (void)installFailurePanel {
+ CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
+ UIView *v=[[UIView alloc]initWithFrame:CGRectMake(12,MAX(76,(h-245)/2),w-24,245)];
+ v.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleBottomMargin;
+ v.backgroundColor=[UIColor colorWithWhite:.11 alpha:.97];v.layer.cornerRadius=12;
+ UILabel *label=[[UILabel alloc]initWithFrame:CGRectMake(16,12,w-56,105)];
+ label.autoresizingMask=UIViewAutoresizingFlexibleWidth;label.textColor=[UIColor whiteColor];
+ label.numberOfLines=0;label.textAlignment=NSTextAlignmentCenter;label.font=[UIFont systemFontOfSize:13];
+ label.text=@"正在加载抖音网页…";[v addSubview:label];self.failureText=label;
+ NSArray *titles=@[@"重新加载",@"Safari 打开",@"返回原生视频"];
+ SEL actions[]={@selector(reloadPage),@selector(openSafari),@selector(close)};
+ for(NSInteger i=0;i<3;i++){
+  UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];
+  b.frame=CGRectMake(16,124+i*37,w-56,32);b.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+  [b setTitle:titles[i] forState:UIControlStateNormal];b.titleLabel.font=[UIFont boldSystemFontOfSize:14];
+  [b addTarget:self action:actions[i] forControlEvents:UIControlEventTouchUpInside];[v addSubview:b];
+ }
+ v.hidden=YES;[self.view addSubview:v];self.failurePanel=v;
+}
+- (void)openSafari {NSURL *url=[NSURL URLWithString:self.address.text?:@""];if(url)[[UIApplication sharedApplication] openURL:url];}
+- (void)showFailureMessage:(NSString *)msg {
+ self.failureText.text=msg;
+ self.failurePanel.hidden=NO;
+}
+- (void)checkLoadingTimeout:(NSNumber *)generation {
+ if(generation.unsignedIntegerValue!=self.requestGeneration)return;
+ [self showFailureMessage:@"网页长时间没有完成加载。iOS 8 的 WebKit 可能无法执行新版抖音所需的 JavaScript，也可能发生 TLS 或网络请求失败。你可以重试、用 Safari 测试，或返回原生视频列表。"];
+}
+- (void)finishLoading {
+ self.requestGeneration++;
+ self.failurePanel.hidden=YES;
 }
 - (void)close {[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)openURL:(NSURL *)url{
  if(!url || !([url.scheme isEqualToString:@"https"]||[url.scheme isEqualToString:@"http"]))return;
  self.address.text=url.absoluteString;
+ self.failurePanel.hidden=YES;
+ NSUInteger generation=++self.requestGeneration;
+ [self performSelector:@selector(checkLoadingTimeout:) withObject:@(generation) afterDelay:18];
  NSURLRequest *request=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:20];
  if(self.web)[self.web loadRequest:request];else if(self.legacy)[self.legacy loadRequest:request];
 }
@@ -74,15 +113,14 @@
 - (void)reloadPage {if(self.web)[self.web reload];else[self.legacy reload];}
 - (void)openHome {[self openURL:[NSURL URLWithString:@"https://www.douyin.com/"]];}
 - (void)openLive {[self openURL:[NSURL URLWithString:@"https://live.douyin.com/"]];}
-- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {self.address.text=webView.URL.absoluteString;}
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {self.address.text=webView.URL.absoluteString;[self finishLoading];}
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self showError:error];}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {[self showError:error];}
-- (void)webViewDidFinishLoad:(UIWebView *)webView {self.address.text=webView.request.URL.absoluteString;}
+- (void)webViewDidFinishLoad:(UIWebView *)webView {self.address.text=webView.request.URL.absoluteString;[self finishLoading];}
 - (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error {[self showError:error];}
 - (void)showError:(NSError *)error {
  if(error.code==NSURLErrorCancelled)return;
- UIAlertController *a=[UIAlertController alertControllerWithTitle:@"网页加载失败" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
- [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
- if(self.presentedViewController==nil)[self presentViewController:a animated:YES completion:nil];
+ self.requestGeneration++;
+ [self showFailureMessage:[NSString stringWithFormat:@"网页加载失败（错误 %ld）：%@\n可尝试 Safari 打开。如果 Safari 同样无法访问，旧系统浏览器兼容性可能是原因。",(long)error.code,error.localizedDescription?:@"未知错误"]];
 }
 @end
