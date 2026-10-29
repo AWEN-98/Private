@@ -60,7 +60,7 @@
  if(!url || !([url.scheme isEqualToString:@"https"]||[url.scheme isEqualToString:@"http"]))return;
  self.address.text=url.absoluteString;
  NSURLRequest *request=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:20];
- if(self.web)[self.web loadRequest:request];else[self.legacy loadRequest:request];
+ if(self.web)[self.web loadRequest:request];else if(self.legacy)[self.legacy loadRequest:request];
 }
 - (void)openAddress{
  [self.address resignFirstResponder];
@@ -69,8 +69,8 @@
  [self openURL:[NSURL URLWithString:value]];
 }
 - (BOOL)textFieldShouldReturn:(UITextField *)field {[self openAddress];return YES;}
-- (void)goBack {if(self.web.canGoBack)[self.web goBack];else if(self.legacy.canGoBack)[self.legacy goBack];}
-- (void)goForward {if(self.web.canGoForward)[self.web goForward];else if(self.legacy.canGoForward)[self.legacy goForward];}
+- (void)goBack {if(self.web && self.web.canGoBack)[self.web goBack];else if(self.legacy && self.legacy.canGoBack)[self.legacy goBack];}
+- (void)goForward {if(self.web && self.web.canGoForward)[self.web goForward];else if(self.legacy && self.legacy.canGoForward)[self.legacy goForward];}
 - (void)reloadPage {if(self.web)[self.web reload];else[self.legacy reload];}
 - (void)openHome {[self openURL:[NSURL URLWithString:@"https://www.douyin.com/"]];}
 - (void)openLive {[self openURL:[NSURL URLWithString:@"https://live.douyin.com/"]];}
