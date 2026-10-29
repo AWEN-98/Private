@@ -192,6 +192,22 @@ class BrowserFeed:
                     self.error = str(exc)[:250]
                     break
 
+    async def session_info(self):
+        """Report cookie presence without disclosing credentials or claiming login validity."""
+        cookie_names = {"sessionid", "sessionid_ss", "sid_tt", "sid_guard"}
+        result = {"session_cookie_present": False, "login_verified": False}
+        if not self.context:
+            return result
+        try:
+            cookies = await self.context.cookies(FEED_URL)
+            result["session_cookie_present"] = any(
+                item.get("name", "").lower() in cookie_names and bool(item.get("value"))
+                for item in cookies
+            )
+        except Exception:
+            pass
+        return result
+
     async def close(self):
         if self.context:
             await self.context.close()
@@ -225,10 +241,13 @@ async def health():
 async def status(request: Request):
     authorize(request)
     await engine.check_status()
+    session = await engine.session_info()
     return {
         "status": engine.status, "items": len(engine.items),
         "last_seen": int(engine.last_seen), "error": engine.error,
         "manual_verification": engine.status == "verification_required",
+        **session,
+        "login_help": "Use the private noVNC browser desktop to log in or complete verification manually. A cookie does not guarantee a valid account session.",
     }
 
 @app.get("/api/feed")
