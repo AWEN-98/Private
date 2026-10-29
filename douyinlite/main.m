@@ -163,6 +163,95 @@ static NSDictionary *DLVideoDetails(NSString *html){
     return @{@"url":url,@"title":title,@"source":@"public-share"};
 }
 
+
+static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(size,size),NO,0);
+    CGContextRef c=UIGraphicsGetCurrentContext();
+    if(!c)return nil;
+    CGContextScaleCTM(c,size/24.0,size/24.0);
+    CGContextSetLineWidth(c,1.85);
+    CGContextSetLineCap(c,kCGLineCapRound);
+    CGContextSetLineJoin(c,kCGLineJoinRound);
+    CGContextSetStrokeColorWithColor(c,color.CGColor);
+    CGContextSetFillColorWithColor(c,color.CGColor);
+    if([kind isEqualToString:@"heart"]||[kind isEqualToString:@"heart-on"]){
+        CGContextMoveToPoint(c,12,20.5);
+        CGContextAddCurveToPoint(c,3.2,12.7,2.0,8.5,4,5.7);
+        CGContextAddCurveToPoint(c,6.0,2.6,10.0,3.3,12,6.1);
+        CGContextAddCurveToPoint(c,14.0,3.3,18.0,2.6,20,5.7);
+        CGContextAddCurveToPoint(c,22,8.5,20.8,12.7,12,20.5);
+        CGContextClosePath(c);
+        if([kind isEqualToString:@"heart-on"])CGContextDrawPath(c,kCGPathFillStroke);
+        else CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"plus"]){
+        CGContextMoveToPoint(c,12,4);CGContextAddLineToPoint(c,12,20);
+        CGContextMoveToPoint(c,4,12);CGContextAddLineToPoint(c,20,12);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"menu"]){
+        for(int y=6;y<=18;y+=6){CGContextMoveToPoint(c,4,y);CGContextAddLineToPoint(c,20,y);}
+        CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"share"]){
+        CGContextMoveToPoint(c,12,3);CGContextAddLineToPoint(c,12,15);
+        CGContextMoveToPoint(c,7,8);CGContextAddLineToPoint(c,12,3);CGContextAddLineToPoint(c,17,8);
+        CGContextMoveToPoint(c,4.5,13);CGContextAddLineToPoint(c,4.5,19);
+        CGContextAddQuadCurveToPoint(c,4.5,21,7,21);
+        CGContextAddLineToPoint(c,17,21);CGContextAddQuadCurveToPoint(c,19.5,21,19.5,18.5);
+        CGContextAddLineToPoint(c,19.5,13);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"sound"]||[kind isEqualToString:@"muted"]){
+        CGContextMoveToPoint(c,3,9);CGContextAddLineToPoint(c,7,9);
+        CGContextAddLineToPoint(c,12,5);CGContextAddLineToPoint(c,12,19);
+        CGContextAddLineToPoint(c,7,15);CGContextAddLineToPoint(c,3,15);CGContextClosePath(c);
+        CGContextStrokePath(c);
+        if([kind isEqualToString:@"sound"]){
+            CGContextMoveToPoint(c,16,9);CGContextAddQuadCurveToPoint(c,19,12,16,15);
+            CGContextMoveToPoint(c,18,6);CGContextAddQuadCurveToPoint(c,24,12,18,18);
+        }else{
+            CGContextMoveToPoint(c,16,9);CGContextAddLineToPoint(c,21,15);
+            CGContextMoveToPoint(c,21,9);CGContextAddLineToPoint(c,16,15);
+        }
+        CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"play"]){
+        CGContextMoveToPoint(c,8,4.5);CGContextAddLineToPoint(c,19,12);
+        CGContextAddLineToPoint(c,8,19.5);CGContextClosePath(c);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"pause"]){
+        CGContextMoveToPoint(c,8,5);CGContextAddLineToPoint(c,8,19);
+        CGContextMoveToPoint(c,16,5);CGContextAddLineToPoint(c,16,19);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"home"]){
+        CGContextMoveToPoint(c,3,11);CGContextAddLineToPoint(c,12,3.5);
+        CGContextAddLineToPoint(c,21,11);
+        CGContextMoveToPoint(c,5.5,10);CGContextAddLineToPoint(c,5.5,20);
+        CGContextAddLineToPoint(c,18.5,20);CGContextAddLineToPoint(c,18.5,10);
+        CGContextMoveToPoint(c,10,20);CGContextAddLineToPoint(c,10,14);
+        CGContextAddLineToPoint(c,14,14);CGContextAddLineToPoint(c,14,20);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"search"]){
+        CGContextAddArc(c,10.5,10.5,6.5,0,2*M_PI,0);
+        CGContextMoveToPoint(c,15.1,15.1);CGContextAddLineToPoint(c,21,21);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"user"]){
+        CGContextAddArc(c,12,8,4.1,0,2*M_PI,0);
+        CGContextMoveToPoint(c,4.5,21);CGContextAddQuadCurveToPoint(c,3.9,14,12,14);
+        CGContextAddQuadCurveToPoint(c,20.1,14,19.5,21);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"clock"]){
+        CGContextAddArc(c,12,12,9,0,2*M_PI,0);
+        CGContextMoveToPoint(c,12,6.5);CGContextAddLineToPoint(c,12,12);
+        CGContextAddLineToPoint(c,16,14);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"grid"]){
+        for(int y=4;y<=14;y+=10)for(int x=4;x<=14;x+=10){
+            CGContextStrokeRect(c,CGRectMake(x,y,6,6));
+        }
+    }else if([kind isEqualToString:@"back"]){
+        CGContextMoveToPoint(c,15.5,4.5);CGContextAddLineToPoint(c,8,12);
+        CGContextAddLineToPoint(c,15.5,19.5);CGContextStrokePath(c);
+    }
+    UIImage *result=UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return result;
+}
+static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *color){
+    [button setTitle:nil forState:UIControlStateNormal];
+    [button setImage:DLLineIcon(kind,size,color) forState:UIControlStateNormal];
+    button.adjustsImageWhenHighlighted=NO;
+    button.imageView.contentMode=UIViewContentModeScaleAspectFit;
+}
+
 @interface DLVideoSurface : UIView @end
 @implementation DLVideoSurface
 + (Class)layerClass{return [AVPlayerLayer class];}
