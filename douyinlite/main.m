@@ -131,12 +131,6 @@ static NSDictionary *DLPublicInfoFromHTML(NSString *html) {
 }
 static NSString *DLPublicPlaybackURL(NSDictionary *item) {
     NSDictionary *video=[item[@"video"] isKindOfClass:[NSDictionary class]]?item[@"video"]:@{};
-    NSDictionary *play=[video[@"play_addr"] isKindOfClass:[NSDictionary class]]?video[@"play_addr"]:@{};
-    NSArray *urls=[play[@"url_list"] isKindOfClass:[NSArray class]]?play[@"url_list"]:@[];
-    for(id candidate in urls){
-        NSString *link=DLText(candidate);
-        if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
-    }
     NSArray *rates=[video[@"bit_rate"] isKindOfClass:[NSArray class]]?video[@"bit_rate"]:@[];
     // Favor H.264 to maximize compatibility with iPhone 4S.
     for(id entry in rates){
@@ -150,6 +144,12 @@ static NSString *DLPublicPlaybackURL(NSDictionary *item) {
             NSString *link=DLText(candidate);
             if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
         }
+    }
+    NSDictionary *play=[video[@"play_addr"] isKindOfClass:[NSDictionary class]]?video[@"play_addr"]:@{};
+    NSArray *urls=[play[@"url_list"] isKindOfClass:[NSArray class]]?play[@"url_list"]:@[];
+    for(id candidate in urls){
+        NSString *link=DLText(candidate);
+        if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
     }
     return nil;
 }
