@@ -637,6 +637,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"];
  if(!base.length)return;
  if(self.onlineLoading&&!reset)return;
+ if(!reset && !self.feedNextPageURL.length)return;
  if(reset){[self.onlineVideos removeAllObjects];self.onlineError=nil;self.onlineOffset=0;self.index=0;}
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
@@ -645,7 +646,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  if(reset)self.feedNextPageURL=nil;
  NSURL *url=[NSURL URLWithString:endpoint];
  if(![url.scheme isEqualToString:@"https"]){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=@"内容接口需要 HTTPS";[self reloadCurrent];return;}
- if(!reset && !self.feedNextPageURL.length)return;
  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
  NSString *bridgeKey=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"];
  if(bridgeKey.length)[req setValue:[@"Bearer " stringByAppendingString:bridgeKey] forHTTPHeaderField:@"Authorization"];
