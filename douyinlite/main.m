@@ -186,6 +186,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
 @property(nonatomic,assign) BOOL transitioning;
 @property(nonatomic,assign) NSUInteger transitionID;
 @property(nonatomic,strong) NSMutableDictionary *positions;
+@property(nonatomic,copy) NSString *playingURL;
 @property(nonatomic,assign) NSTimeInterval lastPositionSave;
 @property(nonatomic,assign) BOOL demoMode;
 @property(nonatomic,assign) BOOL scanning;
@@ -471,10 +472,8 @@ static NSDictionary *DLVideoDetails(NSString *html){
     [d setObject:self.history forKey:@"dl_history_v1"];
 }
 - (void)saveCurrentPosition {
-    NSArray *clips=[self visibleVideos];
-    if(!self.item||self.index<0||self.index>=clips.count)return;
-    NSString *key=DLText(clips[self.index][@"url"]);
-    if(!key.length)return;
+    NSString *key=self.playingURL;
+    if(!self.item||!key.length)return;
     NSTimeInterval time=CMTimeGetSeconds(self.player.currentTime);
     NSTimeInterval duration=CMTimeGetSeconds(self.item.duration);
     if(!isfinite(time)||time<1)return;
@@ -496,7 +495,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
         [[NSNotificationCenter defaultCenter] removeObserver:self name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.item];
     }
     [self.player replaceCurrentItemWithPlayerItem:nil];
-    self.item=nil;self.holdingSpeed=NO;
+    self.item=nil;self.playingURL=nil;self.holdingSpeed=NO;
     [self setLoading:NO];
 }
 - (void)reloadCurrent {
@@ -524,6 +523,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
     }
     NSDictionary *clip=visible[self.index];
     NSString *address=DLText(clip[@"url"]);
+    self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
     NSString *kind=[clip[@"source"] isEqualToString:@"demo"]?@"公开授权样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
@@ -555,14 +555,10 @@ static NSDictionary *DLVideoDetails(NSString *html){
         if(item!=self.item)return;
         if(item.status==AVPlayerItemStatusReadyToPlay){
             [self setLoading:NO];self.message.text=@"";
-            NSArray *videos=[self visibleVideos];
-            if(self.index<videos.count){
-                NSString *key=DLText(videos[self.index][@"url"]);
-                NSTimeInterval previous=[self.positions[key] doubleValue];
-                NSTimeInterval duration=CMTimeGetSeconds(item.duration);
-                if(isfinite(duration)&&duration>0 && previous>4 && previous<duration-6)
-                    [self.player seekToTime:CMTimeMakeWithSeconds(previous,600)];
-            }
+            NSTimeInterval previous=[self.positions[self.playingURL] doubleValue];
+            NSTimeInterval duration=CMTimeGetSeconds(item.duration);
+            if(isfinite(duration)&&duration>0 && previous>4 && previous<duration-6)
+                [self.player seekToTime:CMTimeMakeWithSeconds(previous,600)];
             [self.player play];
             [self prepareNextAsset];
             self.playButton.hidden=YES;
@@ -581,9 +577,8 @@ static NSDictionary *DLVideoDetails(NSString *html){
 }
 - (void)videoEnded:(NSNotification *)notification {
     NSArray *clips=[self visibleVideos];
-    if(self.index>=0&&self.index<clips.count){
-        NSString *key=DLText(clips[self.index][@"url"]);
-        [self.positions removeObjectForKey:key];
+    if(self.playingURL.length){
+        [self.positions removeObjectForKey:self.playingURL];
         [[NSUserDefaults standardUserDefaults] setObject:self.positions forKey:@"dl_positions_v1"];
     }
     if(!clips.count)return;
