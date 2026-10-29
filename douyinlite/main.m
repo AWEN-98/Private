@@ -429,7 +429,9 @@ static NSDictionary *DLVideoDetails(NSString *html){
             self.loading=NO;self.message.text=@"";
             [self.player play];
             self.playButton.hidden=YES;
-            NSString *key=DLText([self visibleVideos][self.index][@"url"]);
+            NSArray *shown=[self visibleVideos];
+            if(!shown.count || self.index>=shown.count)return;
+            NSString *key=DLText(shown[self.index][@"url"]);
             [self.history removeObject:key];[self.history insertObject:key atIndex:0];
             if(self.history.count>100)[self.history removeLastObject];
             [self storeLibrary];
@@ -568,11 +570,12 @@ static NSDictionary *DLVideoDetails(NSString *html){
             html=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             if(!html)html=[[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding];
         }
-        NSString *video=DLPublicVideoFromHTML(html);
+        NSDictionary *publicClip=DLVideoDetails(html);
+        NSString *video=DLText(publicClip[@"url"]);
         dispatch_async(dispatch_get_main_queue(),^{
             self.message.text=@"";
             if(video.length){
-                [self addPlayableURL:video name:@"抖音公开分享视频" source:@"public-share"];
+                [self addPlayableURL:video name:DLText(publicClip[@"title"]) source:@"public-share"];
             }else{
                 [self alert:@"暂无法从分享页播放"
                   message:@"已识别抖音分享链接，但当前公开页面未提供可直接播放的视频地址。DouyinLite 不会绕过登录、风控或视频访问限制；你可以导入已获授权的 MP4/HLS 视频直链或本机文件。"];
