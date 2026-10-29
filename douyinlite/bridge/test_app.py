@@ -19,3 +19,27 @@ def test_reject_non_https():
 def test_empty_and_challenge_responses():
     assert extract_items({"status_code":0,"aweme_list":[]})==[]
     assert extract_items({"page_title":"验证码中间页"})==[]
+
+def test_login_cookie_status_never_returns_cookie_value():
+    import asyncio
+    from app import BrowserFeed
+    class FakeContext:
+        async def cookies(self, url):
+            return [{"name": "sessionid_ss", "value": "private-session-should-not-leak"}]
+    engine = BrowserFeed()
+    engine.context = FakeContext()
+    status = asyncio.run(engine.session_info())
+    assert status["session_cookie_present"] is True
+    assert status["login_verified"] is False
+    assert "private-session-should-not-leak" not in str(status)
+
+def test_guest_session_is_not_falsely_marked_logged_in():
+    import asyncio
+    from app import BrowserFeed
+    class FakeContext:
+        async def cookies(self, url):
+            return [{"name": "msToken", "value": "public-guest-marker"}]
+    engine = BrowserFeed()
+    engine.context = FakeContext()
+    status = asyncio.run(engine.session_info())
+    assert status["session_cookie_present"] is False
