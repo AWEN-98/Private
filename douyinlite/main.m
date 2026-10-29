@@ -177,6 +177,14 @@ static NSDictionary *DLVideoDetails(NSString *html){
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,strong) NSArray *demoVideos;
 @property(nonatomic,strong) AVURLAsset *nextAsset;
+@property(nonatomic,copy) NSString *nextURL;
+@property(nonatomic,copy) NSString *preloadSourceURL;
+@property(nonatomic,strong) UIActivityIndicatorView *loadingIndicator;
+@property(nonatomic,assign) BOOL animationsEnabled;
+@property(nonatomic,assign) BOOL preloadEnabled;
+@property(nonatomic,assign) BOOL autoplayNext;
+@property(nonatomic,assign) BOOL transitioning;
+@property(nonatomic,assign) NSUInteger transitionID;
 @property(nonatomic,assign) BOOL demoMode;
 @property(nonatomic,assign) BOOL scanning;
 @property(nonatomic,assign) NSInteger failedDemoCount;
@@ -228,6 +236,9 @@ static NSDictionary *DLVideoDetails(NSString *html){
     self.videos=[[[defaults arrayForKey:@"dl_library_v1"]?:@[] mutableCopy] mutableCopy];
     self.favorites=[[[defaults arrayForKey:@"dl_favorites_v1"]?:@[] mutableCopy] mutableCopy];
     self.history=[[[defaults arrayForKey:@"dl_history_v1"]?:@[] mutableCopy] mutableCopy];
+    self.animationsEnabled=![[defaults objectForKey:@"dl_animations_enabled_v1"] isEqual:@NO];
+    self.preloadEnabled=![[defaults objectForKey:@"dl_preload_enabled_v1"] isEqual:@NO];
+    self.autoplayNext=![[defaults objectForKey:@"dl_autonext_enabled_v1"] isEqual:@NO];
     self.index=0;
     // Real open-licensed sample MP4s are a clearly labeled playback test
     // source. They are never misrepresented as a Douyin recommendation feed.
@@ -237,6 +248,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
     self.demoMode=self.videos.count==0;
+    self.index=[[defaults objectForKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"] integerValue];
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
     self.surface.backgroundColor=DLBG();
     self.surface.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -303,6 +315,9 @@ static NSDictionary *DLVideoDetails(NSString *html){
     self.message=[self label:14];self.message.numberOfLines=0;
     self.message.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.message];
+    self.loadingIndicator=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+    self.loadingIndicator.hidesWhenStopped=YES;
+    [self.view addSubview:self.loadingIndicator];
 
     self.progress=[UIProgressView new];self.progress.progressTintColor=DLAccent();
     self.progress.trackTintColor=[UIColor colorWithWhite:1 alpha:.3];
@@ -330,25 +345,121 @@ static NSDictionary *DLVideoDetails(NSString *html){
     self.titleText.frame=CGRectMake(14,h-124,MAX(100,w-93),42);
     self.subtitleText.frame=CGRectMake(14,h-82,MAX(100,w-93),43);
     self.countText.frame=CGRectMake(MAX(140,w-96),h-43,80,22);
-    self.message.frame=CGRectMake(20,MAX(70,(h-100)/2),w-40,110);
+    self.message.frame=CGRectMake(20,MAX(85,(h-100)/2),w-40,110);
+    self.loadingIndicator.center=CGPointMake(w/2,MAX(78,h/2-49));
     self.progress.frame=CGRectMake(0,h-3,w,3);
 }
 - (NSArray *)visibleVideos {
     if(self.demoMode && !self.favoritesOnly && !self.historyOnly)return self.demoVideos;
     if(self.favoritesOnly){
         NSMutableArray *result=[NSMutableArray array];
+        // Demo clips are eligible for favorites as well as user-imported clips.
         for(NSDictionary *v in self.videos)
+            if([self.favorites containsObject:DLText(v[@"url"])])[result addObject:v];
+        for(NSDictionary *v in self.demoVideos)
             if([self.favorites containsObject:DLText(v[@"url"])])[result addObject:v];
         return result;
     }
     if(self.historyOnly){
         NSMutableArray *result=[NSMutableArray array];
         for(NSString *key in self.history){
-            for(NSDictionary *v in self.videos)if([key isEqualToString:DLText(v[@"url"])]){[result addObject:v];break;}
+            NSDictionary *found=nil;
+            for(NSDictionary *v in self.videos)if([key isEqualToString:DLText(v[@"url"])]){found=v;break;}
+            if(!found)for(NSDictionary *v in self.demoVideos)if([key isEqualToString:DLText(v[@"url"])]){found=v;break;}
+            if(found)[result addObject:found];
         }
         return result;
     }
     return self.videos;
+}
+- (void)savePlaybackIndex {
+    if(!self.favoritesOnly&&!self.historyOnly)
+        [[NSUserDefaults standardUserDefaults] setInteger:self.index forKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"];
+}
+- (void)setLoading:(BOOL)busy {
+    self.loading=busy;
+    if(busy)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
+}
+- (void)pulseView:(UIView *)target {
+    if(!self.animationsEnabled || UIAccessibilityIsReduceMotionEnabled() || !target)return;
+    target.transform=CGAffineTransformMakeScale(1.24,1.24);
+    [UIView animateWithDuration:.19 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionAllowUserInteraction animations:^{
+        target.transform=CGAffineTransformIdentity;
+    } completion:nil];
+}
+- (void)showHeartAnimationAt:(CGPoint)point {
+    if(!self.animationsEnabled||UIAccessibilityIsReduceMotionEnabled())return;
+    UILabel *heart=[[UILabel alloc] initWithFrame:CGRectMake(point.x-44,point.y-48,88,88)];
+    heart.text=@"♥";heart.textAlignment=NSTextAlignmentCenter;
+    heart.textColor=[UIColor colorWithRed:1 green:.28 blue:.43 alpha:1];
+    heart.font=[UIFont boldSystemFontOfSize:79];
+    heart.shadowColor=[UIColor colorWithWhite:0 alpha:.45];
+    heart.shadowOffset=CGSizeMake(0,2);
+    heart.alpha=0;heart.transform=CGAffineTransformMakeScale(.45,.45);
+    heart.userInteractionEnabled=NO;
+    [self.view addSubview:heart];
+    [UIView animateWithDuration:.17 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+        heart.alpha=1;heart.transform=CGAffineTransformMakeScale(1.12,1.12);
+    } completion:^(BOOL finished){
+        [UIView animateWithDuration:.24 delay:.06 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+            heart.alpha=0;
+            heart.transform=CGAffineTransformConcat(CGAffineTransformMakeScale(.92,.92),CGAffineTransformMakeTranslation(0,-24));
+        } completion:^(BOOL done){[heart removeFromSuperview];}];
+    }];
+}
+- (void)transitionToIndex:(NSInteger)index direction:(NSInteger)direction {
+    if(self.transitioning)return;
+    self.transitioning=YES;
+    NSUInteger token=++self.transitionID;
+    CGFloat distance=direction>=0?-14.0f:14.0f;
+    if(!self.animationsEnabled || UIAccessibilityIsReduceMotionEnabled()){
+        self.index=index;
+        [self savePlaybackIndex];
+        [self reloadCurrent];
+        self.transitioning=NO;
+        return;
+    }
+    NSArray *captions=@[self.titleText,self.subtitleText,self.countText,self.rightRail];
+    [UIView animateWithDuration:.11 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionCurveEaseIn animations:^{
+        for(UIView *v in captions){v.alpha=0;v.transform=CGAffineTransformMakeTranslation(0,distance);}
+    } completion:^(BOOL finished){
+        if(token!=self.transitionID)return;
+        self.index=index;
+        [self savePlaybackIndex];
+        [self reloadCurrent];
+        for(UIView *v in captions){v.transform=CGAffineTransformMakeTranslation(0,-distance);v.alpha=0;}
+        [UIView animateWithDuration:.19 delay:0 options:UIViewAnimationOptionBeginFromCurrentState|UIViewAnimationOptionCurveEaseOut animations:^{
+            for(UIView *v in captions){v.transform=CGAffineTransformIdentity;v.alpha=1;}
+        } completion:^(BOOL done){if(token==self.transitionID)self.transitioning=NO;}];
+    }];
+}
+- (void)prepareNextAsset {
+    self.nextAsset=nil;self.nextURL=nil;self.preloadSourceURL=nil;
+    if(!self.preloadEnabled || !self.item || ![self visibleVideos].count)return;
+    NSArray *videos=[self visibleVideos];
+    NSInteger next=self.index+1;
+    if(next>=videos.count){
+        if(self.demoMode && videos.count>1)next=0;
+        else return;
+    }
+    NSString *link=DLText(videos[next][@"url"]);
+    if(!link.length)return;
+    NSURL *url=[NSURL URLWithString:link];
+    if(!url)return;
+    self.preloadSourceURL=DLText(videos[self.index][@"url"]);
+    self.nextURL=link;
+    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:url options:@{AVURLAssetPreferPreciseDurationAndTimingKey:@NO}];
+    self.nextAsset=asset;
+    [asset loadValuesAsynchronouslyForKeys:@[@"playable"] completionHandler:^{
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(self.nextAsset!=asset)return;
+            NSError *error=nil;
+            AVKeyValueStatus status=[asset statusOfValueForKey:@"playable" error:&error];
+            if(status!=AVKeyValueStatusLoaded || !asset.playable){
+                self.nextAsset=nil;self.nextURL=nil;self.preloadSourceURL=nil;
+            }
+        });
+    }];
 }
 - (void)storeLibrary {
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
@@ -366,12 +477,17 @@ static NSDictionary *DLVideoDetails(NSString *html){
     }
     [self.player replaceCurrentItemWithPlayerItem:nil];
     self.item=nil;self.holdingSpeed=NO;
+    [self setLoading:NO];
 }
 - (void)reloadCurrent {
     NSArray *visible=[self visibleVideos];
+    // Reuse the one metadata-prefetched asset, never a second decoding player.
+    NSString *wanted=self.index<(NSInteger)visible.count?DLText(visible[self.index][@"url"]):@"";
+    AVURLAsset *prefetched=([wanted isEqualToString:self.nextURL])?self.nextAsset:nil;
+    self.nextAsset=nil;self.nextURL=nil;self.preloadSourceURL=nil;
     if(self.index>=visible.count)self.index=MAX(0,(NSInteger)visible.count-1);
     [self stopCurrent];
-    self.loading=NO;
+    [self setLoading:NO];
     self.progress.progress=0;
     self.playButton.hidden=YES;
     self.message.text=@"";
@@ -400,9 +516,9 @@ static NSDictionary *DLVideoDetails(NSString *html){
         self.playButton.hidden=NO;
         return;
     }
-    self.loading=YES;
+    [self setLoading:YES];
     self.message.text=@"正在加载视频…";
-    self.item=[AVPlayerItem playerItemWithURL:url];
+    self.item=prefetched?[AVPlayerItem playerItemWithAsset:prefetched]:[AVPlayerItem playerItemWithURL:url];
     [self.item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial context:NULL];
     self.observing=YES;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:self.item];
@@ -418,8 +534,9 @@ static NSDictionary *DLVideoDetails(NSString *html){
     dispatch_async(dispatch_get_main_queue(), ^{
         if(item!=self.item)return;
         if(item.status==AVPlayerItemStatusReadyToPlay){
-            self.loading=NO;self.message.text=@"";
+            [self setLoading:NO];self.message.text=@"";
             [self.player play];
+            [self prepareNextAsset];
             self.playButton.hidden=YES;
             NSArray *shown=[self visibleVideos];
             if(!shown.count || self.index>=shown.count)return;
@@ -428,7 +545,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
             if(self.history.count>100)[self.history removeLastObject];
             [self storeLibrary];
         }else if(item.status==AVPlayerItemStatusFailed){
-            self.loading=NO;
+            [self setLoading:NO];
             self.message.text=@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权\n\n可添加直接的 MP4 / HLS 地址";
             self.playButton.hidden=NO;
         }
@@ -437,11 +554,11 @@ static NSDictionary *DLVideoDetails(NSString *html){
 - (void)videoEnded:(NSNotification *)notification {
     NSArray *clips=[self visibleVideos];
     if(!clips.count)return;
-    if(self.index+1<(NSInteger)clips.count){
-        self.index++;[self reloadCurrent];return;
+    if(self.autoplayNext && self.index+1<(NSInteger)clips.count){
+        [self transitionToIndex:self.index+1 direction:1];return;
     }
-    if(self.demoMode && clips.count>1){
-        self.index=0;[self reloadCurrent];return;
+    if(self.autoplayNext && self.demoMode && clips.count>1){
+        [self transitionToIndex:0 direction:1];return;
     }
     [self.player pause];self.playButton.hidden=NO;
     self.message.text=@"播放结束 · 上滑继续或导入新视频";
@@ -472,7 +589,13 @@ static NSDictionary *DLVideoDetails(NSString *html){
     [self tick];
 }
 - (void)tapVideo:(UITapGestureRecognizer *)tap {if(tap.state==UIGestureRecognizerStateEnded)[self togglePlay];}
-- (void)doubleTapVideo:(UITapGestureRecognizer *)tap {if(tap.state==UIGestureRecognizerStateEnded)[self toggleFavorite];}
+- (void)doubleTapVideo:(UITapGestureRecognizer *)tap {
+    if(tap.state!=UIGestureRecognizerStateEnded)return;
+    NSArray *clips=[self visibleVideos];if(!clips.count)return;
+    NSString *key=DLText(clips[self.index][@"url"]);
+    if(![self.favorites containsObject:key])[self toggleFavorite];
+    [self showHeartAnimationAt:[tap locationInView:self.view]];
+}
 - (void)holdVideo:(UILongPressGestureRecognizer *)hold {
     if(hold.state==UIGestureRecognizerStateBegan){
         self.wasPlaying=self.player.rate>.01f;self.holdingSpeed=YES;
@@ -486,7 +609,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
     NSInteger next=self.index+(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1);
     if(next<0 || next>=clips.count){
         if(self.demoMode && clips.count){
-            self.index=next<0?(NSInteger)clips.count-1:0;[self reloadCurrent];return;
+            [self transitionToIndex:next<0?(NSInteger)clips.count-1:0 direction:(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1)];return;
         }
         if(clips.count){
             self.message.text=next<0?@"已经是第一条":@"已经是最后一条";
@@ -494,7 +617,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
         }
         return;
     }
-    self.index=next;[self reloadCurrent];
+    [self transitionToIndex:next direction:(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1)];
 }
 - (void)clearTransientMessage {if(self.player.rate>.01f)self.message.text=@"";}
 - (void)toggleFavorite {
@@ -503,6 +626,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
     if([self.favorites containsObject:key])[self.favorites removeObject:key];
     else[self.favorites addObject:key];
     [self storeLibrary];[self reloadMetadata];
+    [self pulseView:self.likeButton];
 }
 - (void)reloadMetadata {
     NSArray *clips=[self visibleVideos];if(!clips.count){[self reloadCurrent];return;}
