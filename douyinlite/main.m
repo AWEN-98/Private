@@ -185,6 +185,8 @@ static NSDictionary *DLVideoDetails(NSString *html){
 @property(nonatomic,assign) BOOL autoplayNext;
 @property(nonatomic,assign) BOOL transitioning;
 @property(nonatomic,assign) NSUInteger transitionID;
+@property(nonatomic,strong) NSMutableDictionary *positions;
+@property(nonatomic,assign) NSTimeInterval lastPositionSave;
 @property(nonatomic,assign) BOOL demoMode;
 @property(nonatomic,assign) BOOL scanning;
 @property(nonatomic,assign) NSInteger failedDemoCount;
@@ -236,6 +238,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
     self.videos=[[[defaults arrayForKey:@"dl_library_v1"]?:@[] mutableCopy] mutableCopy];
     self.favorites=[[[defaults arrayForKey:@"dl_favorites_v1"]?:@[] mutableCopy] mutableCopy];
     self.history=[[[defaults arrayForKey:@"dl_history_v1"]?:@[] mutableCopy] mutableCopy];
+    self.positions=[[[defaults dictionaryForKey:@"dl_positions_v1"]?:@{} mutableCopy] mutableCopy];
     self.animationsEnabled=![[defaults objectForKey:@"dl_animations_enabled_v1"] isEqual:@NO];
     self.preloadEnabled=![[defaults objectForKey:@"dl_preload_enabled_v1"] isEqual:@NO];
     self.autoplayNext=![[defaults objectForKey:@"dl_autonext_enabled_v1"] isEqual:@NO];
@@ -467,7 +470,24 @@ static NSDictionary *DLVideoDetails(NSString *html){
     [d setObject:self.favorites forKey:@"dl_favorites_v1"];
     [d setObject:self.history forKey:@"dl_history_v1"];
 }
+- (void)saveCurrentPosition {
+    NSArray *clips=[self visibleVideos];
+    if(!self.item||self.index<0||self.index>=clips.count)return;
+    NSString *key=DLText(clips[self.index][@"url"]);
+    if(!key.length)return;
+    NSTimeInterval time=CMTimeGetSeconds(self.player.currentTime);
+    NSTimeInterval duration=CMTimeGetSeconds(self.item.duration);
+    if(!isfinite(time)||time<1)return;
+    if(isfinite(duration)&&duration>0&&time>=duration-3)[self.positions removeObjectForKey:key];
+    else self.positions[key]=@(time);
+    if(self.positions.count>100){
+        NSString *oldKey=self.positions.allKeys.firstObject;
+        if(oldKey)[self.positions removeObjectForKey:oldKey];
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:self.positions forKey:@"dl_positions_v1"];
+}
 - (void)stopCurrent {
+    [self saveCurrentPosition];
     [self.player pause];
     if(self.observing && self.item)[self.item removeObserver:self forKeyPath:@"status" context:NULL];
     self.observing=NO;
@@ -535,6 +555,14 @@ static NSDictionary *DLVideoDetails(NSString *html){
         if(item!=self.item)return;
         if(item.status==AVPlayerItemStatusReadyToPlay){
             [self setLoading:NO];self.message.text=@"";
+            NSArray *videos=[self visibleVideos];
+            if(self.index<videos.count){
+                NSString *key=DLText(videos[self.index][@"url"]);
+                NSTimeInterval previous=[self.positions[key] doubleValue];
+                NSTimeInterval duration=CMTimeGetSeconds(item.duration);
+                if(isfinite(duration)&&duration>0 && previous>4 && previous<duration-6)
+                    [self.player seekToTime:CMTimeMakeWithSeconds(previous,600)];
+            }
             [self.player play];
             [self prepareNextAsset];
             self.playButton.hidden=YES;
@@ -553,6 +581,11 @@ static NSDictionary *DLVideoDetails(NSString *html){
 }
 - (void)videoEnded:(NSNotification *)notification {
     NSArray *clips=[self visibleVideos];
+    if(self.index>=0&&self.index<clips.count){
+        NSString *key=DLText(clips[self.index][@"url"]);
+        [self.positions removeObjectForKey:key];
+        [[NSUserDefaults standardUserDefaults] setObject:self.positions forKey:@"dl_positions_v1"];
+    }
     if(!clips.count)return;
     if(self.autoplayNext && self.index+1<(NSInteger)clips.count){
         [self transitionToIndex:self.index+1 direction:1];return;
@@ -574,6 +607,11 @@ static NSDictionary *DLVideoDetails(NSString *html){
     Float64 t=CMTimeGetSeconds(self.player.currentTime);
     Float64 d=CMTimeGetSeconds(self.item.duration);
     if(isfinite(t)&&isfinite(d)&&d>0)self.progress.progress=(float)MIN(1,MAX(0,t/d));
+    NSTimeInterval now=[[NSDate date] timeIntervalSince1970];
+    if(playing && now-self.lastPositionSave>8){
+        self.lastPositionSave=now;
+        [self saveCurrentPosition];
+    }
 }
 - (void)togglePlay {
     if(!self.item)return;
@@ -759,8 +797,27 @@ static NSDictionary *DLVideoDetails(NSString *html){
     [menu addAction:[UIAlertAction actionWithTitle:@"观看历史" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"轻量动画：%@",self.animationsEnabled?@"开":@"关"]
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.animationsEnabled=!self.animationsEnabled;
+        [[NSUserDefaults standardUserDefaults] setBool:self.animationsEnabled forKey:@"dl_animations_enabled_v1"];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"下一条预加载：%@",self.preloadEnabled?@"开":@"关"]
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.preloadEnabled=!self.preloadEnabled;
+        [[NSUserDefaults standardUserDefaults] setBool:self.preloadEnabled forKey:@"dl_preload_enabled_v1"];
+        if(self.preloadEnabled)[self prepareNextAsset];
+        else {self.nextAsset=nil;self.nextURL=nil;self.preloadSourceURL=nil;}
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"自动下一条：%@",self.autoplayNext?@"开":@"关"]
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.autoplayNext=!self.autoplayNext;
+        [[NSUserDefaults standardUserDefaults] setBool:self.autoplayNext forKey:@"dl_autonext_enabled_v1"];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"扫描本地视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self scanLocalVideos];}]];
-    if([self visibleVideos].count){
+    NSArray *currentClips=[self visibleVideos];
+    BOOL canRemove=currentClips.count && self.index<currentClips.count && ![DLText(currentClips[self.index][@"source"]) isEqualToString:@"demo"];
+    if(canRemove){
         [menu addAction:[UIAlertAction actionWithTitle:@"移除当前视频" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
             NSArray *clips=[self visibleVideos];
             if(!clips.count)return;
@@ -770,14 +827,25 @@ static NSDictionary *DLVideoDetails(NSString *html){
             }];
             [self.videos removeObjectsAtIndexes:indices];
             [self.favorites removeObject:url];[self.history removeObject:url];
+            [self.positions removeObjectForKey:url];
+            [[NSUserDefaults standardUserDefaults] setObject:self.positions forKey:@"dl_positions_v1"];
             self.index=0;[self storeLibrary];[self reloadCurrent];
         }]];
     }
     [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:menu animated:YES completion:nil];
 }
-- (void)viewWillDisappear:(BOOL)animated {[self.player pause];[super viewWillDisappear:animated];}
-- (void)dealloc {[self.uiTimer invalidate];[self stopCurrent];[[NSNotificationCenter defaultCenter] removeObserver:self];}
+- (void)viewWillDisappear:(BOOL)animated {
+    [self saveCurrentPosition];
+    [self.player pause];
+    [super viewWillDisappear:animated];
+}
+- (void)dealloc {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    [self.uiTimer invalidate];
+    [self stopCurrent];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
 @end
 
 @interface DLApp : UIResponder <UIApplicationDelegate>
