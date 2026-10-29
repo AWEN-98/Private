@@ -1250,6 +1250,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
         message:@"首页加载 PeerTube 公开视频，不是抖音推荐。抖音公开分享链接可尝试导入，部分需要平台登录或授权。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
+        if([[UIApplication sharedApplication] canOpenURL:url])[[UIApplication sharedApplication] openURL:url];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"联网公开视频 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
         self.index=0;[self reloadCurrent];[self loadOnlineFeed:YES];
