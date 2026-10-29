@@ -289,6 +289,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL searchMode;
 @property(nonatomic,assign) BOOL panning;
 @property(nonatomic,assign) NSInteger activeTab;
+@property(nonatomic,assign) NSInteger paintedTab;
+@property(nonatomic,assign) BOOL lastPlayingIcon;
 @property(nonatomic,strong) UIButton *likeButton;
 @property(nonatomic,strong) UIButton *muteButton;
 @property(nonatomic,strong) UIButton *playButton;
@@ -453,6 +455,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }
     self.tabButtons=buttons;self.tabLabels=labels;
     self.activeTab=0;
+    self.paintedTab=-1;
 
 
     self.uiTimer=[NSTimer scheduledTimerWithTimeInterval:.5 target:self selector:@selector(tick) userInfo:nil repeats:YES];
@@ -602,6 +605,129 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         });
     }];
 }
+
+- (void)refreshTabBar {
+    NSInteger selected=self.searchMode?1:(self.favoritesOnly?2:(self.demoMode&&!self.historyOnly?0:3));
+    if(selected==self.paintedTab)return;
+    self.paintedTab=selected;
+    NSArray *symbols=@[@"home",@"search",@"heart",@"user"];
+    for(NSInteger i=0;i<self.tabButtons.count;i++){
+        UIButton *button=self.tabButtons[i];
+        BOOL active=i==selected;
+        UIColor *color=active?[UIColor whiteColor]:[UIColor colorWithWhite:.61 alpha:1];
+        DLStyleIcon(button,symbols[i],23,color);
+        UILabel *label=self.tabLabels[i];
+        label.textColor=color;
+        label.font=active?[UIFont boldSystemFontOfSize:10]:[UIFont systemFontOfSize:10];
+    }
+}
+- (void)openSearch {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"搜索我的视频"
+        message:@"仅搜索已经导入的视频和公开样片；不提供抖音平台全站搜索。" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder=@"搜索标题或文件名";
+        field.text=self.searchQuery?:@"";
+        field.clearButtonMode=UITextFieldViewModeWhileEditing;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"搜索" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        NSString *query=[DLText(((UITextField *)alert.textFields.firstObject).text) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if(!query.length){[self openSearch];return;}
+        self.searchQuery=query;
+        NSMutableArray *result=[NSMutableArray array];
+        NSMutableSet *known=[NSMutableSet set];
+        NSMutableArray *all=[NSMutableArray arrayWithArray:self.videos];
+        [all addObjectsFromArray:self.demoVideos];
+        for(NSDictionary *clip in all){
+            NSString *title=DLText(clip[@"title"]);
+            NSString *address=DLText(clip[@"url"]);
+            if([title rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound &&
+               [address rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
+            if([known containsObject:address])continue;
+            [known addObject:address];[result addObject:clip];
+        }
+        self.searchResults=result;
+        self.searchMode=YES;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+        [self reloadCurrent];[self refreshTabBar];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (void)tabPressed:(UIButton *)button {
+    NSInteger tab=button.tag-200;
+    if(tab==0){
+        self.demoMode=YES;self.searchMode=NO;
+        self.favoritesOnly=NO;self.historyOnly=NO;
+        self.index=[[NSUserDefaults standardUserDefaults] integerForKey:@"dl_demo_index_v1"];
+        [self reloadCurrent];
+    }else if(tab==1){
+        [self openSearch];
+    }else if(tab==2){
+        self.searchMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
+        [self reloadCurrent];
+    }else if(tab==3){
+        [self openMenu];
+    }
+    [self refreshTabBar];
+}
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    if(![recognizer isKindOfClass:[UIPanGestureRecognizer class]])return YES;
+    CGPoint point=[touch locationInView:self.view];
+    CGFloat h=self.view.bounds.size.height;
+    if(point.y<58 || point.y>h-57)return NO;
+    UIView *v=touch.view;
+    while(v && v!=self.view){
+        if([v isKindOfClass:[UIControl class]])return NO;
+        v=v.superview;
+    }
+    return YES;
+}
+- (void)resetPanVisuals:(BOOL)animated {
+    NSArray *targets=@[self.titleText,self.subtitleText,self.countText,self.rightRail];
+    void (^reset)(void)=^{
+        for(UIView *v in targets){v.transform=CGAffineTransformIdentity;v.alpha=1;}
+    };
+    if(animated && self.animationsEnabled && !UIAccessibilityIsReduceMotionEnabled())
+        [UIView animateWithDuration:.16 animations:reset];
+    else reset();
+}
+- (void)moveFeedBy:(NSInteger)delta {
+    NSArray *clips=[self visibleVideos];
+    if(!clips.count)return;
+    NSInteger next=self.index+delta;
+    if(next<0 || next>=clips.count){
+        if(self.demoMode&&!self.searchMode&&!self.favoritesOnly&&!self.historyOnly){
+            next=next<0?(NSInteger)clips.count-1:0;
+        }else{
+            self.message.text=next<0?@"已经是第一条":@"已经是最后一条";
+            [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:1.2];
+            return;
+        }
+    }
+    [self transitionToIndex:next direction:delta];
+}
+- (void)verticalPan:(UIPanGestureRecognizer *)gesture {
+    if(self.transitioning)return;
+    CGPoint translation=[gesture translationInView:self.view];
+    CGPoint velocity=[gesture velocityInView:self.view];
+    if(gesture.state==UIGestureRecognizerStateBegan){self.panning=YES;return;}
+    if(gesture.state==UIGestureRecognizerStateChanged){
+        if(fabs(translation.y)<fabs(translation.x))return;
+        if(self.animationsEnabled&&!UIAccessibilityIsReduceMotionEnabled()){
+            CGFloat offset=MAX(-18,MIN(18,translation.y*.16));
+            CGFloat opacity=MAX(.62,1-fabs(translation.y)/420);
+            for(UIView *v in @[self.titleText,self.subtitleText,self.countText,self.rightRail]){
+                v.transform=CGAffineTransformMakeTranslation(0,offset);
+                v.alpha=opacity;
+            }
+        }
+    }else if(gesture.state==UIGestureRecognizerStateEnded||gesture.state==UIGestureRecognizerStateCancelled||gesture.state==UIGestureRecognizerStateFailed){
+        self.panning=NO;
+        BOOL change=fabs(translation.y)>46 || (fabs(velocity.y)>470 && fabs(translation.y)>16);
+        NSInteger delta=(translation.y<0||velocity.y<-470)?1:-1;
+        [self resetPanVisuals:!change];
+        if(change)[self moveFeedBy:delta];
+    }
+}
 - (void)storeLibrary {
     NSUserDefaults *d=[NSUserDefaults standardUserDefaults];
     [d setObject:self.videos forKey:@"dl_library_v1"];
@@ -644,6 +770,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(self.index>=visible.count)self.index=MAX(0,(NSInteger)visible.count-1);
     [self stopCurrent];
     [self setLoading:NO];
+    self.lastPlayingIcon=YES;
+    DLStyleIcon(self.playButton,@"play",42,[UIColor whiteColor]);
     self.progress.progress=0;
     self.playButton.hidden=YES;
     self.message.text=@"";
@@ -652,10 +780,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.demoMode?@"公开视频样片 · 测试":@"我的视频"));
+    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.demoMode?@"公开视频 · 非推荐":@"我的视频")));
+    [self refreshTabBar];
     if(!visible.count){
-        self.message.text=self.favoritesOnly?@"还没有收藏视频\n轻点左上角 ··· 返回全部视频":
-            (self.historyOnly?@"暂无观看历史":@"DouyinLite\n\n点击右上角＋添加视频链接\n或通过菜单扫描本地视频\n\n向上滑动切换下一条");
+        self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":(self.favoritesOnly?@"还没有收藏视频\n双击视频即可添加收藏":
+            (self.historyOnly?@"暂无观看历史":@"暂时没有可播放的视频\n右上角＋导入，或返回首页样片测试"));
         return;
     }
     NSDictionary *clip=visible[self.index];
@@ -665,8 +794,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *kind=[clip[@"source"] isEqualToString:@"demo"]?@"公开授权样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
-    [self.likeButton setTitle:[self.favorites containsObject:address]?@"♥":@"♡" forState:UIControlStateNormal];
-    [self.likeButton setTitleColor:[self.favorites containsObject:address]?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor] forState:UIControlStateNormal];
+    BOOL liked=[self.favorites containsObject:address];
+    DLStyleIcon(self.likeButton,liked?@"heart-on":@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
     NSURL *url=[NSURL URLWithString:address];
     if(!url){
         self.message.text=@"视频链接无效";
@@ -735,6 +864,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)tick {
     BOOL playing=self.player.rate>.01f;
     self.playButton.hidden=playing||self.loading||![self visibleVideos].count;
+    if(playing!=self.lastPlayingIcon){
+        DLStyleIcon(self.playButton,playing?@"pause":@"play",42,[UIColor whiteColor]);
+        self.lastPlayingIcon=playing;
+    }
     if(playing && self.message.text.length)self.message.text=@"";
     Float64 t=CMTimeGetSeconds(self.player.currentTime);
     Float64 d=CMTimeGetSeconds(self.item.duration);
@@ -802,10 +935,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *clips=[self visibleVideos];if(!clips.count){[self reloadCurrent];return;}
     NSString *key=DLText(clips[self.index][@"url"]);
     BOOL liked=[self.favorites containsObject:key];
-    [self.likeButton setTitle:liked?@"♥":@"♡" forState:UIControlStateNormal];
-    [self.likeButton setTitleColor:liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor] forState:UIControlStateNormal];
+    DLStyleIcon(self.likeButton,liked?@"heart-on":@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
 }
-- (void)toggleMute {self.muted=!self.muted;self.player.muted=self.muted;[self.muteButton setTitle:self.muted?@"×":@"♪" forState:UIControlStateNormal];}
+- (void)toggleMute {
+    self.muted=!self.muted;self.player.muted=self.muted;
+    DLStyleIcon(self.muteButton,self.muted?@"muted":@"sound",26,[UIColor whiteColor]);
+    [self pulseView:self.muteButton];
+}
 - (void)copyLink {
     NSArray *clips=[self visibleVideos];if(!clips.count)return;
     [UIPasteboard generalPasteboard].string=DLText(clips[self.index][@"url"]);
