@@ -1,4 +1,13 @@
-# DouyinLite V0.4.0
+# DouyinLite V0.5.0 — Real public video feed (NOT official Douyin)
+
+This version has a **real external public-video source** using the published PeerTube REST API. It is **not the Douyin algorithmic recommended feed**. The app fetches paginated PeerTube listings and requests each video's public metadata, choosing MP4/HLS variants where available. iPhone 4S decoding and provider reliability must be verified on the device. Three sample clips remain under the menu as an optional playback check.
+
+- Home starts public-network loading; separate menu entries for refresh, test clips, user-imported library, favorites and history.
+- Attempts a fallback provider if no compatible files found.
+- Source is prominently attributed as PeerTube. Watch history and favorites retain original video web links.
+- Failure messages distinguish unavailable streaming/codec from absent Douyin login/permissions.
+- No private APIs, stolen session credentials, or claims of official Douyin recommendations.
+
 
 ## Mobile-first UX update
 - Fullscreen vertical playback with native pan-to-next / pan-to-previous.
@@ -38,11 +47,11 @@ Native lightweight swipe-video player for jailbroken iPhone 4S (iOS 8.4.1 / ARMv
 
 ## Installation
 
-Use `downloads/DouyinLite-iOS8-v0.4.0.deb` with iFile / compatible jailbreak package manager.
+Use `downloads/DouyinLite-iOS8-v0.5.0.deb` with iFile / compatible jailbreak package manager.
 
 ## Limitations
 
 Some links require authentication, DRM, private API authorization or newer codecs; there is no guarantee a Douyin share URL becomes a playable video. This release is build-tested in GitHub Actions but not device-tested on an actual iPhone 4S.
 
-## V0.4.0
+## V0.5.0
 启动空列表时自动进入明确标注的 MIT/CC0 等公开样片测试流，支持上下滑动及播放结束自动下一条；尝试解析公开分享页中的结构化数据。演示流不是抖音推荐流，普通分享页仍可能受权限限制。
