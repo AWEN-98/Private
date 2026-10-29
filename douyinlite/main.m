@@ -398,10 +398,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self.rightRail addSubview:self.likeButton];
     UILabel *likeLabel=[self label:10];likeLabel.text=@"收藏";
     likeLabel.textAlignment=NSTextAlignmentCenter;likeLabel.tag=111;[self.rightRail addSubview:likeLabel];
-    UIButton *share=[self button:@"" action:@selector(copyLink) font:20];
+    UIButton *share=[self button:@"" action:@selector(shareCurrent) font:20];
     DLStyleIcon(share,@"share",27,[UIColor whiteColor]);
     [self.rightRail addSubview:share];share.tag=112;
-    UILabel *shareLabel=[self label:10];shareLabel.text=@"复制";
+    UILabel *shareLabel=[self label:10];shareLabel.text=@"分享";
     shareLabel.textAlignment=NSTextAlignmentCenter;shareLabel.tag=113;[self.rightRail addSubview:shareLabel];
     self.muteButton=[self button:@"" action:@selector(toggleMute) font:20];
     DLStyleIcon(self.muteButton,@"sound",26,[UIColor whiteColor]);
@@ -533,22 +533,17 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)showHeartAnimationAt:(CGPoint)point {
     if(!self.animationsEnabled||UIAccessibilityIsReduceMotionEnabled())return;
-    UILabel *heart=[[UILabel alloc] initWithFrame:CGRectMake(point.x-44,point.y-48,88,88)];
-    heart.text=@"♥";heart.textAlignment=NSTextAlignmentCenter;
-    heart.textColor=[UIColor colorWithRed:1 green:.28 blue:.43 alpha:1];
-    heart.font=[UIFont boldSystemFontOfSize:79];
-    heart.shadowColor=[UIColor colorWithWhite:0 alpha:.45];
-    heart.shadowOffset=CGSizeMake(0,2);
-    heart.alpha=0;heart.transform=CGAffineTransformMakeScale(.45,.45);
+    UIImageView *heart=[[UIImageView alloc] initWithImage:DLLineIcon(@"heart",82,[UIColor colorWithRed:1 green:.28 blue:.43 alpha:1])];
+    heart.frame=CGRectMake(point.x-41,point.y-41,82,82);
+    heart.alpha=0;heart.transform=CGAffineTransformMakeScale(.48,.48);
     heart.userInteractionEnabled=NO;
     [self.view addSubview:heart];
-    [UIView animateWithDuration:.17 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+    [UIView animateWithDuration:.18 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
         heart.alpha=1;heart.transform=CGAffineTransformMakeScale(1.12,1.12);
-    } completion:^(BOOL finished){
+    } completion:^(BOOL done){
         [UIView animateWithDuration:.24 delay:.06 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-            heart.alpha=0;
-            heart.transform=CGAffineTransformConcat(CGAffineTransformMakeScale(.92,.92),CGAffineTransformMakeTranslation(0,-24));
-        } completion:^(BOOL done){[heart removeFromSuperview];}];
+            heart.alpha=0;heart.transform=CGAffineTransformMakeTranslation(0,-23);
+        } completion:^(BOOL finished){[heart removeFromSuperview];}];
     }];
 }
 - (void)transitionToIndex:(NSInteger)index direction:(NSInteger)direction {
@@ -795,7 +790,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
     BOOL liked=[self.favorites containsObject:address];
-    DLStyleIcon(self.likeButton,liked?@"heart-on":@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
+    DLStyleIcon(self.likeButton,@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
     NSURL *url=[NSURL URLWithString:address];
     if(!url){
         self.message.text=@"视频链接无效";
@@ -928,19 +923,31 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *key=DLText(clips[self.index][@"url"]);
     if([self.favorites containsObject:key])[self.favorites removeObject:key];
     else[self.favorites addObject:key];
-    [self storeLibrary];[self reloadMetadata];
+    [self storeLibrary];
+    if(self.favoritesOnly && ![self.favorites containsObject:key]){
+        self.index=MIN(self.index,MAX(0,(NSInteger)[self visibleVideos].count-1));
+        [self reloadCurrent];
+    }else [self reloadMetadata];
     [self pulseView:self.likeButton];
 }
 - (void)reloadMetadata {
     NSArray *clips=[self visibleVideos];if(!clips.count){[self reloadCurrent];return;}
     NSString *key=DLText(clips[self.index][@"url"]);
     BOOL liked=[self.favorites containsObject:key];
-    DLStyleIcon(self.likeButton,liked?@"heart-on":@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
+    DLStyleIcon(self.likeButton,@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
 }
 - (void)toggleMute {
     self.muted=!self.muted;self.player.muted=self.muted;
     DLStyleIcon(self.muteButton,self.muted?@"muted":@"sound",26,[UIColor whiteColor]);
     [self pulseView:self.muteButton];
+}
+- (void)shareCurrent {
+    NSArray *clips=[self visibleVideos];if(!clips.count||self.index>=clips.count)return;
+    NSString *link=DLText(clips[self.index][@"url"]);
+    NSURL *url=[NSURL URLWithString:link];
+    if(!url){[self alert:@"无法分享" message:@"当前视频链接无效。"];return;}
+    UIActivityViewController *sheet=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 - (void)copyLink {
     NSArray *clips=[self visibleVideos];if(!clips.count)return;
@@ -1009,7 +1016,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(!address.length)return;
     for(NSDictionary *item in self.videos){
         if([DLText(item[@"url"]) isEqualToString:address]){
-            self.favoritesOnly=NO;self.historyOnly=NO;
+            self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
             self.index=[self.videos indexOfObject:item];
             self.demoMode=NO;
             [self reloadCurrent];
@@ -1020,7 +1027,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         @"source":source.length?source:@"link"};
     [self.videos insertObject:entry atIndex:0];
     if(self.videos.count>200)[self.videos removeLastObject];
-    self.favoritesOnly=NO;self.historyOnly=NO;self.demoMode=NO;self.index=0;
+    self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.demoMode=NO;self.index=0;
     [self storeLibrary];[self reloadCurrent];
 }
 - (void)scanLocalVideos {
@@ -1045,7 +1052,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         for(NSDictionary *old in self.videos)if([old[@"url"] isEqualToString:entry[@"url"]]){exists=YES;break;}
         if(!exists){[self.videos addObject:entry];count++;}
     }
-    if(found.count){self.demoMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;}
+    if(found.count){self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;}
     [self storeLibrary];
     [self alert:@"本地视频扫描完成" message:[NSString stringWithFormat:@"新增 %ld 个视频。\n扫描路径：\n/var/mobile/Documents/DouyinLite\n/var/mobile/Documents/PocketDrop",(long)count]];
     [self reloadCurrent];
@@ -1054,16 +1061,16 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite"
         message:@"支持公开抖音分享页解析；官方推荐流仍需授权。演示样片使用公开许可视频。" preferredStyle:UIAlertControllerStyleActionSheet];
     [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=YES;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.demoMode=YES;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"所有视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"我的收藏" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.searchMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"观看历史" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
+        self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"轻量动画：%@",self.animationsEnabled?@"开":@"关"]
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
@@ -1082,6 +1089,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.autoplayNext=!self.autoplayNext;
         [[NSUserDefaults standardUserDefaults] setBool:self.autoplayNext forKey:@"dl_autonext_enabled_v1"];
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"导入视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"复制当前视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self copyLink];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"扫描本地视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self scanLocalVideos];}]];
     NSArray *currentClips=[self visibleVideos];
     BOOL canRemove=currentClips.count && self.index<currentClips.count && ![DLText(currentClips[self.index][@"source"]) isEqualToString:@"demo"];
