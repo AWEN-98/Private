@@ -44,6 +44,28 @@ jobs:
           path: douyinlite-build.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Commit failure diagnostics for direct inspection
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          {
+            echo "DouyinLite 0.8.1 build failure"
+            echo "Commit: $GITHUB_SHA"
+            echo "Run: $GITHUB_RUN_ID"
+            echo "Workflow logs: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            if [ -f douyinlite-build.log ]; then
+              tail -n 300 douyinlite-build.log
+            else
+              echo "No compiler log. Failure occurred during runner setup or dependency installation."
+            fi
+          } > diagnostics/douyinlite-0.8.1-failure.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add diagnostics/douyinlite-0.8.1-failure.txt
+          git commit -m "ci: save DouyinLite failed build diagnostics [skip ci]" || true
+          git pull --rebase origin main || true
+          git push origin HEAD:main || true
       - name: Validate iOS 8 DEB
         run: |
           set -euo pipefail
