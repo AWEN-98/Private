@@ -604,6 +604,48 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         [self fetchOnlineCandidates:items index:i+1 token:token before:before];
     }];
 }
+- (void)checkBridgeLoginStatus {
+ NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"];
+ NSURL *feed=[NSURL URLWithString:base];
+ if(![feed.scheme isEqualToString:@"https"] || !feed.host.length){
+    [self alert:@"尚未连接云端" message:@"请先在视频来源菜单连接 DouyinBridge，并填写服务器地址和 API 密钥。"];
+    return;
+ }
+ NSURLComponents *parts=[NSURLComponents componentsWithURL:feed resolvingAgainstBaseURL:NO];
+ NSString *path=parts.path?:@"";
+ if(![path hasSuffix:@"/api/feed"]){
+    [self alert:@"地址不兼容" message:@"请填写 DouyinBridge 的 /api/feed 地址后再检查登录。"];
+    return;
+ }
+ parts.path=[[path substringToIndex:path.length-4] stringByAppendingString:@"status"];
+ parts.query=nil;parts.fragment=nil;
+ NSURL *endpoint=parts.URL;
+ NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:endpoint cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15];
+ NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"];
+ if(key.length)[request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
+ [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+    NSDictionary *json=nil;
+    if(data.length && data.length<200000){
+        id obj=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        if([obj isKindOfClass:[NSDictionary class]])json=obj;
+    }
+    NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
+    BOOL cookie=[json[@"session_cookie_present"] respondsToSelector:@selector(boolValue)]?[json[@"session_cookie_present"] boolValue]:NO;
+    NSString *status=DLText(json[@"status"]);
+    NSString *account=cookie?@"已检测到账号会话，仍需确认登录是否有效":@"未检测到账号登录会话";
+    NSString *detail=@"";
+    if(http.statusCode==401)detail=@"云端 API 密钥错误，请重新配置。";
+    else if(error)detail=error.localizedDescription;
+    else if([status isEqualToString:@"verification_required"])detail=@"云端浏览器正在等待人工验证。";
+    else if([status isEqualToString:@"ready"])detail=@"云端已获取到可访问的视频。";
+    else if([status isEqualToString:@"waiting_for_videos"])detail=@"当前暂无视频，请在云端浏览器确认登录和页面播放状态。";
+    else if([status isEqualToString:@"browser_error"])detail=DLText(json[@"error"]);
+    else detail=@"请检查云端服务状态。";
+    NSString *message=[NSString stringWithFormat:@"%@\n%@\n缓存视频：%@\n\n首次登录：在电脑上通过 SSH 隧道打开云端浏览器，扫码登录后会保存会话。",account,detail,DLText(json[@"items"])];
+    dispatch_async(dispatch_get_main_queue(),^{[self alert:@"DouyinBridge 登录状态" message:message];});
+ }] resume];
+}
+
 - (void)configureJSONFeed {
  UIAlertController *a=[UIAlertController alertControllerWithTitle:@"连接 DouyinBridge"
  message:@"填写自己部署的 HTTPS 视频列表接口。浏览器会话可能需要人工验证；当前应用不会绕过平台限制。"
@@ -1401,6 +1443,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       [self loadOnlineFeed:YES];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"连接 DouyinBridge（云端浏览器）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"检查 DouyinBridge 登录状态" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self checkBridgeLoginStatus];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
