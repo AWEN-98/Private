@@ -70,6 +70,16 @@ jobs:
           (cd downloads && zip -q -9 DouyinLite-iOS8-v0.6.1.zip DouyinLite-iOS8-v0.6.1.deb)
           unzip -t downloads/DouyinLite-iOS8-v0.6.1.zip | tail -1
           sha256sum downloads/DouyinLite-iOS8-v0.6.1.*
+      - name: Upload install packages as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DouyinLite-iOS8-v0.6.1
+          path: |
+            downloads/DouyinLite-iOS8-v0.6.1.deb
+            downloads/DouyinLite-iOS8-v0.6.1.ipa
+            downloads/DouyinLite-iOS8-v0.6.1.zip
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish verified files
         run: |
           set -euo pipefail
