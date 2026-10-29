@@ -1,0 +1,12 @@
+#!/bin/sh
+APP="/Applications/DouyinLite.app"
+if [ -d "$APP" ]; then
+  chown -R 0:0 "$APP" >/dev/null 2>&1 || true
+  chmod 755 "$APP" "$APP/DouyinLite" >/dev/null 2>&1 || true
+fi
+if [ -x /usr/bin/uicache ]; then
+  /usr/bin/uicache >/dev/null 2>&1 || true
+elif command -v uicache >/dev/null 2>&1; then
+  uicache >/dev/null 2>&1 || true
+fi
+exit 0

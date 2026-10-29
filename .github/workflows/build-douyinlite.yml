@@ -1,0 +1,82 @@
+name: Build DouyinLite iOS 8
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'douyinlite/**'
+      - '.github/workflows/build-douyinlite.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl make clang lld unzip zip xz-utils ca-certificates libarchive-tools dpkg-dev binutils python3
+      - name: Install Theos
+        run: |
+          export THEOS="$HOME/theos"
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+      - name: Obtain iOS 10.3 SDK
+        run: |
+          mkdir -p "$HOME/theos/sdks"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/douyin-sdks
+          git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS10.3.sdk
+          cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
+      - name: Compile and package
+        run: |
+          export THEOS="$HOME/theos"
+          cd douyinlite
+          python3 scripts/generate_icons.py
+          make clean package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+      - name: Validate iOS 8 DEB
+        run: |
+          set -euo pipefail
+          DEB="$(find douyinlite/packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$DEB"
+          mkdir -p /tmp/douyin-repack
+          dpkg-deb -R "$DEB" /tmp/douyin-repack
+          cp douyinlite/scripts/postinst /tmp/douyin-repack/DEBIAN/postinst
+          chmod 755 /tmp/douyin-repack/DEBIAN/postinst
+          dpkg-deb --root-owner-group -Zgzip -z6 --build /tmp/douyin-repack "$DEB"
+          test "$(dpkg-deb -f "$DEB" Version)" = "0.1.0"
+          test "$(dpkg-deb -f "$DEB" Architecture)" = "iphoneos-arm"
+          ar t "$DEB" | grep -Fx 'data.tar.gz'
+          ar t "$DEB" | grep -Fx 'control.tar.gz'
+          mkdir -p /tmp/douyin-unpack /tmp/douyin-ipa/Payload
+          dpkg-deb -x "$DEB" /tmp/douyin-unpack
+          APP=/tmp/douyin-unpack/Applications/DouyinLite.app
+          test -x "$APP/DouyinLite"
+          test -s "$APP/Info.plist"
+          test -s "$APP/Icon@2x.png"
+          file "$APP/DouyinLite" | grep -F 'Mach-O armv7 executable'
+          python3 - "$APP/Info.plist" <<'PYTEST'
+          import plistlib,sys
+          with open(sys.argv[1],'rb') as f:p=plistlib.load(f)
+          assert p["CFBundleIdentifier"]=="com.finn.douyinlite"
+          assert p["MinimumOSVersion"]=="8.0"
+          assert p["CFBundleShortVersionString"]=="0.1.0"
+          print("Verified iOS 8 app identity and version")
+          PYTEST
+          cp -a "$APP" /tmp/douyin-ipa/Payload/DouyinLite.app
+          mkdir -p downloads
+          (cd /tmp/douyin-ipa && zip -qr -X "$GITHUB_WORKSPACE/downloads/DouyinLite-iOS8-v0.1.0.ipa" Payload)
+          cp "$DEB" downloads/DouyinLite-iOS8-v0.1.0.deb
+          (cd downloads && zip -q -9 DouyinLite-iOS8-v0.1.0.zip DouyinLite-iOS8-v0.1.0.deb)
+          unzip -t downloads/DouyinLite-iOS8-v0.1.0.zip | tail -1
+          sha256sum downloads/DouyinLite-iOS8-v0.1.0.*
+      - name: Publish verified files
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/DouyinLite-iOS8-v0.1.0.deb downloads/DouyinLite-iOS8-v0.1.0.zip downloads/DouyinLite-iOS8-v0.1.0.ipa
+          if ! git diff --cached --quiet; then
+            git commit -m "release: verified DouyinLite 0.1.0 armv7 install packages [skip ci]"
+            git push origin HEAD:main
+          fi
