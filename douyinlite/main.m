@@ -605,21 +605,30 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }];
 }
 - (void)configureJSONFeed {
- UIAlertController *a=[UIAlertController alertControllerWithTitle:@"视频内容接口"
- message:@"填写你有权使用的 HTTPS JSON 列表地址。返回 {data:[{url,title}]}，可选 next URL 分页。此功能不会自动提供抖音推荐数据。"
+ UIAlertController *a=[UIAlertController alertControllerWithTitle:@"连接 DouyinBridge"
+ message:@"填写自己部署的 HTTPS 视频列表接口。浏览器会话可能需要人工验证；当前应用不会绕过平台限制。"
  preferredStyle:UIAlertControllerStyleAlert];
  [a addTextFieldWithConfigurationHandler:^(UITextField *t){
-   t.placeholder=@"https://example.com/feed.json";
+   t.placeholder=@"https://bridge.example.com/api/feed";
    t.text=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
    t.keyboardType=UIKeyboardTypeURL;t.autocapitalizationType=UITextAutocapitalizationTypeNone;
  }];
+ [a addTextFieldWithConfigurationHandler:^(UITextField *t){
+   t.placeholder=@"云端 API 密钥";
+   t.text=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
+   t.secureTextEntry=YES;t.autocapitalizationType=UITextAutocapitalizationTypeNone;
+ }];
  [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
- [a addAction:[UIAlertAction actionWithTitle:@"保存并加载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-    NSString *s=[((UITextField *)a.textFields.firstObject).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+ [a addAction:[UIAlertAction actionWithTitle:@"连接并加载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+    NSString *s=[((UITextField *)a.textFields[0]).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSString *key=[((UITextField *)a.textFields[1]).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSURL *url=[NSURL URLWithString:s];
-    if(s.length && ![url.scheme isEqualToString:@"https"]){[self alert:@"无效地址" message:@"内容接口必须使用 HTTPS。"];return;}
-    [[NSUserDefaults standardUserDefaults] setObject:s?:@"" forKey:@"dl_feed_endpoint_v1"];
-    self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+    if(![url.scheme isEqualToString:@"https"]||!url.host.length){[self alert:@"无效地址" message:@"请填写有效的 HTTPS 云端列表地址。"];return;}
+    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
+    [defaults setObject:s forKey:@"dl_feed_endpoint_v1"];
+    [defaults setObject:key?:@"" forKey:@"dl_bridge_key_v1"];
+    [defaults setBool:NO forKey:@"dl_use_peertube_v1"];
+    self.feedNextPageURL=nil;self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
     [self loadOnlineFeed:YES];
  }]];
  [self presentViewController:a animated:YES completion:nil];
@@ -636,7 +645,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  if(reset)self.feedNextPageURL=nil;
  NSURL *url=[NSURL URLWithString:endpoint];
  if(![url.scheme isEqualToString:@"https"]){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=@"内容接口需要 HTTPS";[self reloadCurrent];return;}
- NSURLRequest *req=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
+ if(!reset && !self.feedNextPageURL.length)return;
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
+ NSString *bridgeKey=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"];
+ if(bridgeKey.length)[req setValue:[@"Bearer " stringByAppendingString:bridgeKey] forHTTPHeaderField:@"Authorization"];
  [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
   id parsed=(data.length && data.length<2000000)?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
   NSDictionary *json=[parsed isKindOfClass:[NSDictionary class]]?parsed:@{};
@@ -649,7 +661,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(![candidate.scheme isEqualToString:@"https"])continue;
     BOOL duplicate=NO;
     for(NSDictionary *old in self.onlineVideos)if([DLText(old[@"url"]) isEqualToString:link]){duplicate=YES;break;}
-    if(!duplicate)[incoming addObject:@{@"url":link,@"title":DLText(item[@"title"]).length?DLText(item[@"title"]):@"公开视频",@"source":@"custom"}];
+    if(!duplicate)[incoming addObject:@{@"url":link,@"title":DLText(item[@"title"]).length?DLText(item[@"title"]):@"公开视频",@"source":DLText(item[@"source"]).length?DLText(item[@"source"]):@"custom"}];
     if(incoming.count>=30)break;
   }
   dispatch_async(dispatch_get_main_queue(),^{
@@ -661,7 +673,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.onlineLoading=NO;self.onlinePaging=NO;
     if(!self.onlineVideos.count){
       NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
-      self.onlineError=[NSString stringWithFormat:@"内容接口无有效视频（HTTP %ld）：%@",(long)http.statusCode,error.localizedDescription?:@"请检查 JSON data 与视频地址"];
+      self.onlineError=[NSString stringWithFormat:@"云端暂无可播放视频（HTTP %ld）：%@",(long)http.statusCode,error.localizedDescription?: (DLText(json[@"message"]).length?DLText(json[@"message"]):@"请检查云端浏览器是否需要验证")];
     }
     if(self.onlineMode && (reset || self.onlineVideos.count==incoming.count))[self reloadCurrent];
     else if(self.onlineMode)[self reloadMetadata];
@@ -1061,11 +1073,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?@"联网公开视频 · 非抖音":(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
+    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]?@"DouyinBridge · 云端内容":@"联网公开视频 · 实验"):(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
-            self.message.text=self.onlineLoading?@"正在连接公开视频频道…\n当前视频来源：PeerTube（非抖音）":
+            self.message.text=self.onlineLoading?@"正在连接视频来源…":
                 (self.onlineError.length?self.onlineError:@"暂无联网视频，可打开左上角菜单刷新");
             if(self.onlineLoading)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
         }else{
@@ -1079,7 +1091,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
-    NSString *kind=[clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加")));
+    NSString *kind=[clip[@"source"] isEqualToString:@"douyin-bridge"]?@"DouyinBridge · 云端公开视频":([clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"))));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
     BOOL liked=[self.favorites containsObject:address];
@@ -1385,7 +1397,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
       [self loadOnlineFeed:YES];
     }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"配置 HTTPS 视频列表接口" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"连接 DouyinBridge（云端浏览器）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
