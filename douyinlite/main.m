@@ -677,13 +677,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"https://www.douyin.com/aweme/v2/web/module/feed/?device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=12&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2",(long)(self.onlineOffset+1),(long)(reset?0:2)]];
  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
  req.HTTPMethod=@"POST";
- [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+ [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
  [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
  [req setValue:@"https://www.douyin.com" forHTTPHeaderField:@"Origin"];
  [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
  [req setValue:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
- NSDictionary *payload=@{@"count":@12,@"refresh_index":@(self.onlineOffset),@"pull_type":@(reset?1:2)};
- req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+ req.HTTPBody=[@"encoded_pre_item_ids=" dataUsingEncoding:NSUTF8StringEncoding];
  if(reset){self.message.text=@"正在获取抖音公开推荐内容…";[self.loadingIndicator startAnimating];}
  [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
   id raw=data.length&&data.length<4000000?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
@@ -713,7 +712,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   dispatch_async(dispatch_get_main_queue(),^{
     if(token!=self.onlineRequestID)return;
     self.onlineLoading=NO;self.onlinePaging=NO;
-    if(rows.count)self.onlineOffset+=rows.count;
+    if(rows.count)self.onlineOffset+=1;
     if(items.count)[self.onlineVideos addObjectsFromArray:items];
     if(!self.onlineVideos.count){
       NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
