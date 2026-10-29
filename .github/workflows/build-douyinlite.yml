@@ -30,6 +30,7 @@ jobs:
           cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
       - name: Compile and package
         run: |
+          set -euo pipefail
           export THEOS="$HOME/theos"
           cd douyinlite
           python3 scripts/generate_icons.py
