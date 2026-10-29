@@ -1,3 +1,7 @@
+# DouyinLite V0.6.1
+
+Default: native AVPlayer feed based on publicly available PeerTube sources; imported MP4/HLS and local media remain supported. The official Douyin website is available through an optional Safari menu shortcut. This does not grant access to Douyin recommendation APIs or guarantee video playback in outdated iOS 8 Safari. WebKit shell prototype remains at webshell.m but is not compiled. Real-device verification is still required.
+
 # DouyinLite V0.6.0 Web Shell
 
 Launches the official https://www.douyin.com/ website in WKWebView. Browser controls: back, forward, refresh, home, mobile/desktop user-agent, hide toolbar. The previous feed code remains in main.m but is no longer active.
