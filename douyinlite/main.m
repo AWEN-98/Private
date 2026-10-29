@@ -278,6 +278,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,copy) NSString *onlineError;
 @property(nonatomic,strong) AVURLAsset *nextAsset;
 @property(nonatomic,copy) NSString *nextURL;
+@property(nonatomic,copy) NSString *feedNextPageURL;
 @property(nonatomic,copy) NSString *preloadSourceURL;
 @property(nonatomic,strong) UIActivityIndicatorView *loadingIndicator;
 @property(nonatomic,assign) BOOL animationsEnabled;
@@ -631,8 +632,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
  NSString *endpoint=base;
- if(!reset && self.nextURL.length)endpoint=self.nextURL;
- if(reset)self.nextURL=nil;
+ if(!reset && self.feedNextPageURL.length)endpoint=self.feedNextPageURL;
+ if(reset)self.feedNextPageURL=nil;
  NSURL *url=[NSURL URLWithString:endpoint];
  if(![url.scheme isEqualToString:@"https"]){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=@"内容接口需要 HTTPS";[self reloadCurrent];return;}
  NSURLRequest *req=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
@@ -655,14 +656,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(token!=self.onlineRequestID)return;
     [self.onlineVideos addObjectsFromArray:incoming];
     NSString *next=DLText(json[@"next"]);NSURL *nextURL=[NSURL URLWithString:next];
-    self.nextURL=[nextURL.scheme isEqualToString:@"https"]?next:nil;
+    self.feedNextPageURL=[nextURL.scheme isEqualToString:@"https"]?next:nil;
     self.onlineOffset+=rows.count;
     self.onlineLoading=NO;self.onlinePaging=NO;
     if(!self.onlineVideos.count){
       NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
       self.onlineError=[NSString stringWithFormat:@"内容接口无有效视频（HTTP %ld）：%@",(long)http.statusCode,error.localizedDescription?:@"请检查 JSON data 与视频地址"];
     }
-    if(self.onlineMode)[self reloadCurrent];
+    if(self.onlineMode && (reset || self.onlineVideos.count==incoming.count))[self reloadCurrent];
+    else if(self.onlineMode)[self reloadMetadata];
   });
  }] resume];
 }
