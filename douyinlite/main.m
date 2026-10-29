@@ -47,6 +47,130 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     return nil;
 }
 
+
+// Parse only metadata that a public Douyin share page actually returns.
+// No session cookie, signed private endpoint, or anti-bot challenge is bypassed.
+static NSDictionary *DLPublicInfoInTree(id node,NSInteger depth) {
+    if(depth>16)return nil;
+    if([node isKindOfClass:[NSDictionary class]]){
+        NSDictionary *d=node;
+        id info=d[@"videoInfoRes"];
+        if([info isKindOfClass:[NSDictionary class]]){
+            NSArray *items=[info[@"item_list"] isKindOfClass:[NSArray class]]?info[@"item_list"]:@[];
+            if(items.count && [items[0] isKindOfClass:[NSDictionary class]])return items[0];
+        }
+        id detail=d[@"aweme_detail"];
+        if([detail isKindOfClass:[NSDictionary class]])return detail;
+        id details=d[@"item_list"];
+        if([details isKindOfClass:[NSArray class]] && [details count] && [details[0] isKindOfClass:[NSDictionary class]]){
+            NSDictionary *first=details[0];
+            if([first[@"video"] isKindOfClass:[NSDictionary class]])return first;
+        }
+        for(id key in d){
+            NSDictionary *found=DLPublicInfoInTree(d[key],depth+1);
+            if(found)return found;
+        }
+    }else if([node isKindOfClass:[NSArray class]]){
+        for(id v in node){
+            NSDictionary *found=DLPublicInfoInTree(v,depth+1);
+            if(found)return found;
+        }
+    }
+    return nil;
+}
+static NSDictionary *DLJSONDictionaryAfterMarker(NSString *html,NSString *marker) {
+    NSRange p=[html rangeOfString:marker];
+    if(p.location==NSNotFound)return nil;
+    NSUInteger i=p.location+p.length,n=html.length;
+    // SSR values are assigned after '='; script data may be URI-encoded.
+    while(i<n && [html characterAtIndex:i]!='{')i++;
+    if(i>=n)return nil;
+    NSUInteger begin=i;
+    NSInteger level=0;
+    BOOL quoted=NO,escaped=NO;
+    for(;i<n;i++){
+        unichar c=[html characterAtIndex:i];
+        if(quoted){
+            if(escaped){escaped=NO;continue;}
+            if(c=='\\'){escaped=YES;continue;}
+            if(c=='"')quoted=NO;
+        }else{
+            if(c=='"'){quoted=YES;continue;}
+            if(c=='{')level++;
+            else if(c=='}' && --level==0){
+                if(i-begin>1800000)return nil;
+                NSString *chunk=[html substringWithRange:NSMakeRange(begin,i-begin+1)];
+                NSData *data=[chunk dataUsingEncoding:NSUTF8StringEncoding];
+                id decoded=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+                return [decoded isKindOfClass:[NSDictionary class]]?decoded:nil;
+            }
+        }
+    }
+    return nil;
+}
+static NSDictionary *DLPublicInfoFromHTML(NSString *html) {
+    if(!html.length)return nil;
+    for(NSString *marker in @[@"window._ROUTER_DATA",@"_ROUTER_DATA",@"window.__UNIVERSAL_DATA_FOR_REHYDRATION__"]){
+        NSDictionary *data=DLJSONDictionaryAfterMarker(html,marker);
+        NSDictionary *item=DLPublicInfoInTree(data,0);
+        if(item)return item;
+    }
+    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"<script[^>]*id=['\\\"]RENDER_DATA['\\\"][^>]*>([^<]+)</script>"
+        options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSTextCheckingResult *m=[re firstMatchInString:html options:0 range:NSMakeRange(0,html.length)];
+    if(m && [m rangeAtIndex:1].location!=NSNotFound){
+        NSString *encoded=[html substringWithRange:[m rangeAtIndex:1]];
+        NSString *plain=[encoded stringByRemovingPercentEncoding]?:encoded;
+        id json=[NSJSONSerialization JSONObjectWithData:[plain dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+        return DLPublicInfoInTree(json,0);
+    }
+    return nil;
+}
+static NSString *DLPublicPlaybackURL(NSDictionary *item) {
+    NSDictionary *video=[item[@"video"] isKindOfClass:[NSDictionary class]]?item[@"video"]:@{};
+    NSDictionary *play=[video[@"play_addr"] isKindOfClass:[NSDictionary class]]?video[@"play_addr"]:@{};
+    NSArray *urls=[play[@"url_list"] isKindOfClass:[NSArray class]]?play[@"url_list"]:@[];
+    for(id candidate in urls){
+        NSString *link=DLText(candidate);
+        if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
+    }
+    NSArray *rates=[video[@"bit_rate"] isKindOfClass:[NSArray class]]?video[@"bit_rate"]:@[];
+    // Favor H.264 to maximize compatibility with iPhone 4S.
+    for(id entry in rates){
+        if(![entry isKindOfClass:[NSDictionary class]])continue;
+        NSDictionary *rate=entry;
+        NSString *codec=[DLText(rate[@"codec_type"]) lowercaseString];
+        if(codec.length && ![codec containsString:@"264"] && ![codec isEqualToString:@"h264"])continue;
+        NSDictionary *rplay=[rate[@"play_addr"] isKindOfClass:[NSDictionary class]]?rate[@"play_addr"]:@{};
+        NSArray *rurls=[rplay[@"url_list"] isKindOfClass:[NSArray class]]?rplay[@"url_list"]:@[];
+        for(id candidate in rurls){
+            NSString *link=DLText(candidate);
+            if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
+        }
+    }
+    return nil;
+}
+static NSString *DLVideoIDFromURL(NSURL *url){
+    if(!url)return nil;
+    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"(?:/(?:video|note|slides)/|[?&](?:modal_id|aweme_id|item_ids)=)([0-9]{6,25})"
+      options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSString *text=url.absoluteString?:@"";
+    NSTextCheckingResult *m=[re firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
+    return m?[text substringWithRange:[m rangeAtIndex:1]]:nil;
+}
+static NSDictionary *DLVideoDetails(NSString *html){
+    NSDictionary *item=DLPublicInfoFromHTML(html);
+    NSString *url=DLPublicPlaybackURL(item);
+    if(!url.length)url=DLPublicVideoFromHTML(html);
+    if(!url.length)return nil;
+    NSString *caption=DLText(item[@"desc"]);
+    NSDictionary *author=[item[@"author"] isKindOfClass:[NSDictionary class]]?item[@"author"]:@{};
+    NSString *nickname=DLText(author[@"nickname"]);
+    if(caption.length>70)caption=[[caption substringToIndex:70] stringByAppendingString:@"…"];
+    NSString *title=caption.length?caption:(nickname.length?[@"@" stringByAppendingString:nickname]:@"抖音公开视频");
+    return @{@"url":url,@"title":title,@"source":@"public-share"};
+}
+
 @interface DLVideoSurface : UIView @end
 @implementation DLVideoSurface
 + (Class)layerClass{return [AVPlayerLayer class];}
@@ -59,6 +183,11 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
 @property(nonatomic,strong) NSMutableArray *videos;
 @property(nonatomic,strong) NSMutableArray *favorites;
 @property(nonatomic,strong) NSMutableArray *history;
+@property(nonatomic,strong) NSArray *demoVideos;
+@property(nonatomic,strong) AVURLAsset *nextAsset;
+@property(nonatomic,assign) BOOL demoMode;
+@property(nonatomic,assign) BOOL scanning;
+@property(nonatomic,assign) NSInteger failedDemoCount;
 @property(nonatomic,strong) UIView *rightRail;
 @property(nonatomic,strong) UIButton *likeButton;
 @property(nonatomic,strong) UIButton *muteButton;
@@ -108,6 +237,14 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     self.favorites=[[[defaults arrayForKey:@"dl_favorites_v1"]?:@[] mutableCopy] mutableCopy];
     self.history=[[[defaults arrayForKey:@"dl_history_v1"]?:@[] mutableCopy] mutableCopy];
     self.index=0;
+    // Real open-licensed sample MP4s are a clearly labeled playback test
+    // source. They are never misrepresented as a Douyin recommendation feed.
+    self.demoVideos=@[
+      @{@"url":@"https://raw.githubusercontent.com/kodewright/dummy-data/main/videos/sample-video-portrait-480p.mp4",@"title":@"演示素材 · 越野车航拍",@"source":@"demo"},
+      @{@"url":@"https://raw.githubusercontent.com/kodewright/dummy-data/main/videos/sample-video-landscape-480p.mp4",@"title":@"演示素材 · 城市桥梁",@"source":@"demo"},
+      @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
+    ];
+    self.demoMode=self.videos.count==0;
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
     self.surface.backgroundColor=DLBG();
     self.surface.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -205,6 +342,7 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     self.progress.frame=CGRectMake(0,h-3,w,3);
 }
 - (NSArray *)visibleVideos {
+    if(self.demoMode && !self.favoritesOnly && !self.historyOnly)return self.demoVideos;
     if(self.favoritesOnly){
         NSMutableArray *result=[NSMutableArray array];
         for(NSDictionary *v in self.videos)
@@ -250,7 +388,7 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":@"我的视频");
+    self.topText.text=self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.demoMode?@"公开视频样片 · 测试":@"我的视频"));
     if(!visible.count){
         self.message.text=self.favoritesOnly?@"还没有收藏视频\n轻点左上角 ··· 返回全部视频":
             (self.historyOnly?@"暂无观看历史":@"DouyinLite\n\n点击右上角＋添加视频链接\n或通过菜单扫描本地视频\n\n向上滑动切换下一条");
@@ -259,7 +397,7 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     NSDictionary *clip=visible[self.index];
     NSString *address=DLText(clip[@"url"]);
     self.titleText.text=DLText(clip[@"title"]);
-    NSString *kind=[clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加";
+    NSString *kind=[clip[@"source"] isEqualToString:@"demo"]?@"公开授权样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
     [self.likeButton setTitle:[self.favorites containsObject:address]?@"♥":@"♡" forState:UIControlStateNormal];
@@ -303,8 +441,16 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     });
 }
 - (void)videoEnded:(NSNotification *)notification {
-    [self.player pause];
-    self.playButton.hidden=NO;self.message.text=@"播放结束 · 上滑下一条";
+    NSArray *clips=[self visibleVideos];
+    if(!clips.count)return;
+    if(self.index+1<(NSInteger)clips.count){
+        self.index++;[self reloadCurrent];return;
+    }
+    if(self.demoMode && clips.count>1){
+        self.index=0;[self reloadCurrent];return;
+    }
+    [self.player pause];self.playButton.hidden=NO;
+    self.message.text=@"播放结束 · 上滑继续或导入新视频";
 }
 - (void)videoFailed:(NSNotification *)notification {
     [self.player pause];self.playButton.hidden=NO;
@@ -345,6 +491,9 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
     NSArray *clips=[self visibleVideos];
     NSInteger next=self.index+(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1);
     if(next<0 || next>=clips.count){
+        if(self.demoMode && clips.count){
+            self.index=next<0?(NSInteger)clips.count-1:0;[self reloadCurrent];return;
+        }
         if(clips.count){
             self.message.text=next<0?@"已经是第一条":@"已经是最后一条";
             [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:1.2];
@@ -437,6 +586,7 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
         if([DLText(item[@"url"]) isEqualToString:address]){
             self.favoritesOnly=NO;self.historyOnly=NO;
             self.index=[self.videos indexOfObject:item];
+            self.demoMode=NO;
             [self reloadCurrent];
             return;
         }
@@ -445,7 +595,7 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
         @"source":source.length?source:@"link"};
     [self.videos insertObject:entry atIndex:0];
     if(self.videos.count>200)[self.videos removeLastObject];
-    self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+    self.favoritesOnly=NO;self.historyOnly=NO;self.demoMode=NO;self.index=0;
     [self storeLibrary];[self reloadCurrent];
 }
 - (void)scanLocalVideos {
@@ -470,15 +620,19 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
         for(NSDictionary *old in self.videos)if([old[@"url"] isEqualToString:entry[@"url"]]){exists=YES;break;}
         if(!exists){[self.videos addObject:entry];count++;}
     }
+    if(found.count){self.demoMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;}
     [self storeLibrary];
     [self alert:@"本地视频扫描完成" message:[NSString stringWithFormat:@"新增 %ld 个视频。\n扫描路径：\n/var/mobile/Documents/DouyinLite\n/var/mobile/Documents/PocketDrop",(long)count]];
     [self reloadCurrent];
 }
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite"
-        message:@"本地轻量播放器 · 不含抖音官方推荐接口" preferredStyle:UIAlertControllerStyleActionSheet];
+        message:@"支持公开抖音分享页解析；官方推荐流仍需授权。演示样片使用公开许可视频。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.demoMode=YES;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"所有视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.demoMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"我的收藏" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
