@@ -150,14 +150,6 @@ static NSString *DLPublicPlaybackURL(NSDictionary *item) {
     }
     return nil;
 }
-static NSString *DLVideoIDFromURL(NSURL *url){
-    if(!url)return nil;
-    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"(?:/(?:video|note|slides)/|[?&](?:modal_id|aweme_id|item_ids)=)([0-9]{6,25})"
-      options:NSRegularExpressionCaseInsensitive error:NULL];
-    NSString *text=url.absoluteString?:@"";
-    NSTextCheckingResult *m=[re firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
-    return m?[text substringWithRange:[m rangeAtIndex:1]]:nil;
-}
 static NSDictionary *DLVideoDetails(NSString *html){
     NSDictionary *item=DLPublicInfoFromHTML(html);
     NSString *url=DLPublicPlaybackURL(item);
