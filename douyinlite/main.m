@@ -381,7 +381,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
         [[NSUserDefaults standardUserDefaults] setInteger:self.index forKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"];
 }
 - (void)setLoading:(BOOL)busy {
-    self.loading=busy;
+    _loading=busy;
     if(busy)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
 }
 - (void)pulseView:(UIView *)target {
