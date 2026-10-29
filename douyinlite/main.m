@@ -935,8 +935,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?@"联网公开视频 · 非抖音":(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
     [self refreshTabBar];
     if(!visible.count){
-        self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":(self.favoritesOnly?@"还没有收藏视频\n双击视频即可添加收藏":
-            (self.historyOnly?@"暂无观看历史":@"暂时没有可播放的视频\n右上角＋导入，或返回首页样片测试"));
+        if(self.onlineMode){
+            self.message.text=self.onlineLoading?@"正在连接公开视频频道…\n当前视频来源：PeerTube（非抖音）":
+                (self.onlineError.length?self.onlineError:@"暂无联网视频，可打开左上角菜单刷新");
+            if(self.onlineLoading)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
+        }else{
+            self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":
+                (self.favoritesOnly?@"还没有收藏视频\n双击视频即可添加收藏":
+                (self.historyOnly?@"暂无观看历史":@"暂无视频\n右上角＋导入视频"));
+        }
         return;
     }
     NSDictionary *clip=visible[self.index];
@@ -998,7 +1005,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             [self storeLibrary];
         }else if(item.status==AVPlayerItemStatusFailed){
             [self setLoading:NO];
-            self.message.text=@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权\n\n可添加直接的 MP4 / HLS 地址";
+            self.message.text=self.onlineMode?@"这个公开视频源暂时无法在 iPhone 4S 播放。\n上滑切换下一条，或从菜单切换来源":@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权";
             self.playButton.hidden=NO;
         }
     });
@@ -1086,8 +1093,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)clearTransientMessage {if(self.player.rate>.01f)self.message.text=@"";}
 - (void)toggleFavorite {
-    NSArray *clips=[self visibleVideos];if(!clips.count)return;
-    NSString *key=DLText(clips[self.index][@"url"]);
+    NSArray *clips=[self visibleVideos];if(!clips.count || self.index>=clips.count)return;
+    NSDictionary *clip=clips[self.index];
+    NSString *key=DLText(clip[@"url"]);
+    if([DLText(clip[@"source"]) isEqualToString:@"peertube"]){
+        BOOL exists=NO;
+        for(NSDictionary *item in self.videos)
+            if([DLText(item[@"url"]) isEqualToString:key]){exists=YES;break;}
+        if(!exists)[self.videos insertObject:clip atIndex:0];
+    }
     if([self.favorites containsObject:key])[self.favorites removeObject:key];
     else[self.favorites addObject:key];
     [self storeLibrary];
