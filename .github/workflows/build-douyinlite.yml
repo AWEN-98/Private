@@ -44,7 +44,7 @@ jobs:
           cp douyinlite/scripts/postinst /tmp/douyin-repack/DEBIAN/postinst
           chmod 755 /tmp/douyin-repack/DEBIAN/postinst
           dpkg-deb --root-owner-group -Zgzip -z6 --build /tmp/douyin-repack "$DEB"
-          test "$(dpkg-deb -f "$DEB" Version)" = "0.3.0"
+          test "$(dpkg-deb -f "$DEB" Version)" = "0.4.0"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "iphoneos-arm"
           ar t "$DEB" | grep -Fx 'data.tar.gz'
           ar t "$DEB" | grep -Fx 'control.tar.gz'
@@ -60,23 +60,23 @@ jobs:
           with open(sys.argv[1],'rb') as f:p=plistlib.load(f)
           assert p["CFBundleIdentifier"]=="com.finn.douyinlite"
           assert p["MinimumOSVersion"]=="8.0"
-          assert p["CFBundleShortVersionString"]=="0.3.0"
+          assert p["CFBundleShortVersionString"]=="0.4.0"
           print("Verified iOS 8 app identity and version")
           PYTEST
           cp -a "$APP" /tmp/douyin-ipa/Payload/DouyinLite.app
           mkdir -p downloads
-          (cd /tmp/douyin-ipa && zip -qr -X "$GITHUB_WORKSPACE/downloads/DouyinLite-iOS8-v0.3.0.ipa" Payload)
-          cp "$DEB" downloads/DouyinLite-iOS8-v0.3.0.deb
-          (cd downloads && zip -q -9 DouyinLite-iOS8-v0.3.0.zip DouyinLite-iOS8-v0.3.0.deb)
-          unzip -t downloads/DouyinLite-iOS8-v0.3.0.zip | tail -1
-          sha256sum downloads/DouyinLite-iOS8-v0.3.0.*
+          (cd /tmp/douyin-ipa && zip -qr -X "$GITHUB_WORKSPACE/downloads/DouyinLite-iOS8-v0.4.0.ipa" Payload)
+          cp "$DEB" downloads/DouyinLite-iOS8-v0.4.0.deb
+          (cd downloads && zip -q -9 DouyinLite-iOS8-v0.4.0.zip DouyinLite-iOS8-v0.4.0.deb)
+          unzip -t downloads/DouyinLite-iOS8-v0.4.0.zip | tail -1
+          sha256sum downloads/DouyinLite-iOS8-v0.4.0.*
       - name: Publish verified files
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/DouyinLite-iOS8-v0.3.0.deb downloads/DouyinLite-iOS8-v0.3.0.zip downloads/DouyinLite-iOS8-v0.3.0.ipa
+          git add downloads/DouyinLite-iOS8-v0.4.0.deb downloads/DouyinLite-iOS8-v0.4.0.zip downloads/DouyinLite-iOS8-v0.4.0.ipa
           if ! git diff --cached --quiet; then
-            git commit -m "release: verified DouyinLite 0.3.0 armv7 install packages [skip ci]"
+            git commit -m "release: verified DouyinLite 0.4.0 armv7 install packages [skip ci]"
             git push origin HEAD:main
           fi
