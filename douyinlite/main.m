@@ -788,6 +788,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         NSMutableArray *result=[NSMutableArray array];
         NSMutableSet *known=[NSMutableSet set];
         NSMutableArray *all=[NSMutableArray arrayWithArray:self.videos];
+        [all addObjectsFromArray:self.onlineVideos];
         [all addObjectsFromArray:self.demoVideos];
         for(NSDictionary *clip in all){
             NSString *title=DLText(clip[@"title"]);
@@ -942,7 +943,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
-    NSString *kind=[clip[@"source"] isEqualToString:@"demo"]?@"公开授权样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"));
+    NSString *kind=[clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加")));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
     BOOL liked=[self.favorites containsObject:address];
@@ -983,7 +984,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             self.playButton.hidden=YES;
             NSArray *shown=[self visibleVideos];
             if(!shown.count || self.index>=shown.count)return;
-            NSString *key=DLText(shown[self.index][@"url"]);
+            NSDictionary *clip=shown[self.index];
+            NSString *key=DLText(clip[@"url"]);
+            if([DLText(clip[@"source"]) isEqualToString:@"peertube"]){
+                BOOL stored=NO;
+                for(NSDictionary *existing in self.videos)
+                    if([DLText(existing[@"url"]) isEqualToString:key]){stored=YES;break;}
+                if(!stored)[self.videos insertObject:clip atIndex:0];
+                if(self.videos.count>140)[self.videos removeLastObject];
+            }
             [self.history removeObject:key];[self.history insertObject:key atIndex:0];
             if(self.history.count>100)[self.history removeLastObject];
             [self storeLibrary];
@@ -1101,7 +1110,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)shareCurrent {
     NSArray *clips=[self visibleVideos];if(!clips.count||self.index>=clips.count)return;
-    NSString *link=DLText(clips[self.index][@"url"]);
+    NSDictionary *clip=clips[self.index];
+    NSString *link=DLText(clip[@"originURL"]);
+    if(!link.length)link=DLText(clip[@"url"]);
     NSURL *url=[NSURL URLWithString:link];
     if(!url){[self alert:@"无法分享" message:@"当前视频链接无效。"];return;}
     UIActivityViewController *sheet=[[UIActivityViewController alloc] initWithActivityItems:@[url] applicationActivities:nil];
@@ -1109,7 +1120,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)copyLink {
     NSArray *clips=[self visibleVideos];if(!clips.count)return;
-    [UIPasteboard generalPasteboard].string=DLText(clips[self.index][@"url"]);
+    NSString *link=DLText(clips[self.index][@"originURL"]);
+    if(!link.length)link=DLText(clips[self.index][@"url"]);
+    [UIPasteboard generalPasteboard].string=link;
     [self alert:@"已复制" message:@"视频地址已复制到剪贴板。"];
 }
 - (void)alert:(NSString *)title message:(NSString *)message {
@@ -1216,8 +1229,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self reloadCurrent];
 }
 - (void)openMenu {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite"
-        message:@"支持公开抖音分享页解析；官方推荐流仍需授权。演示样片使用公开许可视频。" preferredStyle:UIAlertControllerStyleActionSheet];
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
+        message:@"首页加载 PeerTube 公开视频，不是抖音推荐。抖音公开分享链接可尝试导入，部分需要平台登录或授权。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"联网公开视频 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+        self.index=0;[self reloadCurrent];[self loadOnlineFeed:YES];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.demoMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
@@ -1251,7 +1268,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [menu addAction:[UIAlertAction actionWithTitle:@"复制当前视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self copyLink];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"扫描本地视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self scanLocalVideos];}]];
     NSArray *currentClips=[self visibleVideos];
-    BOOL canRemove=currentClips.count && self.index<currentClips.count && ![DLText(currentClips[self.index][@"source"]) isEqualToString:@"demo"];
+    NSString *source=(currentClips.count && self.index<currentClips.count)?DLText(currentClips[self.index][@"source"]):@"";
+    BOOL canRemove=currentClips.count && self.index<currentClips.count && ![source isEqualToString:@"demo"] && ![source isEqualToString:@"peertube"];
     if(canRemove){
         [menu addAction:[UIAlertAction actionWithTitle:@"移除当前视频" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
             NSArray *clips=[self visibleVideos];
