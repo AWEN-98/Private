@@ -1,3 +1,9 @@
+# DouyinLite V0.6.0 Web Shell
+
+Launches the official https://www.douyin.com/ website in WKWebView. Browser controls: back, forward, refresh, home, mobile/desktop user-agent, hide toolbar. The previous feed code remains in main.m but is no longer active.
+
+Compatibility warning: iOS 8's old WebKit may not execute current Douyin JavaScript or play current video formats; user-agent switching does not upgrade the browser engine. Requires real-device testing.
+
 # DouyinLite V0.5.0 — Real public video feed (NOT official Douyin)
 
 This version has a **real external public-video source** using the published PeerTube REST API. It is **not the Douyin algorithmic recommended feed**. The app fetches paginated PeerTube listings and requests each video's public metadata, choosing MP4/HLS variants where available. iPhone 4S decoding and provider reliability must be verified on the device. Three sample clips remain under the menu as an optional playback check.
