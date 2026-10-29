@@ -603,7 +603,71 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         [self fetchOnlineCandidates:items index:i+1 token:token before:before];
     }];
 }
+- (void)configureJSONFeed {
+ UIAlertController *a=[UIAlertController alertControllerWithTitle:@"视频内容接口"
+ message:@"填写你有权使用的 HTTPS JSON 列表地址。返回 {data:[{url,title}]}，可选 next URL 分页。此功能不会自动提供抖音推荐数据。"
+ preferredStyle:UIAlertControllerStyleAlert];
+ [a addTextFieldWithConfigurationHandler:^(UITextField *t){
+   t.placeholder=@"https://example.com/feed.json";
+   t.text=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
+   t.keyboardType=UIKeyboardTypeURL;t.autocapitalizationType=UITextAutocapitalizationTypeNone;
+ }];
+ [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+ [a addAction:[UIAlertAction actionWithTitle:@"保存并加载" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+    NSString *s=[((UITextField *)a.textFields.firstObject).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSURL *url=[NSURL URLWithString:s];
+    if(s.length && ![url.scheme isEqualToString:@"https"]){[self alert:@"无效地址" message:@"内容接口必须使用 HTTPS。"];return;}
+    [[NSUserDefaults standardUserDefaults] setObject:s?:@"" forKey:@"dl_feed_endpoint_v1"];
+    self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+    [self loadOnlineFeed:YES];
+ }];
+ [self presentViewController:a animated:YES completion:nil];
+}
+- (void)loadJSONFeed:(BOOL)reset {
+ NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"];
+ if(!base.length)return;
+ if(self.onlineLoading&&!reset)return;
+ if(reset){[self.onlineVideos removeAllObjects];self.onlineError=nil;self.onlineOffset=0;self.index=0;}
+ self.onlineLoading=YES;self.onlinePaging=YES;
+ NSUInteger token=++self.onlineRequestID;
+ NSString *endpoint=base;
+ if(!reset && self.nextURL.length)endpoint=self.nextURL;
+ if(reset)self.nextURL=nil;
+ NSURL *url=[NSURL URLWithString:endpoint];
+ if(![url.scheme isEqualToString:@"https"]){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=@"内容接口需要 HTTPS";[self reloadCurrent];return;}
+ NSURLRequest *req=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
+ [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+  id parsed=(data.length && data.length<2000000)?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+  NSDictionary *json=[parsed isKindOfClass:[NSDictionary class]]?parsed:@{};
+  NSArray *rows=[json[@"data"] isKindOfClass:[NSArray class]]?json[@"data"]:@[];
+  NSMutableArray *incoming=[NSMutableArray array];
+  for(id value in rows){
+    if(![value isKindOfClass:[NSDictionary class]])continue;
+    NSDictionary *item=value;NSString *link=DLText(item[@"url"]);
+    NSURL *candidate=[NSURL URLWithString:link];
+    if(![candidate.scheme isEqualToString:@"https"])continue;
+    BOOL duplicate=NO;
+    for(NSDictionary *old in self.onlineVideos)if([DLText(old[@"url"]) isEqualToString:link]){duplicate=YES;break;}
+    if(!duplicate)[incoming addObject:@{@"url":link,@"title":DLText(item[@"title"]).length?DLText(item[@"title"]):@"公开视频",@"source":@"custom"}];
+    if(incoming.count>=30)break;
+  }
+  dispatch_async(dispatch_get_main_queue(),^{
+    if(token!=self.onlineRequestID)return;
+    [self.onlineVideos addObjectsFromArray:incoming];
+    NSString *next=DLText(json[@"next"]);NSURL *nextURL=[NSURL URLWithString:next];
+    self.nextURL=[nextURL.scheme isEqualToString:@"https"]?next:nil;
+    self.onlineOffset+=rows.count;
+    self.onlineLoading=NO;self.onlinePaging=NO;
+    if(!self.onlineVideos.count){
+      NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
+      self.onlineError=[NSString stringWithFormat:@"内容接口无有效视频（HTTP %ld）：%@",(long)http.statusCode,error.localizedDescription?:@"请检查 JSON data 与视频地址"];
+    }
+    if(self.onlineMode)[self reloadCurrent];
+  });
+ }] resume];
+}
 - (void)loadOnlineFeed:(BOOL)reset {
+    if([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadJSONFeed:reset];return;}
     [self loadOnlineFeed:reset preserveHost:NO];
 }
 - (void)loadOnlineFeed:(BOOL)reset preserveHost:(BOOL)preserveHost {
@@ -1258,6 +1322,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
         message:@"抖音网页浏览为实验功能。旧版 WebKit 可能无法运行现代抖音页面；原生公开视频播放器继续保留。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"配置 HTTPS 视频列表接口" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
