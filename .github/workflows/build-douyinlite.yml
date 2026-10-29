@@ -6,6 +6,9 @@ on:
       - 'douyinlite/**'
       - '.github/workflows/build-douyinlite.yml'
   workflow_dispatch:
+concurrency:
+  group: douyinlite-release-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -120,5 +123,11 @@ jobs:
           git add downloads/DouyinLite-iOS8-v0.9.0.deb downloads/DouyinLite-iOS8-v0.9.0.zip downloads/DouyinLite-iOS8-v0.9.0.ipa
           if ! git diff --cached --quiet; then
             git commit -m "release: verified DouyinLite 0.9.0 armv7 install packages [skip ci]"
-            git push origin HEAD:main
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main
+              if git push origin HEAD:main; then exit 0; fi
+              sleep 3
+            done
+            echo "Unable to publish verified install packages after five attempts" >&2
+            exit 1
           fi
