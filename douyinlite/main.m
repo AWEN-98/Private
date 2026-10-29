@@ -281,6 +281,14 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL scanning;
 @property(nonatomic,assign) NSInteger failedDemoCount;
 @property(nonatomic,strong) UIView *rightRail;
+@property(nonatomic,strong) UIView *tabBar;
+@property(nonatomic,strong) NSArray *tabButtons;
+@property(nonatomic,strong) NSArray *tabLabels;
+@property(nonatomic,strong) NSArray *searchResults;
+@property(nonatomic,copy) NSString *searchQuery;
+@property(nonatomic,assign) BOOL searchMode;
+@property(nonatomic,assign) BOOL panning;
+@property(nonatomic,assign) NSInteger activeTab;
 @property(nonatomic,strong) UIButton *likeButton;
 @property(nonatomic,strong) UIButton *muteButton;
 @property(nonatomic,strong) UIButton *playButton;
@@ -354,10 +362,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapVideo:)];
     tap.delegate=self;tap.cancelsTouchesInView=NO;
     [self.surface addGestureRecognizer:tap];
-    UISwipeGestureRecognizer *up=[[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipe:)];
-    up.direction=UISwipeGestureRecognizerDirectionUp;[self.view addGestureRecognizer:up];
-    UISwipeGestureRecognizer *down=[[UISwipeGestureRecognizer alloc] initWithTarget:self action:@selector(swipe:)];
-    down.direction=UISwipeGestureRecognizerDirectionDown;[self.view addGestureRecognizer:down];
+    UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(verticalPan:)];
+    pan.delegate=self;
+    pan.maximumNumberOfTouches=1;
+    pan.cancelsTouchesInView=NO;
+    [self.view addGestureRecognizer:pan];
     UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(holdVideo:)];
     hold.minimumPressDuration=.43;hold.cancelsTouchesInView=NO;
     [self.surface addGestureRecognizer:hold];
@@ -373,27 +382,33 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.topText=[self label:17];self.topText.font=[UIFont boldSystemFontOfSize:17];
     self.topText.textAlignment=NSTextAlignmentCenter;
     [top addSubview:self.topText];
-    UIButton *add=[self button:@"＋" action:@selector(addVideo) font:29];
+    UIButton *add=[self button:@"" action:@selector(addVideo) font:18];
+    DLStyleIcon(add,@"plus",24,[UIColor whiteColor]);
     add.tag=101;[top addSubview:add];
-    UIButton *menu=[self button:@"⋯" action:@selector(openMenu) font:28];
+    UIButton *menu=[self button:@"" action:@selector(openMenu) font:18];
+    DLStyleIcon(menu,@"menu",22,[UIColor whiteColor]);
     menu.tag=102;[top addSubview:menu];
 
     self.rightRail=[[UIView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.rightRail];
-    self.likeButton=[self button:@"♡" action:@selector(toggleFavorite) font:38];
+    self.likeButton=[self button:@"" action:@selector(toggleFavorite) font:20];
+    DLStyleIcon(self.likeButton,@"heart",29,[UIColor whiteColor]);
     [self.rightRail addSubview:self.likeButton];
     UILabel *likeLabel=[self label:10];likeLabel.text=@"收藏";
     likeLabel.textAlignment=NSTextAlignmentCenter;likeLabel.tag=111;[self.rightRail addSubview:likeLabel];
-    UIButton *share=[self button:@"↗" action:@selector(copyLink) font:35];
+    UIButton *share=[self button:@"" action:@selector(copyLink) font:20];
+    DLStyleIcon(share,@"share",27,[UIColor whiteColor]);
     [self.rightRail addSubview:share];share.tag=112;
     UILabel *shareLabel=[self label:10];shareLabel.text=@"复制";
     shareLabel.textAlignment=NSTextAlignmentCenter;shareLabel.tag=113;[self.rightRail addSubview:shareLabel];
-    self.muteButton=[self button:@"♪" action:@selector(toggleMute) font:26];
+    self.muteButton=[self button:@"" action:@selector(toggleMute) font:20];
+    DLStyleIcon(self.muteButton,@"sound",26,[UIColor whiteColor]);
     [self.rightRail addSubview:self.muteButton];
     UILabel *muteLabel=[self label:10];muteLabel.text=@"声音";
     muteLabel.textAlignment=NSTextAlignmentCenter;muteLabel.tag=114;[self.rightRail addSubview:muteLabel];
 
-    self.playButton=[self button:@"▶" action:@selector(togglePlay) font:48];
+    self.playButton=[self button:@"" action:@selector(togglePlay) font:28];
+    DLStyleIcon(self.playButton,@"play",42,[UIColor whiteColor]);
     self.playButton.backgroundColor=[UIColor colorWithWhite:0 alpha:.28];
     self.playButton.layer.cornerRadius=41;
     [self.view addSubview:self.playButton];
@@ -416,6 +431,30 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.progress.trackTintColor=[UIColor colorWithWhite:1 alpha:.3];
     [self.view addSubview:self.progress];
 
+    self.tabBar=[[UIView alloc] initWithFrame:CGRectZero];
+    self.tabBar.backgroundColor=[UIColor colorWithRed:.045 green:.052 blue:.064 alpha:.98];
+    [self.view addSubview:self.tabBar];
+    NSArray *kinds=@[@"home",@"search",@"heart",@"user"];
+    NSArray *names=@[@"首页",@"搜索",@"收藏",@"我的"];
+    NSMutableArray *buttons=[NSMutableArray array];
+    NSMutableArray *labels=[NSMutableArray array];
+    for(NSInteger i=0;i<4;i++){
+        UIButton *button=[self button:@"" action:@selector(tabPressed:) font:12];
+        button.tag=200+i;
+        button.contentVerticalAlignment=UIControlContentVerticalAlignmentTop;
+        DLStyleIcon(button,kinds[i],23,[UIColor whiteColor]);
+        UILabel *label=[self label:10];
+        label.text=names[i];
+        label.textAlignment=NSTextAlignmentCenter;
+        label.userInteractionEnabled=NO;
+        [button addSubview:label];
+        [buttons addObject:button];[labels addObject:label];
+        [self.tabBar addSubview:button];
+    }
+    self.tabButtons=buttons;self.tabLabels=labels;
+    self.activeTab=0;
+
+
     self.uiTimer=[NSTimer scheduledTimerWithTimeInterval:.5 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self layoutScreen];
     [self reloadCurrent];
@@ -427,7 +466,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.topText.frame=CGRectMake(54,13,MAX(100,w-108),38);
     [top viewWithTag:101].frame=CGRectMake(w-49,10,43,43);
     [top viewWithTag:102].frame=CGRectMake(6,10,43,43);
-    self.rightRail.frame=CGRectMake(w-64,MAX(100,h-307),59,205);
+    self.rightRail.frame=CGRectMake(w-64,MAX(92,h-352),59,205);
     self.likeButton.frame=CGRectMake(2,0,55,45);
     [self.rightRail viewWithTag:111].frame=CGRectMake(2,42,55,22);
     [self.rightRail viewWithTag:112].frame=CGRectMake(2,68,55,45);
@@ -435,14 +474,23 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.muteButton.frame=CGRectMake(2,142,55,39);
     [self.rightRail viewWithTag:114].frame=CGRectMake(2,181,55,20);
     self.playButton.frame=CGRectMake((w-82)/2,(h-82)/2,82,82);
-    self.titleText.frame=CGRectMake(14,h-124,MAX(100,w-93),42);
-    self.subtitleText.frame=CGRectMake(14,h-82,MAX(100,w-93),43);
-    self.countText.frame=CGRectMake(MAX(140,w-96),h-43,80,22);
+    self.titleText.frame=CGRectMake(14,h-179,MAX(100,w-93),42);
+    self.subtitleText.frame=CGRectMake(14,h-137,MAX(100,w-93),43);
+    self.countText.frame=CGRectMake(MAX(140,w-94),h-91,78,22);
     self.message.frame=CGRectMake(20,MAX(85,(h-100)/2),w-40,110);
     self.loadingIndicator.center=CGPointMake(w/2,MAX(78,h/2-49));
-    self.progress.frame=CGRectMake(0,h-3,w,3);
+    self.tabBar.frame=CGRectMake(0,h-52,w,52);
+    CGFloat tabWidth=w/4.0;
+    for(NSInteger i=0;i<self.tabButtons.count;i++){
+        UIButton *btn=self.tabButtons[i];
+        btn.frame=CGRectMake(i*tabWidth,0,tabWidth,52);
+        UILabel *label=self.tabLabels[i];
+        label.frame=CGRectMake(0,32,tabWidth,16);
+    }
+    self.progress.frame=CGRectMake(0,h-55,w,3);
 }
 - (NSArray *)visibleVideos {
+    if(self.searchMode)return self.searchResults?:@[];
     if(self.demoMode && !self.favoritesOnly && !self.historyOnly)return self.demoVideos;
     if(self.favoritesOnly){
         NSMutableArray *result=[NSMutableArray array];
