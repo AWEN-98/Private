@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
+#import "DLAccountSession.h"
 
 @interface DLBrowserController : UIViewController <WKNavigationDelegate, UIWebViewDelegate, UITextFieldDelegate>
 @property(nonatomic,strong) WKWebView *web;
@@ -33,13 +34,17 @@
  go.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;[go setTitle:@"前往" forState:UIControlStateNormal];
  [go addTarget:self action:@selector(openAddress) forControlEvents:UIControlEventTouchUpInside];[bar addSubview:go];
  CGRect frame=CGRectMake(0,64,w,MAX(100,self.view.bounds.size.height-112));
- if(NSClassFromString(@"WKWebView")) {
+ // iOS 8 WKWebView has an isolated cookie jar and no WKHTTPCookieStore API.
+ // UIWebView shares NSHTTPCookieStorage with the native account session.
+ BOOL accountPage=DLIsOfficialLoginURL(self.initialURL);
+ if(NSClassFromString(@"WKWebView") && !accountPage) {
    WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];
    configuration.allowsInlineMediaPlayback=YES;
    self.web=[[WKWebView alloc]initWithFrame:frame configuration:configuration];
    self.web.navigationDelegate=self;self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
    [self.view addSubview:self.web];
  }else{
+   [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"UserAgent":DLWebUserAgent()}];
    self.legacy=[[UIWebView alloc]initWithFrame:frame];self.legacy.delegate=self;
    self.legacy.mediaPlaybackRequiresUserAction=NO;self.legacy.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
    [self.view addSubview:self.legacy];
@@ -91,7 +96,7 @@
  self.requestGeneration++;
  self.failurePanel.hidden=YES;
 }
-- (void)close {[self dismissViewControllerAnimated:YES completion:nil];}
+- (void)close {if(DLAccountSession.shared.hasSession)[DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){}];[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)openURL:(NSURL *)url{
  if(!url || !([url.scheme isEqualToString:@"https"]||[url.scheme isEqualToString:@"http"]))return;
  self.address.text=url.absoluteString;

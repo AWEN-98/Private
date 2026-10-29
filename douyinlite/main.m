@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "DLAccountSession.h"
 #import <AVFoundation/AVFoundation.h>
 #import <math.h>
 @interface DLBrowserController : UIViewController
@@ -132,12 +133,18 @@ static NSDictionary *DLPublicInfoFromHTML(NSString *html) {
 static NSString *DLPublicPlaybackURL(NSDictionary *item) {
     NSDictionary *video=[item[@"video"] isKindOfClass:[NSDictionary class]]?item[@"video"]:@{};
     NSArray *rates=[video[@"bit_rate"] isKindOfClass:[NSArray class]]?video[@"bit_rate"]:@[];
-    // Favor H.264 to maximize compatibility with iPhone 4S.
+    // Prefer modest bitrate H.264 renditions for the 512 MB iPhone 4S.
+    rates=[rates sortedArrayUsingComparator:^NSComparisonResult(id a,id b){
+        double x=[a isKindOfClass:NSDictionary.class]&&[a[@"bit_rate"] respondsToSelector:@selector(doubleValue)]?[a[@"bit_rate"] doubleValue]:1e12;
+        double y=[b isKindOfClass:NSDictionary.class]&&[b[@"bit_rate"] respondsToSelector:@selector(doubleValue)]?[b[@"bit_rate"] doubleValue]:1e12;
+        return x<y?NSOrderedAscending:(x>y?NSOrderedDescending:NSOrderedSame);
+    }];
     for(id entry in rates){
         if(![entry isKindOfClass:[NSDictionary class]])continue;
         NSDictionary *rate=entry;
         NSString *codec=[DLText(rate[@"codec_type"]) lowercaseString];
-        if(codec.length && ![codec containsString:@"264"] && ![codec isEqualToString:@"h264"])continue;
+        if(codec.length && ![codec containsString:@"264"] && ![codec isEqualToString:@"avc"])continue;
+        if([rate[@"is_h265"] respondsToSelector:@selector(boolValue)]&&[rate[@"is_h265"] boolValue])continue;
         NSDictionary *rplay=[rate[@"play_addr"] isKindOfClass:[NSDictionary class]]?rate[@"play_addr"]:@{};
         NSArray *rurls=[rplay[@"url_list"] isKindOfClass:[NSArray class]]?rplay[@"url_list"]:@[];
         for(id candidate in rurls){
@@ -145,7 +152,8 @@ static NSString *DLPublicPlaybackURL(NSDictionary *item) {
             if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
         }
     }
-    NSDictionary *play=[video[@"play_addr"] isKindOfClass:[NSDictionary class]]?video[@"play_addr"]:@{};
+    BOOL hevc=[video[@"is_h265"] respondsToSelector:@selector(boolValue)]&&[video[@"is_h265"] boolValue];
+    NSDictionary *play=[video[@"play_addr_h264"] isKindOfClass:NSDictionary.class]?video[@"play_addr_h264"]:(!hevc&&[video[@"play_addr"] isKindOfClass:NSDictionary.class]?video[@"play_addr"]:@{});
     NSArray *urls=[play[@"url_list"] isKindOfClass:[NSArray class]]?play[@"url_list"]:@[];
     for(id candidate in urls){
         NSString *link=DLText(candidate);
@@ -275,6 +283,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSInteger onlineInstance;
 @property(nonatomic,assign) NSUInteger onlineRequestID;
 @property(nonatomic,assign) BOOL onlinePaging;
+@property(nonatomic,assign) BOOL accountReloadPending;
+@property(nonatomic,assign) BOOL douyinEnd;
+@property(nonatomic,strong) NSDate *douyinRetryAfter;
 @property(nonatomic,copy) NSString *onlineError;
 @property(nonatomic,strong) AVURLAsset *nextAsset;
 @property(nonatomic,copy) NSString *nextURL;
@@ -345,6 +356,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [DLAccountSession shared];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(accountChanged) name:DLAccountDidChangeNotification object:nil];
     self.view.backgroundColor=DLBG();
     NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
     self.videos=[[[defaults arrayForKey:@"dl_library_v1"]?:@[] mutableCopy] mutableCopy];
@@ -726,61 +739,53 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  }] resume];
 }
 
-- (void)loadDouyinAnonymousFeed:(BOOL)reset {
+- (void)loadDouyinAccountFeed:(BOOL)reset {
  if(self.onlineLoading&&!reset)return;
- if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;}
+ if(!reset&&(self.douyinEnd||self.douyinRetryAfter.timeIntervalSinceNow>0))return;
+ if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;}
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
- NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"https://www.douyin.com/aweme/v2/web/module/feed/?device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=12&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2",(long)(self.onlineOffset+1),(long)(reset?0:2)]];
- NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
- req.HTTPMethod=@"POST";
- [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
- [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
- [req setValue:@"https://www.douyin.com" forHTTPHeaderField:@"Origin"];
- [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
- [req setValue:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
- req.HTTPBody=[@"encoded_pre_item_ids=" dataUsingEncoding:NSUTF8StringEncoding];
- if(reset){self.message.text=@"正在获取抖音公开推荐内容…";[self.loadingIndicator startAnimating];}
- [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
-  id raw=data.length&&data.length<4000000?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
-  NSDictionary *root=[raw isKindOfClass:[NSDictionary class]]?raw:@{};
+ NSString *signError=nil;
+ NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset error:&signError];
+ if(!request){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;[self reloadCurrent];return;}
+ if(reset){self.message.text=DLAccountSession.shared.hasSession?@"正在用本机账号加载抖音内容…":@"正在连接抖音，可在「我」中登录账号";[self.loadingIndicator startAnimating];}
+ [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *root,NSString *problem){
+  if(token!=self.onlineRequestID)return;
   id nested=root[@"data"];
-  NSDictionary *body=[nested isKindOfClass:[NSDictionary class]]?nested:root;
+  NSDictionary *body=[nested isKindOfClass:NSDictionary.class]?nested:root;
   NSArray *rows=nil;
-  for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"feed_list"]){
-    if([body[key] isKindOfClass:[NSArray class]]){rows=body[key];break;}
-  }
-  NSMutableArray *items=[NSMutableArray array];
+  for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"feed_list"]){if([body[key] isKindOfClass:NSArray.class]){rows=body[key];break;}}
+  if(!rows&&[nested isKindOfClass:NSArray.class])rows=nested;
+  NSMutableArray *items=[NSMutableArray array];NSMutableSet *known=[NSMutableSet set];
+  for(NSDictionary *old in self.onlineVideos)[known addObject:DLText(old[@"id"]).length?old[@"id"]:DLText(old[@"url"])];
   for(id obj in rows){
-    if(![obj isKindOfClass:[NSDictionary class]])continue;
-    NSDictionary *entry=obj;
-    if([entry[@"aweme_info"] isKindOfClass:[NSDictionary class]])entry=entry[@"aweme_info"];
-    NSString *address=DLPublicPlaybackURL(entry);
-    if(!address.length)continue;
-    BOOL duplicate=NO;
-    for(NSDictionary *old in self.onlineVideos)if([DLText(old[@"url"]) isEqualToString:address]){duplicate=YES;break;}
-    if(duplicate)continue;
-    NSDictionary *author=[entry[@"author"] isKindOfClass:[NSDictionary class]]?entry[@"author"]:@{};
-    NSString *title=DLText(entry[@"desc"]);
-    if(!title.length)title=DLText(author[@"nickname"]);
-    if(!title.length)title=@"抖音公开视频";
-    [items addObject:@{@"url":address,@"title":title,@"source":@"public-share"}];
+   if(![obj isKindOfClass:NSDictionary.class])continue;
+   NSDictionary *entry=obj;if([entry[@"aweme_info"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme_info"];
+   NSString *address=DLPublicPlaybackURL(entry);if(!address.length)continue;
+   NSString *vid=DLText(entry[@"aweme_id"]);NSString *identity=vid.length?vid:address;if([known containsObject:identity])continue;[known addObject:identity];
+   NSDictionary *author=[entry[@"author"] isKindOfClass:NSDictionary.class]?entry[@"author"]:@{};
+   NSString *title=DLText(entry[@"desc"]);if(!title.length)title=DLText(author[@"nickname"]);if(!title.length)title=@"抖音视频";
+   [items addObject:@{@"id":vid,@"url":address,@"title":title,@"source":@"douyin-account"}];if(items.count>=20)break;
   }
-  dispatch_async(dispatch_get_main_queue(),^{
-    if(token!=self.onlineRequestID)return;
-    self.onlineLoading=NO;self.onlinePaging=NO;
-    if(rows.count)self.onlineOffset+=1;
-    if(items.count)[self.onlineVideos addObjectsFromArray:items];
-    if(!self.onlineVideos.count){
-      NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
-      self.onlineError=[NSString stringWithFormat:@"抖音匿名推荐暂无可用视频（HTTP %ld）%@。可在菜单切换到公开视频源或导入链接。",(long)http.statusCode,error.localizedDescription?:@""];
-    }
-    if(reset || self.onlineVideos.count==items.count)[self reloadCurrent];
-  });
- }] resume];
+  self.onlineLoading=NO;self.onlinePaging=NO;
+  if(rows.count)self.onlineOffset++;
+  [self.onlineVideos addObjectsFromArray:items];
+  // Keep at most 120 feed entries without discarding the current or upcoming video.
+  NSInteger remove=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
+  if(remove>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,remove)];self.index-=remove;}
+  if(!items.count){
+   self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:15];
+   if(!problem&&[body[@"has_more"] respondsToSelector:@selector(boolValue)]&&![body[@"has_more"] boolValue])self.douyinEnd=YES;
+   NSString *reason=problem;
+   if(!reason.length){NSString *code=DLText(root[@"status_code"]);if(!code.length)code=DLText(body[@"status_code"]);reason=code.length&&![code isEqualToString:@"0"]?[NSString stringWithFormat:@"内容接口返回状态 %@。",code]:@"未返回新的兼容视频，可能需要账号登录或网页验证。";}
+   self.onlineError=[reason stringByAppendingString:@"\n点击「我」进入抖音账号，再返回首页刷新。"];
+   if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
+  }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
+  if(self.onlineMode && !self.presentedViewController){if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
+ }];
 }
 - (void)loadOnlineFeed:(BOOL)reset {
-    if(![[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadDouyinAnonymousFeed:reset];return;}
+    if(![[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadDouyinAccountFeed:reset];return;}
     if([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadJSONFeed:reset];return;}
     [self loadOnlineFeed:reset preserveHost:NO];
 }
@@ -924,7 +929,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(!url)return;
     self.preloadSourceURL=DLText(videos[self.index][@"url"]);
     self.nextURL=link;
-    AVURLAsset *asset=[AVURLAsset URLAssetWithURL:url options:@{AVURLAssetPreferPreciseDurationAndTimingKey:@NO}];
+    AVURLAsset *asset=[self playbackAsset:url];
     self.nextAsset=asset;
     [asset loadValuesAsynchronouslyForKeys:@[@"playable"] completionHandler:^{
         dispatch_async(dispatch_get_main_queue(),^{
@@ -1099,6 +1104,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.item=nil;self.playingURL=nil;self.holdingSpeed=NO;
     [self setLoading:NO];
 }
+- (AVURLAsset *)playbackAsset:(NSURL *)url {
+ NSMutableDictionary *options=[@{AVURLAssetPreferPreciseDurationAndTimingKey:@NO} mutableCopy];
+ NSArray *cookies=[NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:url];
+ if(cookies.count)options[AVURLAssetHTTPCookiesKey]=cookies;
+ return [AVURLAsset URLAssetWithURL:url options:options];
+}
 - (void)reloadCurrent {
     NSArray *visible=[self visibleVideos];
     // Reuse the one metadata-prefetched asset, never a second decoding player.
@@ -1118,7 +1129,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]?@"DouyinBridge · 云端内容":@"联网公开视频 · 实验"):(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
+    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]?@"DouyinBridge · 云端内容":([[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"]?@"PeerTube 公开频道":@"抖音内容 · 本机连接")):(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
@@ -1136,7 +1147,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
-    NSString *kind=[clip[@"source"] isEqualToString:@"douyin-bridge"]?@"DouyinBridge · 云端公开视频":([clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加"))));
+    NSString *kind=[clip[@"source"] isEqualToString:@"douyin-account"]?@"抖音内容 · 本机连接":([clip[@"source"] isEqualToString:@"douyin-bridge"]?@"DouyinBridge · 云端公开视频":([clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加")))));
     self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
     self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
     BOOL liked=[self.favorites containsObject:address];
@@ -1149,7 +1160,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }
     [self setLoading:YES];
     self.message.text=@"正在加载视频…";
-    self.item=prefetched?[AVPlayerItem playerItemWithAsset:prefetched]:[AVPlayerItem playerItemWithURL:url];
+    self.item=[AVPlayerItem playerItemWithAsset:prefetched?:[self playbackAsset:url]];
     [self.item addObserver:self forKeyPath:@"status" options:NSKeyValueObservingOptionInitial context:NULL];
     self.observing=YES;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoEnded:) name:AVPlayerItemDidPlayToEndTimeNotification object:self.item];
@@ -1172,7 +1183,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             NSTimeInterval duration=CMTimeGetSeconds(item.duration);
             if(isfinite(duration)&&duration>0 && previous>4 && previous<duration-6)
                 [self.player seekToTime:CMTimeMakeWithSeconds(previous,600)];
-            [self.player play];
+            if(!self.presentedViewController && UIApplication.sharedApplication.applicationState==UIApplicationStateActive)[self.player play];
             [self prepareNextAsset];
             self.playButton.hidden=YES;
             NSArray *shown=[self visibleVideos];
@@ -1428,6 +1439,23 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self alert:@"本地视频扫描完成" message:[NSString stringWithFormat:@"新增 %ld 个视频。\n扫描路径：\n/var/mobile/Documents/DouyinLite\n/var/mobile/Documents/PocketDrop",(long)count]];
     [self reloadCurrent];
 }
+- (void)openAccount {
+ [self.player pause];
+ [self presentViewController:[DLLoginController new] animated:YES completion:nil];
+}
+- (void)accountChanged {
+ self.accountReloadPending=YES;self.onlineRequestID++;self.onlineLoading=NO;self.onlinePaging=NO;
+ [self.onlineVideos removeAllObjects];self.onlineError=nil;[self stopCurrent];
+}
+- (void)viewDidAppear:(BOOL)animated {
+ [super viewDidAppear:animated];
+ if(self.accountReloadPending){
+  self.accountReloadPending=NO;
+  [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
+  [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
+  self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;[self loadOnlineFeed:YES];
+ }
+}
 - (void)openDouyinBrowser {
     [self.player pause];
     DLBrowserController *browser=[[DLBrowserController alloc] initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
@@ -1435,8 +1463,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
-        message:@"抖音网页浏览为实验功能。旧版 WebKit 可能无法运行现代抖音页面；原生公开视频播放器继续保留。" preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"抖音匿名推荐（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        message:@"登录会话保存在本机。推荐内容通过本机请求获取，旧系统的网络和网页兼容性仍需实际验证。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:(DLAccountSession.shared.hasSession?@"抖音账号 · 检查 / 重新登录":@"抖音账号 · 扫码登录") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"抖音内容 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
       [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
       [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
       self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;

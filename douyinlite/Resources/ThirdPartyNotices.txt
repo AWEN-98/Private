@@ -1,0 +1,16 @@
+DLSigner.js is an ES5 port of the A-Bogus algorithm and SM3 hash implementation
+in Evil0ctal/Douyin_TikTok_Download_API, revision b5505e3830a2e4b9b8608962f58e96dfe75f23c5.
+Source: https://github.com/Evil0ctal/Douyin_TikTok_Download_API
+Original files: src/dtk/signing/native/abogus.py, sm3.py, websign.py
+Licensed under Apache License 2.0. Full license: Apache-2.0.txt.
+Modifications by Finn: ES5 JavaScriptCore port and native request integration.
+Copyright and attribution in upstream source are retained in this notice.
+
+Upstream NOTICE:
+Douyin_TikTok_Download_API
+Copyright 2021-2026 Evil0ctal and contributors
+
+Licensed under the Apache License, Version 2.0. The full text is in the
+LICENSE file next to this one.
+
+https://github.com/Evil0ctal/Douyin_TikTok_Download_API
