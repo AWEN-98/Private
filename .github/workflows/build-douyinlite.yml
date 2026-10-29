@@ -29,6 +29,7 @@ jobs:
           git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS10.3.sdk
           cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
       - name: Compile and package
+        # Retry V0.8.1 package with retained diagnostic output
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
