@@ -621,7 +621,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [[NSUserDefaults standardUserDefaults] setObject:s?:@"" forKey:@"dl_feed_endpoint_v1"];
     self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
     [self loadOnlineFeed:YES];
- }];
+ }]];
  [self presentViewController:a animated:YES completion:nil];
 }
 - (void)loadJSONFeed:(BOOL)reset {
