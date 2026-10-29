@@ -1,6 +1,6 @@
 Package: com.finn.douyinlite
 Name: DouyinLite
-Version: 0.3.0
+Version: 0.4.0
 Architecture: iphoneos-arm
 Description: Lightweight swipe-video app for jailbroken iPhone 4S and iOS 8
 Maintainer: Finn
