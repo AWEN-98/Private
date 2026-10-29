@@ -33,7 +33,15 @@ jobs:
           export THEOS="$HOME/theos"
           cd douyinlite
           python3 scripts/generate_icons.py
-          make clean package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip
+          make clean package FINALPACKAGE=1 THEOS_PLATFORM_DEB_COMPRESSION_TYPE=gzip 2>&1 | tee "$GITHUB_WORKSPACE/douyinlite-build.log"
+      - name: Preserve compiler log even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DouyinLite-v0.6.1-build-log
+          path: douyinlite-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Validate iOS 8 DEB
         run: |
           set -euo pipefail
