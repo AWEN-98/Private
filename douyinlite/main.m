@@ -9,11 +9,6 @@ static BOOL DLPlayableFile(NSString *file){
     NSString *ext=[[file pathExtension] lowercaseString];
     return [@[@"mp4",@"mov",@"m4v",@"m3u8"] containsObject:ext];
 }
-static NSString *DLClock(NSTimeInterval sec){
-    if(!isfinite(sec)||sec<0)sec=0;
-    NSInteger x=(NSInteger)sec;
-    return [NSString stringWithFormat:@"%02ld:%02ld",(long)(x/60),(long)(x%60)];
-}
 static BOOL DLDouyinHost(NSString *host){
     NSString *h=[host lowercaseString];
     return [h isEqualToString:@"douyin.com"]||[h hasSuffix:@".douyin.com"]||
