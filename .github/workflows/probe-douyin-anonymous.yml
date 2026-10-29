@@ -23,13 +23,18 @@ jobs:
           which google-chrome
       - name: Browse actual logged-out Douyin webpage
         continue-on-error: true
-        run: python douyinlite/scripts/probe_anonymous_web.py
+        run: |
+          mkdir -p diagnostics
+          python douyinlite/scripts/probe_anonymous_web.py >diagnostics/douyin-browser-run.log 2>&1 || true
+          tail -n 50 diagnostics/douyin-browser-run.log
       - name: Commit probe result and optional public video manifest
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/douyin-anonymous-probe.json downloads/douyin-public-feed.json 2>/dev/null || true
+          git add diagnostics/douyin-browser-run.log
+          if [ -f diagnostics/douyin-anonymous-probe.json ]; then git add diagnostics/douyin-anonymous-probe.json; fi
+          if [ -f downloads/douyin-public-feed.json ]; then git add downloads/douyin-public-feed.json; fi
           if ! git diff --cached --quiet; then
             git commit -m "test: save anonymous Douyin browser probe results [skip ci]"
             git pull --rebase origin main
@@ -41,6 +46,7 @@ jobs:
           name: douyin-anonymous-probe-log
           path: |
             diagnostics/douyin-anonymous-probe.json
+            diagnostics/douyin-browser-run.log
             downloads/douyin-public-feed.json
           if-no-files-found: ignore
           retention-days: 7
