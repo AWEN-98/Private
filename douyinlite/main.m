@@ -674,7 +674,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;}
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
- NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/aweme/v2/web/module/feed/"];
+ NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:@"https://www.douyin.com/aweme/v2/web/module/feed/?device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=12&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2",(long)(self.onlineOffset+1),(long)(reset?0:2)]];
  NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
  req.HTTPMethod=@"POST";
  [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
