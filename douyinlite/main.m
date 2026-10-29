@@ -501,6 +501,152 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }
     self.progress.frame=CGRectMake(0,h-55,w,3);
 }
+
+// Independent PeerTube public feed. It is deliberately NOT a Douyin recommender.
+- (NSArray *)networkHosts {
+    return @[@"https://diode.zone",@"https://tilvids.com",@"https://peertube.tv"];
+}
+- (NSString *)networkHost {
+    NSArray *hosts=[self networkHosts];
+    return hosts[(NSUInteger)MIN(MAX(0,self.onlineInstance),(NSInteger)hosts.count-1)];
+}
+- (void)onlineRequest:(NSString *)url finished:(void (^)(NSDictionary *,NSString *))done {
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+    [req setValue:@"DouyinLite/0.5 (iOS 8; public Peertube client)" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        NSDictionary *json=nil;
+        NSString *problem=nil;
+        if(error)problem=error.localizedDescription?:@"网络连接失败";
+        else if([response isKindOfClass:[NSHTTPURLResponse class]]&&[(NSHTTPURLResponse *)response statusCode]>=400)
+            problem=[NSString stringWithFormat:@"服务器 HTTP %ld",(long)[(NSHTTPURLResponse *)response statusCode]];
+        else if(data.length && data.length<900000){
+            id object=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+            if([object isKindOfClass:[NSDictionary class]])json=object;
+            else problem=@"服务器返回的数据无法识别";
+        }else problem=@"服务器无有效响应";
+        dispatch_async(dispatch_get_main_queue(),^{done(json,problem);});
+    }] resume];
+}
+- (NSString *)peerStreamFromVideo:(NSDictionary *)detail {
+    NSArray *files=[detail[@"files"] isKindOfClass:[NSArray class]]?detail[@"files"]:@[];
+    NSString *best=nil;
+    NSInteger bestScore=100000;
+    for(id candidate in files){
+        if(![candidate isKindOfClass:[NSDictionary class]])continue;
+        NSDictionary *file=candidate;
+        NSString *link=DLText(file[@"fileUrl"]);
+        if(!link.length)link=DLText(file[@"fileDownloadUrl"]);
+        NSString *lower=[[NSURL URLWithString:link].path lowercaseString];
+        if(![lower hasSuffix:@".mp4"] && ![lower hasSuffix:@".m4v"])continue;
+        NSDictionary *resolution=[file[@"resolution"] isKindOfClass:[NSDictionary class]]?file[@"resolution"]:@{};
+        NSInteger h=[resolution[@"id"] integerValue];
+        if(h<=0)h=480;
+        NSInteger score=ABS(h-360)+(h>720?1800:0);
+        if(score<bestScore){bestScore=score;best=link;}
+    }
+    if(best.length)return best;
+    NSArray *playlists=[detail[@"streamingPlaylists"] isKindOfClass:[NSArray class]]?detail[@"streamingPlaylists"]:@[];
+    for(id candidate in playlists){
+        if(![candidate isKindOfClass:[NSDictionary class]])continue;
+        NSString *url=DLText(candidate[@"playlistUrl"]);
+        if([url hasPrefix:@"https://"] || [url hasPrefix:@"http://"])return url;
+    }
+    return nil;
+}
+- (void)fetchOnlineCandidates:(NSArray *)items index:(NSUInteger)i token:(NSUInteger)token before:(NSUInteger)before {
+    if(token!=self.onlineRequestID)return;
+    if(i>=items.count){
+        self.onlineLoading=NO;self.onlinePaging=NO;
+        self.onlineOffset+=35;
+        if(self.onlineVideos.count==before && before==0 && self.onlineInstance+1<[self networkHosts].count){
+            self.onlineInstance++;
+            [self loadOnlineFeed:YES preserveHost:YES];
+            return;
+        }
+        if(self.onlineVideos.count==0){
+            self.onlineError=@"公开视频源没有提供兼容 MP4/HLS，或网络连接失败。\n可以在左上角菜单重试、切换公开样片，或导入自己的视频。";
+            if(self.onlineMode)[self reloadCurrent];
+        }
+        return;
+    }
+    NSDictionary *entry=items[i];
+    NSString *idString=DLText(entry[@"uuid"]);
+    if(!idString.length)idString=DLText(entry[@"id"]);
+    if(!idString.length){[self fetchOnlineCandidates:items index:i+1 token:token before:before];return;}
+    NSString *url=[NSString stringWithFormat:@"%@/api/v1/videos/%@",[self networkHost],idString];
+    [self onlineRequest:url finished:^(NSDictionary *detail,NSString *problem){
+        if(token!=self.onlineRequestID)return;
+        NSString *stream=[self peerStreamFromVideo:detail?:@{}];
+        if(stream.length){
+            NSString *title=DLText(detail[@"name"]);
+            if(!title.length)title=DLText(entry[@"name"]);
+            NSString *original=DLText(detail[@"url"]);
+            if(!original.length)original=DLText(entry[@"url"]);
+            NSDictionary *clip=@{@"url":stream,@"title":title.length?title:@"网络公开视频",
+                @"source":@"peertube",@"originURL":original.length?original:url};
+            BOOL duplicate=NO;
+            for(NSDictionary *existing in self.onlineVideos){
+                if([DLText(existing[@"url"]) isEqualToString:stream]){duplicate=YES;break;}
+            }
+            if(!duplicate){
+                [self.onlineVideos addObject:clip];
+                if(self.onlineMode&&!self.favoritesOnly&&!self.historyOnly&&self.onlineVideos.count==1){
+                    self.index=0;[self reloadCurrent];
+                }
+            }
+        }
+        [self fetchOnlineCandidates:items index:i+1 token:token before:before];
+    }];
+}
+- (void)loadOnlineFeed:(BOOL)reset {
+    [self loadOnlineFeed:reset preserveHost:NO];
+}
+- (void)loadOnlineFeed:(BOOL)reset preserveHost:(BOOL)preserveHost {
+    if(self.onlineLoading&&!reset)return;
+    if(reset){
+        if(!preserveHost)self.onlineInstance=0;
+        self.onlineOffset=0;self.index=0;
+        [self.onlineVideos removeAllObjects];
+        self.onlineError=nil;
+    }
+    self.onlineLoading=YES;self.onlinePaging=YES;
+    NSUInteger token=++self.onlineRequestID;
+    if(self.onlineMode && self.onlineVideos.count==0){
+        self.message.text=@"正在获取真实公开视频…\n（来源 PeerTube，不是抖音推荐）";
+        [self.loadingIndicator startAnimating];
+    }
+    NSString *endpoint=[NSString stringWithFormat:@"%@/api/v1/videos?start=%ld&count=35&sort=-publishedAt&nsfw=false&isLocal=true",
+         [self networkHost],(long)self.onlineOffset];
+    [self onlineRequest:endpoint finished:^(NSDictionary *json,NSString *problem){
+        if(token!=self.onlineRequestID)return;
+        NSArray *rows=[json[@"data"] isKindOfClass:[NSArray class]]?json[@"data"]:@[];
+        NSMutableArray *candidates=[NSMutableArray array];
+        for(id object in rows){
+            if(![object isKindOfClass:[NSDictionary class]])continue;
+            NSDictionary *video=object;
+            if([video[@"isLive"] boolValue])continue;
+            NSInteger duration=[video[@"duration"] integerValue];
+            if(duration<3 || duration>900)continue;
+            NSNumber *privacy=[video[@"privacy"] isKindOfClass:[NSDictionary class]]?video[@"privacy"][@"id"]:nil;
+            if(privacy && [privacy integerValue]!=1)continue;
+            [candidates addObject:video];
+            if(candidates.count>=16)break;
+        }
+        if(candidates.count){
+            [self fetchOnlineCandidates:candidates index:0 token:token before:self.onlineVideos.count];
+        }else{
+            self.onlineLoading=NO;self.onlinePaging=NO;
+            if(self.onlineVideos.count==0 && self.onlineInstance+1<[self networkHosts].count){
+                self.onlineInstance++;[self loadOnlineFeed:YES preserveHost:YES];
+            }else if(self.onlineVideos.count==0){
+                self.onlineError=[NSString stringWithFormat:@"网络公开视频加载失败：%@\n可切换公开样片，或导入已有播放地址。",problem?:@"没有符合条件的兼容视频"];
+                if(self.onlineMode)[self reloadCurrent];
+            }
+        }
+    }];
+}
 - (NSArray *)visibleVideos {
     if(self.searchMode)return self.searchResults?:@[];
     if(self.onlineMode&&!self.favoritesOnly&&!self.historyOnly)return self.onlineVideos;
