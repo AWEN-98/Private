@@ -21,23 +21,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/verified
-          gh run download 40778922073 -R AWEN-98/Private -n 'pocketdrop-ios8-deb' -D /tmp/verified
+          RUN_ID=""
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --commit "$GITHUB_SHA" --json databaseId,status,conclusion --limit 10 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
+            if [ -n "$RUN_ID" ]; then break; fi
+            sleep 10
+          done
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --branch main --json databaseId,status,conclusion --limit 20 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
+          fi
+          test -n "$RUN_ID"
+          gh run download "$RUN_ID" -R AWEN-98/Private -n 'pocketdrop-ios8-deb' -D /tmp/verified
           DEB="$(find /tmp/verified -maxdepth 2 -name '*.deb' -print -quit)"
           test -n "$DEB"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "iphoneos-arm"
-          test "$(dpkg-deb -f "$DEB" Version)" = "0.3.0"
+          test "$(dpkg-deb -f "$DEB" Version)" = "0.3.1"
           ar t "$DEB" | grep -qx data.tar.gz
           mkdir -p downloads
-          cp "$DEB" "downloads/PocketDrop-iOS8-v0.3.0.deb"
-          (cd downloads && zip -q -9 "PocketDrop-iOS8-v0.3.0.zip" "PocketDrop-iOS8-v0.3.0.deb")
-          unzip -t "downloads/PocketDrop-iOS8-v0.3.0.zip"
-          sha256sum "downloads/PocketDrop-iOS8-v0.3.0.deb" "downloads/PocketDrop-iOS8-v0.3.0.zip"
+          cp "$DEB" "downloads/PocketDrop-iOS8-v0.3.1.deb"
+          (cd downloads && zip -q -9 "PocketDrop-iOS8-v0.3.1.zip" "PocketDrop-iOS8-v0.3.1.deb")
+          unzip -t "downloads/PocketDrop-iOS8-v0.3.1.zip"
+          sha256sum "downloads/PocketDrop-iOS8-v0.3.1.deb" "downloads/PocketDrop-iOS8-v0.3.1.zip"
       - name: Commit binary downloads for direct links
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/PocketDrop-iOS8-v0.3.0.deb downloads/PocketDrop-iOS8-v0.3.0.zip
+          git add downloads/PocketDrop-iOS8-v0.3.1.deb downloads/PocketDrop-iOS8-v0.3.1.zip
           if ! git diff --cached --quiet; then
             git commit -m "release: publish verified PocketDrop direct download files [skip ci]"
             git push origin HEAD:main
