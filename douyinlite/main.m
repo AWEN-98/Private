@@ -265,6 +265,14 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,strong) NSMutableArray *favorites;
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,strong) NSArray *demoVideos;
+@property(nonatomic,strong) NSMutableArray *onlineVideos;
+@property(nonatomic,assign) BOOL onlineMode;
+@property(nonatomic,assign) BOOL onlineLoading;
+@property(nonatomic,assign) NSInteger onlineOffset;
+@property(nonatomic,assign) NSInteger onlineInstance;
+@property(nonatomic,assign) NSUInteger onlineRequestID;
+@property(nonatomic,assign) BOOL onlinePaging;
+@property(nonatomic,copy) NSString *onlineError;
 @property(nonatomic,strong) AVURLAsset *nextAsset;
 @property(nonatomic,copy) NSString *nextURL;
 @property(nonatomic,copy) NSString *preloadSourceURL;
@@ -350,8 +358,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       @{@"url":@"https://raw.githubusercontent.com/kodewright/dummy-data/main/videos/sample-video-landscape-480p.mp4",@"title":@"演示素材 · 城市桥梁",@"source":@"demo"},
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
-    self.demoMode=self.videos.count==0;
-    self.index=[[defaults objectForKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"] integerValue];
+    self.onlineVideos=[NSMutableArray array];
+    self.onlineMode=YES;self.demoMode=NO;self.index=0;
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
     self.surface.backgroundColor=DLBG();
     self.surface.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
@@ -461,6 +469,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.uiTimer=[NSTimer scheduledTimerWithTimeInterval:.5 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     [self layoutScreen];
     [self reloadCurrent];
+    [self loadOnlineFeed:YES];
 }
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self layoutScreen];}
 - (void)layoutScreen {
@@ -494,6 +503,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (NSArray *)visibleVideos {
     if(self.searchMode)return self.searchResults?:@[];
+    if(self.onlineMode&&!self.favoritesOnly&&!self.historyOnly)return self.onlineVideos;
     if(self.demoMode && !self.favoritesOnly && !self.historyOnly)return self.demoVideos;
     if(self.favoritesOnly){
         NSMutableArray *result=[NSMutableArray array];
@@ -517,7 +527,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     return self.videos;
 }
 - (void)savePlaybackIndex {
-    if(!self.favoritesOnly&&!self.historyOnly)
+    if(!self.favoritesOnly&&!self.historyOnly&&!self.onlineMode)
         [[NSUserDefaults standardUserDefaults] setInteger:self.index forKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"];
 }
 - (void)setLoading:(BOOL)busy {
@@ -602,7 +612,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 
 - (void)refreshTabBar {
-    NSInteger selected=self.searchMode?1:(self.favoritesOnly?2:(self.demoMode&&!self.historyOnly?0:3));
+    NSInteger selected=self.searchMode?1:(self.favoritesOnly?2:((self.onlineMode||self.demoMode)&&!self.historyOnly?0:3));
     if(selected==self.paintedTab)return;
     self.paintedTab=selected;
     NSArray *symbols=@[@"home",@"search",@"heart",@"user"];
@@ -642,7 +652,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             [known addObject:address];[result addObject:clip];
         }
         self.searchResults=result;
-        self.searchMode=YES;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+        self.searchMode=YES;self.onlineMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];[self refreshTabBar];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -650,14 +660,14 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)tabPressed:(UIButton *)button {
     NSInteger tab=button.tag-200;
     if(tab==0){
-        self.demoMode=YES;self.searchMode=NO;
-        self.favoritesOnly=NO;self.historyOnly=NO;
-        self.index=[[NSUserDefaults standardUserDefaults] integerForKey:@"dl_demo_index_v1"];
+        self.demoMode=NO;self.onlineMode=YES;self.searchMode=NO;
+        self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
+        if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
     }else if(tab==1){
         [self openSearch];
     }else if(tab==2){
-        self.searchMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
+        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
     }else if(tab==3){
         [self openMenu];
@@ -775,7 +785,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.demoMode?@"公开视频 · 非推荐":@"我的视频")));
+    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?@"联网公开视频 · 非抖音":(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
     [self refreshTabBar];
     if(!visible.count){
         self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":(self.favoritesOnly?@"还没有收藏视频\n双击视频即可添加收藏":
@@ -806,6 +816,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.item];
     [self.player replaceCurrentItemWithPlayerItem:self.item];
     self.player.muted=self.muted;
+    if(self.onlineMode && self.index+5>=self.onlineVideos.count && !self.onlineLoading && !self.onlinePaging)
+        [self loadOnlineFeed:NO];
 }
 - (void)observeValueForKeyPath:(NSString *)path ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if(object!=self.item || ![path isEqualToString:@"status"]){
@@ -1027,7 +1039,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         @"source":source.length?source:@"link"};
     [self.videos insertObject:entry atIndex:0];
     if(self.videos.count>200)[self.videos removeLastObject];
-    self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.demoMode=NO;self.index=0;
+    self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.demoMode=NO;self.index=0;
     [self storeLibrary];[self reloadCurrent];
 }
 - (void)scanLocalVideos {
@@ -1052,7 +1064,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         for(NSDictionary *old in self.videos)if([old[@"url"] isEqualToString:entry[@"url"]]){exists=YES;break;}
         if(!exists){[self.videos addObject:entry];count++;}
     }
-    if(found.count){self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;}
+    if(found.count){self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;}
     [self storeLibrary];
     [self alert:@"本地视频扫描完成" message:[NSString stringWithFormat:@"新增 %ld 个视频。\n扫描路径：\n/var/mobile/Documents/DouyinLite\n/var/mobile/Documents/PocketDrop",(long)count]];
     [self reloadCurrent];
@@ -1061,16 +1073,16 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite"
         message:@"支持公开抖音分享页解析；官方推荐流仍需授权。演示样片使用公开许可视频。" preferredStyle:UIAlertControllerStyleActionSheet];
     [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=YES;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.demoMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"所有视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"我的收藏" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.searchMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"观看历史" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
+        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"轻量动画：%@",self.animationsEnabled?@"开":@"关"]
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
