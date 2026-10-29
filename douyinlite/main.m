@@ -850,7 +850,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         if(self.demoMode&&!self.searchMode&&!self.favoritesOnly&&!self.historyOnly){
             next=next<0?(NSInteger)clips.count-1:0;
         }else{
-            self.message.text=next<0?@"已经是第一条":@"已经是最后一条";
+            if(next>=clips.count && self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
+                if(!self.onlineLoading && !self.onlinePaging)[self loadOnlineFeed:NO];
+                self.message.text=@"正在加载更多公开视频…";
+            }else{
+                self.message.text=next<0?@"已经是第一条":@"已经是最后一条";
+            }
             [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:1.2];
             return;
         }
