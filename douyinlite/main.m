@@ -668,7 +668,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(token!=self.onlineRequestID)return;
     [self.onlineVideos addObjectsFromArray:incoming];
     NSString *next=DLText(json[@"next"]);NSURL *nextURL=[NSURL URLWithString:next];
-    self.feedNextPageURL=[nextURL.scheme isEqualToString:@"https"]?next:nil;
+    NSURL *baseURL=[NSURL URLWithString:base];
+    BOOL sameHost=[nextURL.host isEqualToString:baseURL.host] &&
+                  ((!nextURL.port && !baseURL.port) || [nextURL.port isEqual:baseURL.port]);
+    self.feedNextPageURL=([nextURL.scheme isEqualToString:@"https"] && sameHost)?next:nil;
     self.onlineOffset+=rows.count;
     self.onlineLoading=NO;self.onlinePaging=NO;
     if(!self.onlineVideos.count){
