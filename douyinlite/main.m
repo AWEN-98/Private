@@ -1,6 +1,9 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <math.h>
+@interface DLBrowserController : UIViewController
+- (instancetype)initWithURL:(NSURL *)url;
+@end
 
 static UIColor *DLBG(void){return [UIColor colorWithRed:.055 green:.064 blue:.082 alpha:1];}
 static UIColor *DLAccent(void){return [UIColor colorWithRed:.14 green:.88 blue:.85 alpha:1];}
@@ -1247,9 +1250,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self alert:@"本地视频扫描完成" message:[NSString stringWithFormat:@"新增 %ld 个视频。\n扫描路径：\n/var/mobile/Documents/DouyinLite\n/var/mobile/Documents/PocketDrop",(long)count]];
     [self reloadCurrent];
 }
+- (void)openDouyinBrowser {
+    [self.player pause];
+    DLBrowserController *browser=[[DLBrowserController alloc] initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+    [self presentViewController:browser animated:YES completion:nil];
+}
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
-        message:@"首页加载 PeerTube 公开视频，不是抖音推荐。抖音公开分享链接可尝试导入，部分需要平台登录或授权。" preferredStyle:UIAlertControllerStyleActionSheet];
+        message:@"抖音网页浏览为实验功能。旧版 WebKit 可能无法运行现代抖音页面；原生公开视频播放器继续保留。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
         if([[UIApplication sharedApplication] canOpenURL:url])[[UIApplication sharedApplication] openURL:url];
