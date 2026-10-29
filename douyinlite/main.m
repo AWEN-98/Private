@@ -668,7 +668,63 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   });
  }] resume];
 }
+
+- (void)loadDouyinAnonymousFeed:(BOOL)reset {
+ if(self.onlineLoading&&!reset)return;
+ if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;}
+ self.onlineLoading=YES;self.onlinePaging=YES;
+ NSUInteger token=++self.onlineRequestID;
+ NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/aweme/v2/web/module/feed/"];
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
+ req.HTTPMethod=@"POST";
+ [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+ [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+ [req setValue:@"https://www.douyin.com" forHTTPHeaderField:@"Origin"];
+ [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+ [req setValue:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36" forHTTPHeaderField:@"User-Agent"];
+ NSDictionary *payload=@{@"count":@12,@"refresh_index":@(self.onlineOffset),@"pull_type":@(reset?1:2)};
+ req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+ if(reset){self.message.text=@"正在获取抖音公开推荐内容…";[self.loadingIndicator startAnimating];}
+ [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+  id raw=data.length&&data.length<4000000?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+  NSDictionary *root=[raw isKindOfClass:[NSDictionary class]]?raw:@{};
+  id nested=root[@"data"];
+  NSDictionary *body=[nested isKindOfClass:[NSDictionary class]]?nested:root;
+  NSArray *rows=nil;
+  for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"feed_list"]){
+    if([body[key] isKindOfClass:[NSArray class]]){rows=body[key];break;}
+  }
+  NSMutableArray *items=[NSMutableArray array];
+  for(id obj in rows){
+    if(![obj isKindOfClass:[NSDictionary class]])continue;
+    NSDictionary *entry=obj;
+    if([entry[@"aweme_info"] isKindOfClass:[NSDictionary class]])entry=entry[@"aweme_info"];
+    NSString *address=DLPublicPlaybackURL(entry);
+    if(!address.length)continue;
+    BOOL duplicate=NO;
+    for(NSDictionary *old in self.onlineVideos)if([DLText(old[@"url"]) isEqualToString:address]){duplicate=YES;break;}
+    if(duplicate)continue;
+    NSDictionary *author=[entry[@"author"] isKindOfClass:[NSDictionary class]]?entry[@"author"]:@{};
+    NSString *title=DLText(entry[@"desc"]);
+    if(!title.length)title=DLText(author[@"nickname"]);
+    if(!title.length)title=@"抖音公开视频";
+    [items addObject:@{@"url":address,@"title":title,@"source":@"public-share"}];
+  }
+  dispatch_async(dispatch_get_main_queue(),^{
+    if(token!=self.onlineRequestID)return;
+    self.onlineLoading=NO;self.onlinePaging=NO;
+    if(rows.count)self.onlineOffset+=rows.count;
+    if(items.count)[self.onlineVideos addObjectsFromArray:items];
+    if(!self.onlineVideos.count){
+      NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
+      self.onlineError=[NSString stringWithFormat:@"抖音匿名推荐暂无可用视频（HTTP %ld）%@。可在菜单切换到公开视频源或导入链接。",(long)http.statusCode,error.localizedDescription?:@""];
+    }
+    if(reset || self.onlineVideos.count==items.count)[self reloadCurrent];
+  });
+ }] resume];
+}
 - (void)loadOnlineFeed:(BOOL)reset {
+    if(![[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadDouyinAnonymousFeed:reset];return;}
     if([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadJSONFeed:reset];return;}
     [self loadOnlineFeed:reset preserveHost:NO];
 }
@@ -1324,11 +1380,23 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
         message:@"抖音网页浏览为实验功能。旧版 WebKit 可能无法运行现代抖音页面；原生公开视频播放器继续保留。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"抖音匿名推荐（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+      [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
+      [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
+      self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+      [self loadOnlineFeed:YES];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"配置 HTTPS 视频列表接口" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
         if([[UIApplication sharedApplication] canOpenURL:url])[[UIApplication sharedApplication] openURL:url];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"PeerTube 公开频道（备用）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+      [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"dl_use_peertube_v1"];
+      [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
+      self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+      [self loadOnlineFeed:YES];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"联网公开视频 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
