@@ -7,6 +7,7 @@ APPLICATION_NAME = DouyinLite
 DouyinLite_FILES = main.m
 DouyinLite_FRAMEWORKS = UIKit Foundation AVFoundation
 DouyinLite_CFLAGS = -fobjc-arc -fblocks -Wno-deprecated-declarations
+DouyinLite_LDFLAGS = -Wl,-U,_objc_msgSend_stret
 DouyinLite_INSTALL_PATH = /Applications
 
 include $(THEOS_MAKE_PATH)/application.mk
