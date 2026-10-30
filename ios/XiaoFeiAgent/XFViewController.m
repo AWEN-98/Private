@@ -248,6 +248,12 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.chat.onImageTap=^(UIImage *image) {
         [weakSelf showGeneratedImage:image];
     };
+    self.chat.onQuickPrompt=^(NSString *prompt) {
+        if(weakSelf.isWorking || weakSelf.isRecording)return;
+        weakSelf.message.text=prompt;
+        [weakSelf textViewDidChange:weakSelf.message];
+        [weakSelf.message becomeFirstResponder];
+    };
     self.recordingBadge=[[UILabel alloc] initWithFrame:CGRectMake(6,94,w-12,30)];
     self.recordingBadge.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.recordingBadge.font=[UIFont boldSystemFontOfSize:13];
