@@ -436,10 +436,17 @@
       forKey:[self draftKeyForConversation:self.conversationID]];
 }
 - (void)restoreSubmittedDraft {
-    if(self.message.text.length || !self.lastSubmittedDraft.length)return;
-    self.message.text=self.lastSubmittedDraft;
-    [self textViewDidChange:self.message];
-    self.status.text=@"请求失败，已恢复输入内容";
+    BOOL recovered=NO;
+    if(!self.message.text.length && self.lastSubmittedDraft.length){
+        self.message.text=self.lastSubmittedDraft;
+        [self textViewDidChange:self.message];
+        recovered=YES;
+    }
+    if(!self.pendingImage && self.sendingImageName.length){
+        UIImage *saved=[XFChatStore imageForName:self.sendingImageName];
+        if(saved){self.pendingImage=saved;[self layoutForKeyboard:self.keyboardOffset];recovered=YES;}
+    }
+    if(recovered)self.status.text=@"请求失败，已恢复文字及图片附件";
 }
 - (void)showAlert:(NSString *)title detail:(NSString *)detail {
     UIAlertController *a=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
@@ -1427,8 +1434,12 @@
     }
     NSString *mode=[[NSUserDefaults standardUserDefaults] stringForKey:[self imageProtocolKey:profile]];
     if(![@[@"images",@"chat"] containsObject:mode]){
-        [self chooseImageProtocol:YES profile:profile prompt:prompt];
-        return;
+        // First use: pick a single protocol without another modal.
+        NSString *mid=[profile[@"model"] lowercaseString]?:@"";
+        NSString *host=[[NSURL URLWithString:profile[@"endpoint"]] host].lowercaseString?:@"";
+        BOOL chatStyle=([host hasSuffix:@"openrouter.ai"] && [mid containsString:@"gemini"]);
+        mode=chatStyle?@"chat":@"images";
+        [[NSUserDefaults standardUserDefaults] setObject:mode forKey:[self imageProtocolKey:profile]];
     }
     [self startImageGenerationWithProfile:profile prompt:prompt chat:[mode isEqualToString:@"chat"]];
 }
