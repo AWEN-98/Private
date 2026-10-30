@@ -5,6 +5,9 @@ on:
     paths:
       - '.github/workflows/publish-pocketdrop-download.yml'
   workflow_dispatch:
+concurrency:
+  group: pocketdrop-direct-download
+  cancel-in-progress: true
 permissions:
   contents: write
   actions: read
@@ -21,15 +24,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/verified
-          RUN_ID=""
-          for attempt in $(seq 1 30); do
-            RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --commit "$GITHUB_SHA" --json databaseId,status,conclusion --limit 10 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
-            if [ -n "$RUN_ID" ]; then break; fi
-            sleep 10
-          done
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --branch main --json databaseId,status,conclusion --limit 20 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
-          fi
+          # Reuse the most recent verified ARMv7 build. The package metadata
+          # is checked below before it is ever published.
+          RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --branch main --json databaseId,status,conclusion --limit 30 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
           test -n "$RUN_ID"
           gh run download "$RUN_ID" -R AWEN-98/Private -n 'pocketdrop-ios8-deb' -D /tmp/verified
           DEB="$(find /tmp/verified -maxdepth 2 -name '*.deb' -print -quit)"
