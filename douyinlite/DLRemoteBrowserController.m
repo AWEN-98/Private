@@ -1,4 +1,5 @@
 #import "DLRemoteBrowserController.h"
+#import <MediaPlayer/MediaPlayer.h>
 
 @interface DLRemoteBrowserController ()
 @property(nonatomic,copy) NSString *feedURLString;
@@ -9,6 +10,7 @@
 @property(nonatomic,strong) NSTimer *pollTimer;
 @property(nonatomic,assign) BOOL frameLoading;
 @property(nonatomic,assign) NSUInteger generation;
+@property(nonatomic,strong) MPMoviePlayerViewController *remotePlayer;
 @end
 
 @implementation DLRemoteBrowserController
@@ -88,6 +90,13 @@
     bar.backgroundColor=[UIColor colorWithWhite:.11 alpha:1];
     bar.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:bar];
+    UIButton *play=[UIButton buttonWithType:UIButtonTypeSystem];
+    play.frame=CGRectMake(width-72,21,65,36);
+    play.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
+    [play setTitle:@"预览播放" forState:UIControlStateNormal];
+    play.titleLabel.font=[UIFont systemFontOfSize:12];
+    [play addTarget:self action:@selector(startStream) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:play];
     NSArray *titles=@[@"首页",@"后退",@"上滑",@"下滑"];
     SEL actions[]={@selector(openHome),@selector(goBack),@selector(scrollDown),@selector(scrollUp)};
     for(NSUInteger i=0;i<titles.count;i++){
@@ -109,6 +118,7 @@
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [self.pollTimer invalidate];self.pollTimer=nil;self.generation++;
+    if(self.remotePlayer)[self stopCloudStream];
     [super viewWillDisappear:animated];
 }
 - (void)closeViewer {[self dismissViewControllerAnimated:YES completion:nil];}
@@ -162,5 +172,41 @@
 - (void)goBack {[self sendAction:@"back" payload:nil];}
 - (void)scrollDown {[self sendAction:@"scroll" payload:@{@"dy":@750}];}
 - (void)scrollUp {[self sendAction:@"scroll" payload:@{@"dy":@-750}];}
-- (void)dealloc {[self.pollTimer invalidate];}
+- (void)startStream {
+    NSMutableURLRequest *req=[self request:@"stream/start" method:@"POST" payload:nil];
+    if(!req)return;
+    self.statusText.text=@"正在准备云端视频画面（暂不含声音）…";
+    NSUInteger token=self.generation;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        NSDictionary *body=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSString *streamURL=[body isKindOfClass:[NSDictionary class]]?body[@"url"]:nil;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if(token!=self.generation)return;
+            if(![streamURL isKindOfClass:[NSString class]]||![streamURL hasPrefix:@"https://"]){
+                self.statusText.text=error.localizedDescription?:@"云端视频流未就绪，请检查服务器 ffmpeg";
+                return;
+            }
+            self.remotePlayer=[[MPMoviePlayerViewController alloc]initWithContentURL:[NSURL URLWithString:streamURL]];
+            self.remotePlayer.moviePlayer.controlStyle=MPMovieControlStyleFullscreen;
+            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(streamPlaybackFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:self.remotePlayer.moviePlayer];
+            [self presentMoviePlayerViewControllerAnimated:self.remotePlayer];
+            [self.remotePlayer.moviePlayer play];
+        });
+    }] resume];
+}
+- (void)streamPlaybackFinished:(NSNotification *)notification {
+    [self stopCloudStream];
+}
+- (void)stopCloudStream {
+    NSMutableURLRequest *request=[self request:@"stream/stop" method:@"POST" payload:nil];
+    if(request)[[[NSURLSession sharedSession] dataTaskWithRequest:request] resume];
+    if(self.remotePlayer){
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.remotePlayer.moviePlayer];
+        self.remotePlayer=nil;
+    }
+}
+- (void)dealloc {
+    [self.pollTimer invalidate];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
 @end
