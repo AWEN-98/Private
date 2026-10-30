@@ -1797,7 +1797,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 [self inspectPublicShare:[NSURL URLWithString:origin]];
                 return;
             }
-            self.message.text=self.onlineMode?@"当前视频无法播放，上滑切换下一条":@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权";
+            NSString *failure=item.error.localizedDescription?:@"未知播放错误";
+            self.message.text=[NSString stringWithFormat:@"视频播放失败：%@\n可能是源地址已失效、受限或编码不兼容。上滑切换下一条。",failure];
             self.playButton.hidden=NO;
         }
     });
