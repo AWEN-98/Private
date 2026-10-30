@@ -80,12 +80,25 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  [[self.session dataTaskWithRequest:[self webRequest:@"https://www.douyin.com/"] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){dispatch_async(dispatch_get_main_queue(),completion);}] resume];
 }
 - (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset error:(NSString **)error{
+ return [self feedRequestAtPage:page reset:reset seenIDs:@[] error:error];
+}
+- (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset seenIDs:(NSArray *)seenIDs error:(NSString **)error{
  if(!self.signer){NSString *path=[NSBundle.mainBundle pathForResource:@"DLSigner" ofType:@"js"];NSString *source=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;if(source.length){self.signer=[JSContext new];[self.signer evaluateScript:source];}}
  if(!self.signer||self.signer.exception){if(error)*error=@"本机签名组件加载失败，请重新安装。";return nil;}
  NSString *webid=[self cookieValue:@"webid"];if(!webid.length)webid=[self cookieValue:@"webid_v2"];
  NSString *query=[NSString stringWithFormat:@"device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=12&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2&version_code=190500&version_name=19.5.0&pc_client_type=1&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Windows&os_version=10&cpu_core_num=8&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50",(long)(page+1),(long)(reset?0:2)];
  for(NSArray *entry in @[@[@"webid",webid?:@""],@[@"msToken",[self cookieValue:@"msToken"]],@[@"verifyFp",[self cookieValue:@"s_v_web_id"]],@[@"fp",[self cookieValue:@"s_v_web_id"]]])if([entry[1] length])query=[query stringByAppendingFormat:@"&%@=%@",entry[0],DLFormEncode(entry[1])];
- NSString *body=@"encoded_pre_item_ids=";NSNumber *now=@(floor(NSDate.date.timeIntervalSince1970*1000));
+ NSMutableArray *ids=[NSMutableArray array];
+ for(id entry in seenIDs){
+  NSString *value=DLString(entry);
+  if(!value.length || [value rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location!=NSNotFound)continue;
+  [ids addObject:value];
+  if(ids.count>=30)break;
+ }
+ NSString *joined=[ids componentsJoinedByString:@","];
+ NSString *body=[@"encoded_pre_item_ids=" stringByAppendingString:DLFormEncode([[joined dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0])];
+ if(joined.length)query=[query stringByAppendingFormat:@"&pre_item_ids=%@",DLFormEncode(joined)];
+ NSNumber *now=@(floor(NSDate.date.timeIntervalSince1970*1000));
  self.signer.exception=nil;JSValue *function=self.signer[@"DLSigner"][@"sign"];JSValue *result=[function callWithArguments:@[query,body,DLWebUserAgent(),now]];
  NSString *signature=result.isString?result.toString:nil;if(self.signer.exception||!signature.length){if(error)*error=@"请求签名失败，请检查手机日期时间。";return nil;}
  query=[query stringByAppendingFormat:@"&a_bogus=%@",DLFormEncode(signature)];
