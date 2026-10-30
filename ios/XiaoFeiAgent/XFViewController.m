@@ -39,6 +39,8 @@
 @property(nonatomic,copy) NSString *sendingImageName;
 @property(nonatomic,strong) UIImageView *attachmentPreview;
 @property(nonatomic,strong) UIButton *removeAttachmentButton;
+@property(nonatomic,strong) UIButton *composerAttachButton;
+@property(nonatomic,strong) UIButton *composerGenerateButton;
 @property(nonatomic,strong) UILabel *attachmentCaption;
 @property(nonatomic,copy) NSString *pendingFileText;
 @property(nonatomic,copy) NSString *lastAnswer;
@@ -175,8 +177,8 @@
     self.tools.showsHorizontalScrollIndicator=NO;
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
-    NSArray *items=@[@[@"◉ JARVIS",@"jarvis"],@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"生图协议",@"imagemode"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
+    NSArray *items=@[@[@"◉ JARVIS",@"jarvis"],@[@"＋ 新对话",@"new"],@[@"≡ 文本",@"file"],
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"生图协议",@"imagemode"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
     CGFloat x=1;
     for(NSArray *item in items){
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -223,6 +225,21 @@
     self.sendButton.layer.cornerRadius=11;
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.footerBar addSubview:self.sendButton];
+    self.composerAttachButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    [self.composerAttachButton setTitle:@"＋" forState:UIControlStateNormal];
+    self.composerAttachButton.titleLabel.font=[UIFont systemFontOfSize:24];
+    [self styleNavigationButton:self.composerAttachButton filled:NO];
+    [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
+        forControlEvents:UIControlEventTouchUpInside];
+    [self.footerBar addSubview:self.composerAttachButton];
+
+    self.composerGenerateButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    [self.composerGenerateButton setTitle:@"生图" forState:UIControlStateNormal];
+    self.composerGenerateButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
+    [self styleNavigationButton:self.composerGenerateButton filled:NO];
+    [self.composerGenerateButton addTarget:self action:@selector(generateImage)
+        forControlEvents:UIControlEventTouchUpInside];
+    [self.footerBar addSubview:self.composerGenerateButton];
 
     self.pasteButton=[UIButton buttonWithType:UIButtonTypeCustom];
     [self.pasteButton setTitle:@"粘贴" forState:UIControlStateNormal];
@@ -320,7 +337,8 @@
     CGFloat availableBottom=MAX(0,h-self.keyboardOffset-(typing?5:0));
     self.headerBar.hidden=typing;
     self.tools.hidden=typing;
-    self.pasteButton.hidden=!typing;
+    // Image actions remain visible with the keyboard; text paste lives in the + menu.
+    self.pasteButton.hidden=YES;
     CGFloat top=typing?0:88;
     BOOL hasImage=self.pendingImage!=nil;
     CGFloat footerHeight=typing?MIN(hasImage?110:62,availableBottom):(hasImage?192:125);
@@ -329,19 +347,24 @@
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
     self.recordingBadge.frame=CGRectMake(6,typing?4:94,w-12,30);
     if(typing){
-        CGFloat margin=8,gap=6,pasteW=46,sendW=58;
-        CGFloat inputW=MAX(60,w-2*margin-2*gap-pasteW-sendW);
-        CGFloat y=hasImage?MAX(2,footerHeight-51):MAX(2,(footerHeight-44)/2);
-        self.message.frame=CGRectMake(margin,y,inputW,MIN(44,footerHeight));
-        self.messagePlaceholder.frame=CGRectMake(margin+11,y+6,inputW-17,27);
-        self.pasteButton.frame=CGRectMake(margin+inputW+gap,y,pasteW,MIN(44,footerHeight));
-        self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,MIN(44,footerHeight));
+        CGFloat margin=7,gap=5,attachW=35,generateW=45,sendW=54;
+        CGFloat inputW=MAX(80,w-2*margin-3*gap-attachW-generateW-sendW);
+        CGFloat y=hasImage?MAX(2,footerHeight-48):MAX(2,(footerHeight-44)/2);
+        self.composerAttachButton.frame=CGRectMake(margin,y,attachW,44);
+        self.message.frame=CGRectMake(margin+attachW+gap,y,inputW,44);
+        self.messagePlaceholder.frame=CGRectMake(margin+attachW+gap+11,y+6,inputW-15,27);
+        self.composerGenerateButton.frame=CGRectMake(margin+attachW+gap+inputW+gap,y,generateW,44);
+        self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,44);
     } else {
         self.tools.frame=CGRectMake(10,7,w-20,42);
         CGFloat inputY=hasImage?130:57;
-        self.message.frame=CGRectMake(11,inputY,w-94,53);
-        self.messagePlaceholder.frame=CGRectMake(22,inputY+8,w-110,26);
-        self.sendButton.frame=CGRectMake(w-75,inputY+3,64,44);
+        CGFloat margin=8,gap=5,attachW=36,generateW=45,sendW=57;
+        CGFloat inputW=MAX(82,w-2*margin-3*gap-attachW-generateW-sendW);
+        self.composerAttachButton.frame=CGRectMake(margin,inputY+3,attachW,45);
+        self.message.frame=CGRectMake(margin+attachW+gap,inputY,inputW,53);
+        self.messagePlaceholder.frame=CGRectMake(margin+attachW+gap+11,inputY+8,inputW-17,26);
+        self.composerGenerateButton.frame=CGRectMake(margin+attachW+gap+inputW+gap,inputY+3,generateW,44);
+        self.sendButton.frame=CGRectMake(w-margin-sendW,inputY+3,sendW,44);
     }
     self.attachmentPreview.frame=typing?CGRectMake(10,7,36,36):CGRectMake(11,54,63,63);
     self.removeAttachmentButton.frame=typing?CGRectMake(53,8,43,30):CGRectMake(82,63,43,30);
@@ -362,6 +385,27 @@
 }
 - (void)previewPendingImage {
     if(self.pendingImage)[self showGeneratedImage:self.pendingImage];
+}
+- (void)composerAttachTapped {
+    [self.message resignFirstResponder];
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"添加到对话"
+      message:@"可以从相册或剪贴板添加图片" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"选择相册图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [self pickImage];
+    }]];
+    UIImage *pasted=[UIPasteboard generalPasteboard].image;
+    if(pasted){
+        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            [self attachImage:pasted];
+        }]];
+    }
+    if([UIPasteboard generalPasteboard].string.length){
+        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴文字" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            [self pasteTapped];
+        }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)pasteTapped {
     NSString *clip=[UIPasteboard generalPasteboard].string;
@@ -450,6 +494,8 @@
 - (void)setWorking:(BOOL)value {
     self.isWorking=value;
     [self.sendButton setTitle:value?@"停止":@"发送" forState:UIControlStateNormal];
+    self.composerGenerateButton.enabled=!value;
+    self.composerGenerateButton.alpha=value?.45:1.0;
 }
 - (void)toolTapped:(UIButton *)button {
     NSString *name=[button accessibilityIdentifier];
@@ -722,7 +768,21 @@
     [self sendChat:YES];
 }
 - (void)sendChat:(BOOL)web {
-    NSDictionary *profile=[self profileFor:web?@"web":(self.pendingImage?@"vision":@"chat")];
+    NSDictionary *profile=nil;
+    if(self.pendingImage && !web){
+        // Prefer the explicit vision model. A multimodal chat model also accepts image_url.
+        profile=[XFModelsController activeProfileForCapability:@"vision"];
+        if(!profile){
+            NSDictionary *chat=[XFModelsController activeProfileForCapability:@"chat"];
+            if([chat[@"supports_image"] boolValue])profile=chat;
+        }
+        if(!profile){
+            [self showAlert:@"请选择图片理解模型" detail:@"当前聊天模型没有声明图片输入能力。打开「模型库 > 视觉」，选择支持图片理解的模型后，可直接发送此图。图片与输入文字都会保留。"];
+            return;
+        }
+    }else{
+        profile=[self profileFor:web?@"web":@"chat"];
+    }
     if(!profile)return;
     NSString *msg=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if(!msg.length && self.pendingImage) msg=@"请详细描述这张图片";
@@ -1059,26 +1119,35 @@
     self.connection=[[NSURLConnection alloc] initWithRequest:request delegate:self startImmediately:YES];
 }
 - (void)pickImage {
+    [self.message resignFirstResponder];
+    if(![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]){
+        [self showAlert:@"相册不可用" detail:@"请检查照片权限，也可以通过左侧＋号粘贴图片。"];
+        return;
+    }
     UIImagePickerController *picker=[[UIImagePickerController alloc] init];
     picker.delegate=self;
     picker.sourceType=UIImagePickerControllerSourceTypePhotoLibrary;
     [self presentViewController:picker animated:YES completion:nil];
 }
+- (void)attachImage:(UIImage *)img {
+    if(!img || img.size.width<1 || img.size.height<1){
+        self.status.text=@"图片读取失败";return;
+    }
+    // Keep the 512MB iPhone 4S within a bounded decode and upload size.
+    CGFloat scale=MIN(1.0,640.0/MAX(img.size.width,img.size.height));
+    CGSize size=CGSizeMake(MAX(1,round(img.size.width*scale)),MAX(1,round(img.size.height*scale)));
+    UIGraphicsBeginImageContextWithOptions(size,YES,1.0);
+    [img drawInRect:CGRectMake(0,0,size.width,size.height)];
+    self.pendingImage=UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    [self layoutForKeyboard:0];
+    self.status.text=self.pendingImage?@"图片已添加，输入问题并点击发送":@"图片读取失败";
+}
 - (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary *)info {
     UIImage *img=info[UIImagePickerControllerOriginalImage];
-    if(img.size.width>0 && img.size.height>0){
-        // UIImagePickerController can return huge camera originals on iOS 8.
-        // Keep only a 640px copy in memory on the 512MB iPhone 4S.
-        CGFloat scale=MIN(1.0,640.0/MAX(img.size.width,img.size.height));
-        CGSize size=CGSizeMake(MAX(1,round(img.size.width*scale)),MAX(1,round(img.size.height*scale)));
-        UIGraphicsBeginImageContextWithOptions(size,YES,1.0);
-        [img drawInRect:CGRectMake(0,0,size.width,size.height)];
-        self.pendingImage=UIGraphicsGetImageFromCurrentImageContext();
-        UIGraphicsEndImageContext();
-    }else self.pendingImage=nil;
-    [picker dismissViewControllerAnimated:YES completion:nil];
-    [self layoutForKeyboard:self.keyboardOffset];
-    self.status.text=self.pendingImage?@"图片已附加，缩略图可预览或移除":@"图片读取失败";
+    [picker dismissViewControllerAnimated:YES completion:^{
+        [self attachImage:img];
+    }];
 }
 - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker {
     [picker dismissViewControllerAnimated:YES completion:nil];
@@ -1337,6 +1406,10 @@
 }
 - (void)generateImage {
     if(self.isWorking)return;
+    if(self.pendingImage){
+        [self showAlert:@"当前已附加图片" detail:@"点击「发送」可将图片交给视觉模型分析。当前生图功能根据文字描述创建新图片，暂不支持参考图修改。请先移除附件再生图。"];
+        return;
+    }
     NSDictionary *profile=[XFModelsController activeProfileForCapability:@"image"];
     if(!profile){
         [self showAlert:@"无法生图：尚未选择模型"
@@ -1376,6 +1449,8 @@
     NSUInteger token=self.imageRequestToken;
     self.imageGenerating=YES;
     [self setWorking:YES];
+    [self.message resignFirstResponder];
+    [self.chat addMessage:[NSString stringWithFormat:@"生成图片：%@",prompt] fromUser:YES];
     self.status.text=chat?@"正在通过聊天式接口生图…":@"正在通过图像接口生图…";
     __weak XFViewController *weakSelf=self;
     [XFImageGeneration generateWithEndpoint:endpoint model:p[@"model"] apiKey:key prompt:prompt
@@ -1408,16 +1483,23 @@
             return;
         }
         NSString *filename=[XFChatStore saveImage:image];
-        NSString *description=[NSString stringWithFormat:@"已生成图片：%@",prompt];
+        NSString *requestText=[NSString stringWithFormat:@"生成图片：%@",prompt];
+        NSString *description=@"图片已生成，点击图片预览或保存到相册。";
+        [controller.history addObject:@{@"role":@"user",@"content":requestText}];
         if(filename.length){
             [controller.chat addGeneratedImageMessage:description imageName:filename];
             [controller.history addObject:@{@"role":@"assistant",
                    @"content":description,@"image_file":filename}];
-            [XFChatStore saveConversationID:controller.conversationID messages:controller.history];
-        } else [controller appendLine:description];
-        controller.status.text=filename.length?@"生图成功，已存入会话；可保存到相册":
-           @"生图成功，但无法保存到本地会话，请检查磁盘空间";
-        [controller showGeneratedImage:image];
+        } else{
+            [controller.chat showNotice:@"图片已生成，但本地保存失败。请检查剩余空间。"];
+        }
+        [XFChatStore saveConversationID:controller.conversationID messages:controller.history];
+        if([controller.message.text isEqualToString:prompt]){
+            controller.message.text=@"";
+            [controller textViewDidChange:controller.message];
+        }
+        controller.status.text=filename.length?@"生图完成，图片已显示在对话中":@"图片保存失败，请检查手机存储空间";
+        // The result stays inline. Tap the thumbnail to open the full-size viewer.
     }];
 }
 - (void)showGeneratedImage:(UIImage *)image {
