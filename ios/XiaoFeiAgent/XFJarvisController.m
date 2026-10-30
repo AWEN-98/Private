@@ -2,128 +2,219 @@
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
+// Lightweight native CRT.  The iPhone 4S renders at 320x480 points;
+// no UIWebView, WebGL, video loop, or external assets are required.
+@interface XFKarenScope : UIView
+@property(nonatomic,copy) NSString *mode;
+@property(nonatomic,assign) CGFloat microphoneLevel;
+@property(nonatomic,assign) CGFloat speechEnergy;
+@property(nonatomic,assign) CGFloat phase;
+@property(nonatomic,assign) NSInteger expression;
+- (void)advance;
+@end
+
+@implementation XFKarenScope
+- (instancetype)initWithFrame:(CGRect)frame {
+    if((self=[super initWithFrame:frame])) {
+        self.opaque=YES;
+        self.backgroundColor=[UIColor blackColor];
+        self.contentMode=UIViewContentModeRedraw;
+        self.mode=@"idle";
+    }
+    return self;
+}
+- (void)advance {
+    self.phase+=0.145;
+    if(self.phase>10000)self.phase=0;
+    self.speechEnergy*=0.88;
+    [self setNeedsDisplay];
+}
+- (void)drawRect:(CGRect)rect {
+    CGContextRef ctx=UIGraphicsGetCurrentContext();
+    if(!ctx)return;
+    CGFloat w=self.bounds.size.width, h=self.bounds.size.height;
+    CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0.009 green:0.025 blue:0.015 alpha:1].CGColor);
+    CGContextFillRect(ctx,self.bounds);
+    // Faint phosphor grid and scan lines drawn in one pass.
+    CGContextSetLineWidth(ctx,0.5);
+    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:0.12 green:0.35 blue:0.19 alpha:0.17].CGColor);
+    for(CGFloat y=4;y<h;y+=6) {CGContextMoveToPoint(ctx,0,y);CGContextAddLineToPoint(ctx,w,y);}
+    for(CGFloat x=15;x<w;x+=28) {CGContextMoveToPoint(ctx,x,0);CGContextAddLineToPoint(ctx,x,h);}
+    CGContextStrokePath(ctx);
+    CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0 green:0 blue:0 alpha:0.20].CGColor);
+    for(CGFloat y=1;y<h;y+=4) CGContextFillRect(ctx,CGRectMake(0,y,w,1));
+    CGFloat center=h*0.54;
+    NSString *m=self.mode?:@"idle";
+    BOOL listen=[m isEqualToString:@"listening"];
+    BOOL think=[m isEqualToString:@"thinking"] || [m isEqualToString:@"transcribing"];
+    BOOL speak=[m isEqualToString:@"speaking"];
+    if(self.expression==3 && !listen && !think && !speak) {
+        CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0.95 green:0.22 blue:0.17 alpha:1].CGColor);
+        CGFloat x=w/2;
+        CGContextFillRect(ctx,CGRectMake(x-3,center-29,6,37));
+        CGContextFillEllipseInRect(ctx,CGRectMake(x-3,center+15,6,6));
+        return;
+    }
+    if(self.expression==2 && !listen && !think && !speak) {
+        // Minimal eye-roll expression in idle mode.
+        CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.18 green:.96 blue:.43 alpha:.88].CGColor);
+        CGContextSetLineWidth(ctx,2);
+        for(NSInteger i=0;i<2;i++){
+            CGFloat x=w*(i?0.65:0.35);
+            CGContextStrokeEllipseInRect(ctx,CGRectMake(x-20,center-12,40,25));
+            CGContextFillEllipseInRect(ctx,CGRectMake(x-3,center-11,7,7));
+        }
+        return;
+    }
+    // Draw twice for inexpensive phosphor glow (no animated drop shadows).
+    for(NSInteger pass=0;pass<2;pass++){
+        CGContextBeginPath(ctx);
+        CGFloat width=pass==0?5.0:1.8;
+        CGContextSetLineWidth(ctx,width);
+        CGFloat alpha=pass==0?.18:1.0;
+        CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.20 green:1 blue:.46 alpha:alpha].CGColor);
+        CGFloat margin=8;
+        for(CGFloat x=margin;x<=w-margin;x+=2){
+            CGFloat edge=sin((x-margin)/(w-2*margin)*M_PI);
+            CGFloat y=center;
+            if(listen){
+                CGFloat power=MAX(.05,MIN(1,self.microphoneLevel));
+                y+=sinf(x*.11+self.phase*2.6)*(3+power*36)*edge;
+                y+=sinf(x*.31-self.phase*3)*power*7*edge;
+            }else if(think){
+                y+=(sinf(x*.22+self.phase*4)*13+sinf(x*.37-self.phase*2.7)*7)*edge;
+            }else if(speak){
+                CGFloat power=.32+MIN(1,self.speechEnergy)*.68;
+                y+=(sinf(x*.12+self.phase*2.4)*25+sinf(x*.23-self.phase*1.5)*7)*power*edge;
+            }else if(self.expression==1){
+                y+=0; // Karen's deadpan flat line.
+            }else{
+                y+=sinf(x*.045+self.phase)*2.2+sinf(x*.020-self.phase*.35)*1.5;
+            }
+            if(x==margin)CGContextMoveToPoint(ctx,x,y);
+            else CGContextAddLineToPoint(ctx,x,y);
+        }
+        CGContextStrokePath(ctx);
+    }
+    // Static bezel strokes; kept translucent and inside the content bounds.
+    CGContextSetLineWidth(ctx,1);
+    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.12 green:.55 blue:.29 alpha:.44].CGColor);
+    CGContextStrokeRect(ctx,CGRectInset(self.bounds,3,3));
+}
+@end
+
 @interface XFJarvisController ()
-@property(nonatomic,strong) UIView *ringOuter;
-@property(nonatomic,strong) UIView *ringInner;
-@property(nonatomic,strong) UIButton *primary;
-@property(nonatomic,strong) UIButton *stopButton;
+@property(nonatomic,strong) XFKarenScope *scope;
+@property(nonatomic,strong) UILabel *hintLabel;
 @property(nonatomic,strong) UILabel *stateLabel;
 @property(nonatomic,strong) UILabel *subtitle;
 @property(nonatomic,strong) UILabel *timeLabel;
-@property(nonatomic,strong) UILabel *hintLabel;
+@property(nonatomic,strong) UIButton *primary;
+@property(nonatomic,strong) UIButton *stopButton;
+@property(nonatomic,strong) UIButton *teaseButton;
 @property(nonatomic,strong) UIButton *autoButton;
-@property(nonatomic,strong) NSMutableArray *meterBars;
+@property(nonatomic,strong) NSTimer *waveTimer;
 @property(nonatomic,copy) NSString *mode;
-@property(nonatomic,copy) NSString *modeDetail;
 @end
 
 @implementation XFJarvisController
-- (UIColor *)accent {return [UIColor colorWithRed:.29 green:.78 blue:.93 alpha:1];}
+- (UIColor *)accent {return [UIColor colorWithRed:.23 green:.95 blue:.47 alpha:1];}
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=[UIColor colorWithRed:.035 green:.065 blue:.115 alpha:1];
-    self.title=@"JARVIS · 小斐";
+    self.view.backgroundColor=[UIColor colorWithRed:.015 green:.026 blue:.020 alpha:1];
+    self.title=@"小斐 · KAREN";
     self.navigationController.navigationBar.translucent=NO;
-    self.navigationController.navigationBar.barTintColor=[UIColor colorWithRed:.06 green:.10 blue:.16 alpha:1];
-    self.navigationController.navigationBar.tintColor=[UIColor whiteColor];
-    self.navigationController.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:[UIColor whiteColor]};
+    self.navigationController.navigationBar.barTintColor=[UIColor colorWithRed:.035 green:.09 blue:.055 alpha:1];
+    self.navigationController.navigationBar.tintColor=[self accent];
+    self.navigationController.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:[self accent]};
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self action:@selector(closePressed)];
     self.hintLabel=[[UILabel alloc] init];
-    self.hintLabel.text=@"XIAOFEI / VOICE ASSISTANT";
+    self.hintLabel.text=@"XIAOFEI  /  RETRO TERMINAL";
+    self.hintLabel.font=[UIFont fontWithName:@"Courier-Bold" size:11]?:[UIFont boldSystemFontOfSize:11];
+    self.hintLabel.textColor=[UIColor colorWithRed:.36 green:.77 blue:.48 alpha:1];
     self.hintLabel.textAlignment=NSTextAlignmentCenter;
-    self.hintLabel.textColor=[UIColor colorWithRed:.40 green:.64 blue:.75 alpha:1];
-    self.hintLabel.font=[UIFont systemFontOfSize:11];
     [self.view addSubview:self.hintLabel];
-
-    self.ringOuter=[[UIView alloc] init];
-    self.ringOuter.backgroundColor=[UIColor clearColor];
-    self.ringOuter.layer.borderWidth=1.6;
-    self.ringOuter.layer.borderColor=[UIColor colorWithRed:.12 green:.39 blue:.55 alpha:1].CGColor;
-    self.ringOuter.layer.cornerRadius=79;
-    [self.view addSubview:self.ringOuter];
-    self.ringInner=[[UIView alloc] init];
-    self.ringInner.layer.cornerRadius=63;
-    self.ringInner.layer.borderWidth=2.4;
-    self.ringInner.layer.borderColor=[self accent].CGColor;
-    self.ringInner.backgroundColor=[UIColor colorWithRed:.065 green:.17 blue:.27 alpha:1];
-    [self.view addSubview:self.ringInner];
-
-    self.meterBars=[NSMutableArray array];
-    for(NSInteger i=0;i<17;i++){
-        UIView *bar=[[UIView alloc] init];
-        bar.layer.cornerRadius=1;
-        bar.backgroundColor=[UIColor colorWithRed:.56 green:.91 blue:1 alpha:1];
-        [self.ringInner addSubview:bar];
-        [self.meterBars addObject:bar];
-    }
+    self.scope=[[XFKarenScope alloc] initWithFrame:CGRectZero];
+    self.scope.layer.borderWidth=1;
+    self.scope.layer.borderColor=[UIColor colorWithRed:.11 green:.38 blue:.20 alpha:1].CGColor;
+    [self.view addSubview:self.scope];
+    UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(scopeTapped)];
+    [self.scope addGestureRecognizer:tap];
     self.stateLabel=[[UILabel alloc] init];
     self.stateLabel.textAlignment=NSTextAlignmentCenter;
-    self.stateLabel.textColor=[UIColor whiteColor];
-    self.stateLabel.font=[UIFont boldSystemFontOfSize:23];
+    self.stateLabel.font=[UIFont boldSystemFontOfSize:21];
+    self.stateLabel.textColor=[self accent];
     [self.view addSubview:self.stateLabel];
     self.subtitle=[[UILabel alloc] init];
     self.subtitle.numberOfLines=3;
-    self.subtitle.textAlignment=NSTextAlignmentCenter;
-    self.subtitle.textColor=[UIColor colorWithRed:.68 green:.79 blue:.85 alpha:1];
     self.subtitle.font=[UIFont systemFontOfSize:13];
+    self.subtitle.textAlignment=NSTextAlignmentCenter;
+    self.subtitle.textColor=[UIColor colorWithRed:.60 green:.78 blue:.64 alpha:1];
     [self.view addSubview:self.subtitle];
-
     self.timeLabel=[[UILabel alloc] init];
-    self.timeLabel.font=[UIFont boldSystemFontOfSize:13];
+    self.timeLabel.font=[UIFont fontWithName:@"Courier" size:13]?:[UIFont systemFontOfSize:13];
     self.timeLabel.textAlignment=NSTextAlignmentCenter;
     self.timeLabel.textColor=[self accent];
-    self.timeLabel.text=@"00:00";
     [self.view addSubview:self.timeLabel];
-
     self.primary=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.primary.backgroundColor=[UIColor colorWithRed:.10 green:.48 blue:.67 alpha:1];
-    self.primary.layer.cornerRadius=22;
+    self.primary.backgroundColor=[UIColor colorWithRed:.11 green:.43 blue:.23 alpha:1];
+    self.primary.layer.cornerRadius=7;
+    self.primary.titleLabel.font=[UIFont boldSystemFontOfSize:14];
     [self.primary setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    self.primary.titleLabel.font=[UIFont boldSystemFontOfSize:16];
     [self.primary addTarget:self action:@selector(primaryPressed) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.primary];
-
     self.stopButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.stopButton.backgroundColor=[UIColor colorWithRed:.12 green:.20 blue:.29 alpha:1];
-    self.stopButton.layer.cornerRadius=18;
+    self.stopButton.layer.cornerRadius=7;
+    self.stopButton.backgroundColor=[UIColor colorWithRed:.16 green:.22 blue:.17 alpha:1];
+    self.stopButton.titleLabel.font=[UIFont systemFontOfSize:13];
     [self.stopButton setTitle:@"停止" forState:UIControlStateNormal];
-    [self.stopButton setTitleColor:[UIColor colorWithRed:.85 green:.92 blue:.96 alpha:1] forState:UIControlStateNormal];
+    [self.stopButton setTitleColor:[self accent] forState:UIControlStateNormal];
     [self.stopButton addTarget:self action:@selector(stopPressed) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.stopButton];
+    self.teaseButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.teaseButton.titleLabel.font=[UIFont boldSystemFontOfSize:12];
+    [self.teaseButton setTitle:@"逗我一下" forState:UIControlStateNormal];
+    [self.teaseButton setTitleColor:[self accent] forState:UIControlStateNormal];
+    [self.teaseButton addTarget:self action:@selector(teasePressed) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.teaseButton];
     self.autoButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.autoButton.titleLabel.font=[UIFont systemFontOfSize:12.5];
-    [self.autoButton setTitleColor:[UIColor colorWithRed:.60 green:.86 blue:.95 alpha:1] forState:UIControlStateNormal];
+    self.autoButton.titleLabel.font=[UIFont systemFontOfSize:12];
+    [self.autoButton setTitleColor:[UIColor colorWithRed:.60 green:.79 blue:.64 alpha:1] forState:UIControlStateNormal];
     [self.autoButton addTarget:self action:@selector(toggleAuto) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.autoButton];
     [self updateAutoTitle];
-    [self updateMode:@"idle" description:@"点击开始说话；再次点击结束并自动提问"];
+    [self updateMode:@"idle" description:@"我在线。点击说话，或者戳戳屏幕。"];
 }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.waveTimer invalidate];
+    self.waveTimer=[NSTimer timerWithTimeInterval:1.0/15.0 target:self.scope selector:@selector(advance) userInfo:nil repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.waveTimer forMode:NSRunLoopCommonModes];
+}
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self.waveTimer invalidate];self.waveTimer=nil;
+}
+- (void)dealloc {[self.waveTimer invalidate];}
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGFloat w=self.view.bounds.size.width, h=self.view.bounds.size.height;
-    self.hintLabel.frame=CGRectMake(8,16,w-16,22);
-    CGFloat centerY=MIN(MAX(130,h*.35),h-197);
-    self.ringOuter.frame=CGRectMake(floor((w-158)/2),floor(centerY-79),158,158);
-    self.ringInner.frame=CGRectMake(floor((w-126)/2),floor(centerY-63),126,126);
-    for(NSInteger i=0;i<self.meterBars.count;i++){
-        UIView *bar=self.meterBars[(NSUInteger)i];
-        CGFloat height=bar.bounds.size.height>1?bar.bounds.size.height:6;
-        bar.frame=CGRectMake(23+i*4.8,63-height/2,2.2,height);
-    }
-    CGFloat stateY=centerY+87;
-    self.stateLabel.frame=CGRectMake(12,stateY,w-24,29);
-    self.subtitle.frame=CGRectMake(18,stateY+34,w-36,52);
-    self.timeLabel.frame=CGRectMake(15,stateY+85,w-30,18);
-    CGFloat buttonsY=MAX(stateY+113,h-91);
-    if(buttonsY+45>h-36)buttonsY=h-82;
-    self.primary.frame=CGRectMake(13,buttonsY,w-100,44);
-    self.stopButton.frame=CGRectMake(w-78,buttonsY,65,44);
-    self.autoButton.frame=CGRectMake(10,h-38,w-20,30);
+    CGFloat scopeH=MIN(184,MAX(115,h*.43));
+    self.hintLabel.frame=CGRectMake(8,8,w-16,22);
+    self.scope.frame=CGRectMake(12,36,w-24,scopeH);
+    CGFloat below=36+scopeH;
+    self.stateLabel.frame=CGRectMake(10,below+5,w-20,30);
+    self.subtitle.frame=CGRectMake(15,below+34,w-30,49);
+    self.timeLabel.frame=CGRectMake(15,below+81,w-30,17);
+    CGFloat buttonsY=MIN(h-87,below+108);
+    self.primary.frame=CGRectMake(12,buttonsY,w-104,42);
+    self.stopButton.frame=CGRectMake(w-85,buttonsY,73,42);
+    self.teaseButton.frame=CGRectMake(14,h-41,w*.43,32);
+    self.autoButton.frame=CGRectMake(w*.43+18,h-41,w*.57-32,32);
 }
 - (void)updateAutoTitle {
-    [self.autoButton setTitle:self.autoSpeak?@"自动朗读：已开启（点击关闭）":@"自动朗读：已关闭（点击开启）"
-                  forState:UIControlStateNormal];
+    [self.autoButton setTitle:self.autoSpeak?@"语音：开":@"语音：关" forState:UIControlStateNormal];
 }
 - (void)setAutoSpeak:(BOOL)autoSpeak {
     _autoSpeak=autoSpeak;
@@ -131,37 +222,44 @@
 }
 - (void)updateMode:(NSString *)mode description:(NSString *)detail {
     self.mode=mode?:@"idle";
-    self.modeDetail=detail?:@"";
-    BOOL listening=[mode isEqualToString:@"listening"];
-    BOOL thinking=[mode isEqualToString:@"thinking"];
-    BOOL speaking=[mode isEqualToString:@"speaking"];
-    BOOL transcribing=[mode isEqualToString:@"transcribing"];
-    self.stateLabel.text=listening?@"正在聆听":(thinking?@"正在思考":(speaking?@"正在回答":(transcribing?@"正在识别":@"随时待命")));
-    self.subtitle.text=detail.length?detail:@"点击开始说话";
-    [self.primary setTitle:listening?@"■ 结束并提问":@"● 开始说话" forState:UIControlStateNormal];
-    self.primary.enabled=!(thinking||transcribing);
-    self.primary.alpha=self.primary.enabled?1:.42;
-    self.ringInner.layer.borderColor=(listening?[UIColor colorWithRed:.94 green:.30 blue:.34 alpha:1]:
-      (speaking?[UIColor colorWithRed:.37 green:.93 blue:.68 alpha:1]:[self accent])).CGColor;
-    self.stopButton.enabled=!( [mode isEqualToString:@"idle"] );
+    self.scope.mode=self.mode;
+    self.scope.expression=0;
+    BOOL listening=[self.mode isEqualToString:@"listening"];
+    BOOL thinking=[self.mode isEqualToString:@"thinking"] || [self.mode isEqualToString:@"transcribing"];
+    BOOL speaking=[self.mode isEqualToString:@"speaking"];
+    self.stateLabel.text=listening?@"正在聆听":(thinking?@"正在思考":(speaking?@"正在回答":@"随时待命"));
+    self.subtitle.text=detail.length?detail:@"我在。";
+    [self.primary setTitle:listening?@"结束并提问":@"开始说话" forState:UIControlStateNormal];
+    self.primary.enabled=!thinking;
+    self.primary.alpha=self.primary.enabled?1:.45;
+    self.stopButton.enabled=![self.mode isEqualToString:@"idle"];
     self.stopButton.alpha=self.stopButton.enabled?1:.45;
-    if(!listening)[self updateMeter:0 seconds:0];
+    self.teaseButton.enabled=![self.mode isEqualToString:@"idle"];
+    self.teaseButton.alpha=self.teaseButton.enabled?1:.40;
+    self.timeLabel.text=listening?@"00:00":@"";
+    if(!listening)self.scope.microphoneLevel=0;
+    if(!speaking)self.scope.speechEnergy=0;
+    [self.scope setNeedsDisplay];
 }
 - (void)updateMeter:(float)level seconds:(NSInteger)seconds {
-    if([self.mode isEqualToString:@"listening"]){
-        self.timeLabel.text=[NSString stringWithFormat:@"%02ld:%02ld",(long)(seconds/60),(long)(seconds%60)];
-    }else self.timeLabel.text=@"";
-    CGFloat strength=MAX(0,MIN(1,level));
-    for(NSInteger i=0;i<self.meterBars.count;i++){
-        UIView *bar=self.meterBars[(NSUInteger)i];
-        CGFloat ridge=1-fabs((double)i-8.0)/10.0;
-        CGFloat height=4+strength*MAX(6,27*ridge)*(0.65+(i%4)*.12);
-        CGRect f=bar.frame;f.origin.y=63-height/2;f.size.height=height;bar.frame=f;
-    }
+    if(![self.mode isEqualToString:@"listening"])return;
+    self.scope.microphoneLevel=MAX(0,MIN(1,level));
+    self.timeLabel.text=[NSString stringWithFormat:@"%02ld:%02ld",(long)(seconds/60),(long)(seconds%60)];
+}
+- (void)updateSpeechPulse {
+    if([self.mode isEqualToString:@"speaking"])self.scope.speechEnergy=1.0;
+}
+- (void)scopeTapped {
+    if(![self.mode isEqualToString:@"idle"])return;
+    self.scope.expression=(self.scope.expression+1)%4;
+    NSArray *lines=@[@"又戳？我的屏幕有使用寿命。",@"……", @"看上面也改变不了现实。",@"警告：检测到无聊的人类。"];
+    self.subtitle.text=lines[(NSUInteger)self.scope.expression];
+    [self.scope setNeedsDisplay];
 }
 - (void)primaryPressed {if(self.onPrimary)self.onPrimary();}
 - (void)stopPressed {if(self.onStop)self.onStop();}
 - (void)closePressed {if(self.onClose)self.onClose();}
+- (void)teasePressed {if(self.onTease)self.onTease();}
 - (void)toggleAuto {
     self.autoSpeak=!self.autoSpeak;
     if(self.onAutoSpeak)self.onAutoSpeak(self.autoSpeak);
