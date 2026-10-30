@@ -52,6 +52,7 @@ jobs:
           THEOS: ${{ github.workspace }}/.theos-link
         run: |
           set -e
+          python3 pocketdrop/tests/test_passwordless.py
           cd pocketdrop
           python3 gen_icons.py
           make package FINALPACKAGE=1 THEOS="$HOME/theos" TARGET=iphone:clang:9.3:8.0 ARCHS=armv7
@@ -63,7 +64,7 @@ jobs:
           chmod 755 repack_legacy/DEBIAN/postinst
           # Theos files compiled as runner must install as root:wheel/root on iOS 8.
           dpkg-deb --root-owner-group -Zgzip -z6 --build repack_legacy "$original_deb"
-          test "$(dpkg-deb -f "$original_deb" Version)" = "0.3.1"
+          test "$(dpkg-deb -f "$original_deb" Version)" = "0.4.0"
           ar t "$original_deb" | grep -qx "control.tar.gz"
           ar t "$original_deb" | grep -qx "data.tar.gz"
           dpkg-deb --ctrl-tarfile "$original_deb" | tar -tf - | grep -q 'postinst'
