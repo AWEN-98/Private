@@ -1326,7 +1326,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 [self resolveLiveRoomID:rid title:title author:name stage:0 generation:generation];
                 if(++started>=12)break;
             }
-            if(!started)self.message.text=@"直播榜单暂不可用，点右上角搜索图标输入直播间链接。";
+            if(!started)self.message.text=@"当前直播榜单未返回直播间，可点右上角搜索图标输入官方直播间链接。";
             else self.message.text=@"正在连接直播流…";
         });
     }] resume];
@@ -1411,9 +1411,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self showBottomTemporarily];
     if(idx==0){[self loadOnlineFeed:YES];}
     else if(idx==1){
-        [self.onlineVideos removeAllObjects];
-        self.onlineError=nil;self.message.text=@"正在获取公开视频热榜…";
-        [self loadAnonymousHotVideos:++self.onlineRequestID];
+        // The deprecated public hot-video list may return no videos.
+        // Try the same signed search pipeline as other categories and retain
+        // the successful recommendation playlist as the honest fallback.
+        [self searchVideos:@"热门" reset:YES];
     }else [self searchVideos:categories[idx] reset:YES];
     [self reloadCurrent];[self layoutScreen];
 }
@@ -1433,6 +1434,43 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
+- (void)fallbackForFailedSearch:(NSString *)term reason:(NSString *)reason {
+    if(!self.searchMode || ![self.searchQuery isEqualToString:term])return;
+    // Only reuse clips that genuinely contain an identifiable category term.
+    // Never silently label arbitrary recommendations as category videos.
+    NSMutableArray *matches=[NSMutableArray array];
+    NSArray *keywords=nil;
+    if([term isEqualToString:@"游戏"])keywords=@[@"游戏",@"电竞",@"王者",@"原神",@"崩铁",@"英雄联盟",@"手游",@"单机"];
+    else if([term isEqualToString:@"音乐"])keywords=@[@"音乐",@"歌曲",@"唱歌",@"翻唱",@"演唱",@"乐器",@"弹唱",@"钢琴"];
+    else if([term isEqualToString:@"生活"])keywords=@[@"生活",@"日常",@"居家",@"旅行",@"做饭",@"美食",@"穿搭",@"记录"];
+    else if([term isEqualToString:@"热门"])keywords=@[@"热门",@"热榜",@"爆款",@"热点"];
+    for(NSDictionary *v in self.onlineVideos){
+        NSString *title=DLText(v[@"title"]);
+        BOOL matched=NO;
+        for(NSString *word in keywords)if([title rangeOfString:word options:NSCaseInsensitiveSearch].location!=NSNotFound){matched=YES;break;}
+        if(matched)[matches addObject:v];
+        if(matches.count>=35)break;
+    }
+    if(matches.count){
+        self.searchResults=matches;
+        self.index=0;
+        [self reloadCurrent];
+        // Filtered from real titles, not from the restricted search endpoint.
+        self.message.text=[NSString stringWithFormat:@"已从推荐视频中筛选%@内容",term];
+        [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2.5];
+        return;
+    }
+    self.searchMode=NO;self.searchEnd=YES;self.onlineMode=YES;self.index=0;
+    self.category=@"推荐";
+    [self reloadCurrent];[self layoutScreen];
+    if(self.onlineVideos.count){
+        self.message.text=[NSString stringWithFormat:@"%@分类暂不可用，已返回推荐视频",term];
+        [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:3.5];
+    }else{
+        self.message.text=reason.length?reason:@"该分类暂时没有可播放内容，正在尝试推荐视频";
+        [self loadOnlineFeed:YES];
+    }
+}
 - (void)searchVideos:(NSString *)keyword reset:(BOOL)reset {
     if(!keyword.length)return;
     if(!reset && (self.searchLoading||self.searchEnd))return;
@@ -1447,7 +1485,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:keyword offset:self.searchOffset error:&issue];
     if(!request){
         self.searchLoading=NO;
-        self.message.text=issue.length?issue:@"无法发起搜索请求";
+        [self fallbackForFailedSearch:keyword reason:issue];
         [self layoutScreen];return;
     }
     [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *json,NSString *problem){
@@ -1483,9 +1521,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         if(!items.count||results.count==previousCount)self.searchEnd=YES;
         if(results.count){self.message.text=@"";[self reloadCurrent];}
         else{
-            self.message.text=problem.length?problem:@"搜索未返回可播放视频，可能需要登录或访问验证。";
-            [self reloadCurrent];
-            self.message.text=problem.length?problem:@"暂无可播放的搜索结果，试试其他关键词";
+            // The general search endpoint is frequently restricted for guests.
+            // Fall back to genuine matched clips from our working homepage feed.
+            [self fallbackForFailedSearch:keyword reason:problem];
         }
         [self layoutScreen];
     }];
