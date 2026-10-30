@@ -1,4 +1,5 @@
 #import "XFPromptToolsController.h"
+#import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
 static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
 
@@ -13,11 +14,12 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title=self.promptTitle?:@"提示词";
-    self.view.backgroundColor=[UIColor colorWithRed:.965 green:.973 blue:.988 alpha:1];
+    self.view.backgroundColor=XFCanvas();
+    XFApplyNavigation(self.navigationController);
     self.editor=[[UITextView alloc] init];
     self.editor.font=[UIFont systemFontOfSize:15];
-    self.editor.backgroundColor=[UIColor whiteColor];
-    self.editor.layer.cornerRadius=8;
+    XFCard(self.editor,12);
+    self.editor.textColor=XFInk();
     self.editor.text=self.promptText?:@"";
     self.editor.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.editor];
@@ -26,9 +28,9 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
         UIButton *btn=[UIButton buttonWithType:UIButtonTypeSystem];
         btn.tag=i;btn.titleLabel.font=[UIFont boldSystemFontOfSize:13];
         [btn setTitle:titles[(NSUInteger)i] forState:UIControlStateNormal];
-        if(i==0){btn.backgroundColor=[UIColor colorWithRed:.32 green:.38 blue:.79 alpha:1];[btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];}
-        else {btn.backgroundColor=[UIColor whiteColor];[btn setTitleColor:[UIColor colorWithRed:.32 green:.38 blue:.79 alpha:1] forState:UIControlStateNormal];}
-        btn.layer.cornerRadius=8;
+        if(i==0){btn.backgroundColor=XFAccent();[btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];}
+        else {btn.backgroundColor=XFAccentPale();[btn setTitleColor:XFAccent() forState:UIControlStateNormal];}
+        btn.layer.cornerRadius=11;
         [btn addTarget:self action:@selector(action:) forControlEvents:UIControlEventTouchUpInside];
         [self.view addSubview:btn];
     }
@@ -74,12 +76,14 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
 @implementation XFPromptToolsController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title=@"提示词工具箱";
+    self.title=@"提示词";
+    XFApplyNavigation(self.navigationController);
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(addCustom)];
     self.tableView.rowHeight=57;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
-    self.tableView.backgroundColor=[UIColor colorWithRed:.96 green:.97 blue:.99 alpha:1];
+    self.tableView.backgroundColor=XFCanvas();
+    self.tableView.separatorColor=XFLine();
     self.builtins=@[
         @{@"title":@"AI 生图提示词",@"category":@"视觉创作",@"text":@"请把以下主题写成适合 AI 生图的完整中文提示词，重点描述主体、外貌、服装、姿态、机位、场景、光影、材质、构图，语言清晰可直接复制。主题：{填写主题}"},
         @{@"title":@"CG 角色设计",@"category":@"视觉创作",@"text":@"设计一个完整的高品质 CG 角色。写出角色定位、剪影、形体语言、重心姿态、服饰层级、材质 CMF、色彩比例、关键装备和角色叙事。不要堆无意义装饰。角色主题：{填写主题}"},
@@ -102,6 +106,9 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
     UITableViewCell *c=[t dequeueReusableCellWithIdentifier:@"template"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"template"];
     NSDictionary *item=ip.section==0?self.builtins[(NSUInteger)ip.row]:self.custom[(NSUInteger)ip.row];
+    c.backgroundColor=XFPaper();
+    c.textLabel.textColor=XFInk();
+    c.detailTextLabel.textColor=XFSecondary();
     c.textLabel.text=item[@"title"];
     c.textLabel.font=[UIFont boldSystemFontOfSize:14.5];
     c.detailTextLabel.text=item[@"category"]?:@"自定义";
