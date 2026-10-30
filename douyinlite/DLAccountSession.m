@@ -109,15 +109,34 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
   dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.sessionGeneration){completion(nil,@"账号会话已切换，请重新操作。");return;}completion(problem?nil:json,problem);});
  }] resume];
 }
+- (void)confirmVerifiedAccount:(void (^)(BOOL,NSString *))completion{
+ BOOL saved=[self saveSession];
+ [[NSNotificationCenter defaultCenter] postNotificationName:DLAccountDidChangeNotification object:self];
+ completion(YES,saved?@"账号已验证，登录会话已保存。":@"账号已验证，但会话保存失败，重开应用后可能需要重新登录。");
+}
 - (void)verifyAccount:(void (^)(BOOL,NSString *))completion{
  [self requestJSON:[self webRequest:@"https://www.douyin.com/passport/web/account/info/?aid=6383&account_sdk_source=web"] completion:^(NSDictionary *json,NSString *problem){
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
   NSString *uid=DLString(data[@"user_id"]);if(!uid.length)uid=DLString(data[@"uid"]);if(!uid.length)uid=DLString(data[@"user_id_str"]);
   NSString *code=DLString(json[@"status_code"]);NSString *message=[DLString(json[@"message"]) lowercaseString];
   BOOL apiSuccess=([code isEqualToString:@"0"]||[message isEqualToString:@"success"]);
-  BOOL ok=!problem&&apiSuccess&&uid.length&&![uid isEqualToString:@"0"];
-  if(ok){BOOL saved=[self saveSession];[[NSNotificationCenter defaultCenter] postNotificationName:DLAccountDidChangeNotification object:self];completion(YES,saved?@"账号已验证，登录会话已保存。":@"账号已验证，但会话保存失败，重开应用后可能需要重新登录。");}
-  else completion(NO,problem?:([self hasSession]?@"已取得会话，但账号接口尚未确认登录有效。":@"尚未取得有效登录会话，请重新扫码。"));
+  if(!problem&&apiSuccess&&uid.length&&![uid isEqualToString:@"0"]){[self confirmVerifiedAccount:completion];return;}
+  // Account info may be unsupported on older sessions. Verify against the
+  // separate profile endpoint rather than assuming cookies prove login.
+  [self requestJSON:[self webRequest:@"https://www.douyin.com/webcast/user/me/?aid=1128"] completion:^(NSDictionary *other,NSString *otherProblem){
+    NSDictionary *profile=[other[@"data"] isKindOfClass:NSDictionary.class]?other[@"data"]:@{};
+    NSString *identity=DLString(profile[@"user_id"]);
+    if(!identity.length)identity=DLString(profile[@"uid"]);
+    if(!identity.length)identity=DLString(profile[@"display_id"]);
+    NSString *nickname=DLString(profile[@"nickname"]);
+    NSString *otherCode=DLString(other[@"status_code"]);
+    NSString *otherMessage=[DLString(other[@"message"]) lowercaseString];
+    BOOL verified=!otherProblem&&identity.length&&![identity isEqualToString:@"0"]&&nickname.length&&
+      ([otherCode isEqualToString:@"0"]||[otherMessage isEqualToString:@"success"]);
+    if(verified){[self confirmVerifiedAccount:completion];return;}
+    NSString *reason=otherProblem?:problem;
+    completion(NO,reason?:([self hasSession]?@"已获取账号会话，但两个账号接口均未确认有效登录。":@"尚未取得有效登录会话，请重新扫码。"));
+  }];
  }];
 }
 - (void)finishLoginAtURL:(NSURL *)url completion:(void (^)(BOOL,NSString *))completion{
