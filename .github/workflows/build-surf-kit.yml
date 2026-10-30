@@ -28,7 +28,7 @@ jobs:
           echo '87c9b3988ddef855eb80f9ae9bc2e4bd00a9b620858f3c787d8ccaee4ac1a192  /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb' | sha256sum --check -
           echo 'e2c48bfdff7249bc8fde8b654b675b31875425d5deea434430f2c65305427026  /tmp/surf-upstream/Surf-Windows-x64.zip' | sha256sum --check -
           test "$(dpkg-deb -f /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb Package)" = "space.seg6.surf"
-          test "$(dpkg-deb -f /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb Version)" = "0.17.0"
+          test "$(dpkg-deb -f /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb Version)" = "0.17.0-1"
           unzip -t /tmp/surf-upstream/Surf-Windows-x64.zip | tail -1
       - name: Assemble one-download ready-to-use package
         run: |
