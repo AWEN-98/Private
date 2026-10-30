@@ -8,6 +8,7 @@
 #import "XFCompareController.h"
 #import "XFDiagnostics.h"
 #import "XFJarvisController.h"
+#import "XFImageGeneration.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
@@ -62,6 +63,8 @@
 @property(nonatomic,assign) BOOL voiceAwaitingChat;
 @property(nonatomic,assign) BOOL voiceAutoSpeak;
 @property(nonatomic,assign) BOOL voiceStarting;
+@property(nonatomic,assign) BOOL imageGenerating;
+@property(nonatomic,assign) NSUInteger imageRequestToken;
 @end
 
 @implementation XFViewController
@@ -161,7 +164,7 @@
     self.tools.alwaysBounceHorizontal=YES;
     [self.footerBar addSubview:self.tools];
     NSArray *items=@[@[@"◉ JARVIS",@"jarvis"],@[@"＋ 新对话",@"new"],@[@"▧ 图片",@"photo"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
+      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"✦ 生图",@"image"],@[@"生图协议",@"imagemode"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
     CGFloat x=1;
     for(NSArray *item in items){
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -453,6 +456,7 @@
     if([name isEqualToString:@"record"]) {[self toggleRecord];return;}
     if([name isEqualToString:@"tts"]) {[self speakLastAnswer];return;}
     if([name isEqualToString:@"image"]) {[self generateImage];return;}
+    if([name isEqualToString:@"imagemode"]) {[self chooseImageProtocol:NO profile:nil prompt:nil];return;}
     if([name isEqualToString:@"web"]) {[self sendAsSearch];return;}
 }
 - (void)voiceUpdate:(NSString *)mode message:(NSString *)message {
@@ -602,6 +606,13 @@
 }
 - (void)sendTapped {
     if(self.isWorking) {
+        if(self.imageGenerating){
+            self.imageRequestToken++;
+            self.imageGenerating=NO;
+            [self setWorking:NO];
+            self.status.text=@"已停止显示本次生图结果（服务器可能仍在生成并计费）";
+            return;
+        }
         [self.connection cancel];self.connection=nil;
         [self setWorking:NO];
         [self restoreSubmittedDraft];
@@ -1160,40 +1171,116 @@
         self.status.text=@"正在朗读";
     }];
 }
+- (NSString *)imageProtocolKey:(NSDictionary *)profile {
+    NSString *account=profile[@"account_id"]?:@"";
+    return [@"xf_image_generation_protocol_v1_" stringByAppendingString:account];
+}
+- (void)chooseImageProtocol:(BOOL)start profile:(NSDictionary *)profile prompt:(NSString *)prompt {
+    NSDictionary *p=profile?:[XFModelsController activeProfileForCapability:@"image"];
+    if(!p){
+        [self showAlert:@"尚未选择生图模型" detail:@"打开模型库，将生图模型分类为「图片生成」并选中，然后再试。"];
+        return;
+    }
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"选择生图接口协议"
+       message:[NSString stringWithFormat:@"当前：%@\n标准图片 API 适用于 OpenAI / 千问及 OpenRouter Images；聊天式生图适用于部分 Gemini、OpenRouter 模型。\n\n只会执行你选择的方式，不会自动重复扣费。",p[@"model"]?:@"未命名模型"]
+       preferredStyle:UIAlertControllerStyleAlert];
+    __weak XFViewController *weakSelf=self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"标准图像 API（推荐）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [[NSUserDefaults standardUserDefaults] setObject:@"images" forKey:[weakSelf imageProtocolKey:p]];
+        weakSelf.status.text=@"已选择标准图像接口";
+        if(start)[weakSelf startImageGenerationWithProfile:p prompt:prompt chat:NO];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"聊天式生图 API" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [[NSUserDefaults standardUserDefaults] setObject:@"chat" forKey:[weakSelf imageProtocolKey:p]];
+        weakSelf.status.text=@"已选择聊天式生图接口";
+        if(start)[weakSelf startImageGenerationWithProfile:p prompt:prompt chat:YES];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 - (void)generateImage {
-    if(self.isWorking) return;
-    NSDictionary *p=[self profileFor:@"image"];if(!p)return;
+    if(self.isWorking)return;
+    NSDictionary *profile=[XFModelsController activeProfileForCapability:@"image"];
+    if(!profile){
+        [self showAlert:@"无法生图：尚未选择模型"
+             detail:@"进入「切换模型」，选择「图片生成」分类，点选一个有权限的生图模型。聊天模型和视觉识图模型不一定支持生图。"];
+        return;
+    }
     NSString *prompt=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if(!prompt.length) {self.status.text=@"请先输入生图描述";return;}
-    NSMutableURLRequest *req=[self requestForProfile:p];if(!req)return;
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    req.HTTPBody=[NSJSONSerialization dataWithJSONObject:@{@"model":p[@"model"],@"prompt":prompt,
-       @"n":@1,@"size":@"1024x1024"} options:0 error:NULL];
-    self.status.text=@"正在生成图片…";
+    if(!prompt.length){
+        self.status.text=@"请先输入生图描述";
+        return;
+    }
+    if(prompt.length>5000){
+        [self showAlert:@"生图提示词过长" detail:@"请将描述缩短至 5000 字以内。"];
+        return;
+    }
+    NSString *mode=[[NSUserDefaults standardUserDefaults] stringForKey:[self imageProtocolKey:profile]];
+    if(![@[@"images",@"chat"] containsObject:mode]){
+        [self chooseImageProtocol:YES profile:profile prompt:prompt];
+        return;
+    }
+    [self startImageGenerationWithProfile:profile prompt:prompt chat:[mode isEqualToString:@"chat"]];
+}
+- (void)startImageGenerationWithProfile:(NSDictionary *)p prompt:(NSString *)prompt chat:(BOOL)chat {
+    if(self.isWorking)return;
+    NSString *key=[XFModelsController secretForProfile:p];
+    if(!key.length) {
+        [self showAlert:@"生图密钥未配置" detail:@"请在 API 管理中填写有效 API Key。"];
+        return;
+    }
+    NSString *endpoint=chat?(p[@"chat_endpoint"]?:@""):p[@"endpoint"];
+    NSURL *endpointURL=[NSURL URLWithString:endpoint];
+    if(![[endpointURL.scheme lowercaseString] isEqualToString:@"https"] || !endpointURL.host.length){
+        [self showAlert:@"生图接口地址无效" detail:@"请检查当前 API 服务的 base URL 是否正确，并使用 HTTPS。"];
+        return;
+    }
+    self.imageRequestToken++;
+    NSUInteger token=self.imageRequestToken;
+    self.imageGenerating=YES;
     [self setWorking:YES];
-    [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
-        [self setWorking:NO];
-        if(err){[XFDiagnostics record:@"生图网络错误" code:err.code detail:err.domain?:@""];
-            self.status.text=[NSString stringWithFormat:@"生图网络失败 %ld",(long)err.code];return;}
-        NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
-        if(data.length>7*1024*1024){
-            [XFDiagnostics record:@"生图响应过大" code:code detail:@"返回超过 7MB"];
-            self.status.text=@"图片返回过大，旧设备无法解码";return;
+    self.status.text=chat?@"正在通过聊天式接口生图…":@"正在通过图像接口生图…";
+    __weak XFViewController *weakSelf=self;
+    [XFImageGeneration generateWithEndpoint:endpoint model:p[@"model"] apiKey:key prompt:prompt
+       chatMode:chat completion:^(UIImage *image,NSString *reason,NSInteger statusCode){
+        XFViewController *controller=weakSelf;
+        if(!controller || token!=controller.imageRequestToken)return;
+        controller.imageGenerating=NO;
+        [controller setWorking:NO];
+        if(!image){
+            NSString *safeReason=reason?:@"生图失败";
+            if(key.length)safeReason=[safeReason stringByReplacingOccurrencesOfString:key withString:@"[密钥已隐藏]"];
+            NSString *shortReason=safeReason.length>330?[safeReason substringToIndex:330]:safeReason;
+            [XFDiagnostics record:@"生图失败" code:statusCode
+                             detail:[NSString stringWithFormat:@"模式：%@，服务：%@",
+                               chat?@"聊天式":@"标准",p[@"provider"]?:@"API"]];
+            controller.status.text=@"生图失败，点击「生图协议」可切换接口";
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:
+                [NSString stringWithFormat:@"生图失败 · %@",chat?@"聊天式":@"标准图片"]
+                message:[NSString stringWithFormat:@"模型：%@\n接口：%@\n原因：%@",
+                         p[@"model"]?:@"",endpointURL.host?:@"",shortReason]
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"复制原因" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                [UIPasteboard generalPasteboard].string=safeReason;
+            }]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"切换生图协议" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                [controller chooseImageProtocol:NO profile:p prompt:nil];
+            }]];
+            [controller presentViewController:alert animated:YES completion:nil];
+            return;
         }
-        NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
-        NSArray *results=[json isKindOfClass:[NSDictionary class]]?json[@"data"]:nil;
-        NSDictionary *first=[results isKindOfClass:[NSArray class]] && results.count?results[0]:nil;
-        NSString *base64=first[@"b64_json"];
-        if(code>=300 || ![base64 isKindOfClass:[NSString class]]) {
-            [XFDiagnostics record:@"生图接口不兼容" code:code detail:@"需要 b64_json 字段"];
-            self.status.text=[NSString stringWithFormat:@"生图失败 HTTP %ld（需要 b64_json）",(long)code];return;
-        }
-        NSData *bytes=[[NSData alloc] initWithBase64EncodedString:base64 options:0];
-        UIImage *image=[UIImage imageWithData:bytes];
-        if(!image){self.status.text=@"图片解码失败";return;}
-        [self showGeneratedImage:image];
-        [self appendLine:[NSString stringWithFormat:@"已生成图片：%@",prompt]];
-        self.status.text=@"图片已生成，可保存到相册";
+        NSString *filename=[XFChatStore saveImage:image];
+        NSString *description=[NSString stringWithFormat:@"已生成图片：%@",prompt];
+        if(filename.length){
+            [controller.chat addGeneratedImageMessage:description imageName:filename];
+            [controller.history addObject:@{@"role":@"assistant",
+                   @"content":description,@"image_file":filename}];
+            [XFChatStore saveConversationID:controller.conversationID messages:controller.history];
+        } else [controller appendLine:description];
+        controller.status.text=filename.length?@"生图成功，已存入会话；可保存到相册":
+           @"生图成功，但无法保存到本地会话，请检查磁盘空间";
+        [controller showGeneratedImage:image];
     }];
 }
 - (void)showGeneratedImage:(UIImage *)image {
