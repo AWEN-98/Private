@@ -823,7 +823,97 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  }] resume];
 }
 
+// The native public video-list request needs no pasted share URL.
+// Some app gateways return only when an aweme_id is supplied. If this
+// standalone list request is empty, retain the signed web-feed fallback.
 - (void)loadDouyinAccountFeed:(BOOL)reset {
+    if(self.onlineLoading && !reset)return;
+    if(!reset && (self.douyinEnd || self.douyinRetryAfter.timeIntervalSinceNow>0))return;
+    if(reset){
+        self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];
+        self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;
+    }
+    self.onlineLoading=YES;self.onlinePaging=YES;
+    NSUInteger token=++self.onlineRequestID;
+    if(reset){
+        self.message.text=@"正在加载抖音视频…";
+        [self.loadingIndicator startAnimating];
+    }
+    [self requestMobileFeed:0 token:token reset:reset];
+}
+- (void)requestMobileFeed:(NSInteger)endpointIndex token:(NSUInteger)token reset:(BOOL)reset {
+    NSArray *hosts=@[@"https://api5-normal-c-hl.amemv.com/aweme/v1/feed/",
+                     @"https://aweme.snssdk.com/aweme/v1/feed/"];
+    if(endpointIndex>=(NSInteger)hosts.count){
+        if(token!=self.onlineRequestID)return;
+        self.onlineLoading=NO;self.onlinePaging=NO;
+        [self loadDouyinAccountFeedWeb:reset];
+        return;
+    }
+    NSString *link=[NSString stringWithFormat:@"%@?aid=1128&count=12&type=0&pull_type=%ld&refresh_index=%ld",
+        hosts[endpointIndex],(long)(reset?0:2),(long)(self.onlineOffset+1)];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:link]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+    [request setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001)"
+        forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(id)response:nil;
+        NSDictionary *json=nil;
+        if(!error&&http.statusCode==200&&data.length>0&&data.length<3500000){
+            id raw=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+            if([raw isKindOfClass:NSDictionary.class])json=raw;
+        }
+        NSDictionary *body=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:json;
+        NSArray *rows=[body[@"aweme_list"] isKindOfClass:NSArray.class]?body[@"aweme_list"]:@[];
+        if(!rows.count && [body[@"item_list"] isKindOfClass:NSArray.class])rows=body[@"item_list"];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(token!=self.onlineRequestID)return;
+            NSMutableSet *seen=[NSMutableSet set];
+            for(NSDictionary *old in self.onlineVideos){
+                NSString *identity=DLText(old[@"id"]);
+                if(!identity.length)identity=DLText(old[@"url"]);
+                if(identity.length)[seen addObject:identity];
+            }
+            NSInteger inserted=0;
+            for(id obj in rows){
+                if(![obj isKindOfClass:NSDictionary.class])continue;
+                NSDictionary *item=obj;
+                if([item[@"aweme_info"] isKindOfClass:NSDictionary.class])item=item[@"aweme_info"];
+                // Exclude promotions and live cards. Only return actual video URLs.
+                if([item[@"is_ads"] respondsToSelector:@selector(boolValue)]&&[item[@"is_ads"] boolValue])continue;
+                if([item[@"is_live"] respondsToSelector:@selector(boolValue)]&&[item[@"is_live"] boolValue])continue;
+                NSString *url=DLPublicPlaybackURL(item);
+                if(!url.length)continue;
+                NSString *idString=DLText(item[@"aweme_id"]);
+                if(!idString.length)idString=DLText(item[@"id"]);
+                NSString *identity=idString.length?idString:url;
+                if([seen containsObject:identity])continue;
+                [seen addObject:identity];
+                NSDictionary *author=[item[@"author"] isKindOfClass:NSDictionary.class]?item[@"author"]:@{};
+                NSString *title=DLText(item[@"desc"]);
+                if(!title.length)title=DLText(author[@"nickname"]);
+                if(!title.length)title=@"抖音视频";
+                if(title.length>90)title=[title substringToIndex:90];
+                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,@"source":@"douyin-feed"}];
+                if(++inserted>=12)break;
+            }
+            if(inserted>0){
+                self.onlineLoading=NO;self.onlinePaging=NO;
+                self.onlineOffset++;
+                self.onlineError=nil;self.douyinRetryAfter=nil;
+                NSInteger drop=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
+                if(drop>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,drop)];self.index-=drop;}
+                if(self.onlineMode&&!self.presentedViewController){
+                    if(reset || self.onlineVideos.count==inserted)[self reloadCurrent];
+                    else [self reloadMetadata];
+                }
+            }else [self requestMobileFeed:endpointIndex+1 token:token reset:reset];
+        });
+    }] resume];
+}
+
+- (void)loadDouyinAccountFeedWeb:(BOOL)reset {
  if(self.onlineLoading&&!reset)return;
  if(!reset&&(self.douyinEnd||self.douyinRetryAfter.timeIntervalSinceNow>0))return;
  if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;}
