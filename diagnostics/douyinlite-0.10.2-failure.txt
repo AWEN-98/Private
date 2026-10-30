@@ -1,0 +1,6 @@
+DouyinLite 0.10.2 build failure
+Commit: 9954d39037cce906a092cd8a5c65770c9d7955f7
+Run: 41019604233
+Workflow logs: https://github.com/AWEN-98/Private/actions/runs/41019604233
+
+No compiler log. Failure occurred during runner setup or dependency installation.
