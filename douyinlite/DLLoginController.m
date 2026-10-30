@@ -1,4 +1,5 @@
 #import "DLAccountSession.h"
+#import "DLRemoteBrowserController.h"
 #import <CoreImage/CoreImage.h>
 #import <math.h>
 
@@ -36,7 +37,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  self.status=[[UILabel alloc]initWithFrame:CGRectMake(20,253,w-40,70)];self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:self.status];
  self.refresh=[self button:@"生成 / 刷新二维码" action:@selector(startLogin) frame:CGRectMake(20,330,w-40,38) parent:scroll];
  [self button:@"已确认登录，检查账号" action:@selector(verify) frame:CGRectMake(20,370,w-40,36) parent:scroll];
- [self button:@"打开官方页面完成登录或验证" action:@selector(openWebsite) frame:CGRectMake(20,409,w-40,36) parent:scroll];
+ [self button:@"云端 Chrome 登录 / 官方网页" action:@selector(openWebsite) frame:CGRectMake(20,409,w-40,36) parent:scroll];
  [self button:@"退出账号并清除本机会话" action:@selector(logout) frame:CGRectMake(20,450,w-40,36) parent:scroll];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
@@ -102,7 +103,20 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  [self suspend];self.status.text=@"正在校验账号会话…";NSUInteger generation=self.generation;
  [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=message;if(ok){self.token=nil;self.qr.image=nil;}else [self resume];}];
 }
-- (void)openWebsite{[self suspend];DLBrowserController *b=[[DLBrowserController alloc]initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];[self presentViewController:b animated:YES completion:nil];}
+- (void)openWebsite{
+ [self suspend];
+ NSString *endpoint=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
+ NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
+ NSURL *url=[NSURL URLWithString:endpoint];
+ UIViewController *browser=nil;
+ if([url.scheme isEqualToString:@"https"]&&[url.path hasSuffix:@"/api/feed"]&&url.host.length&&key.length){
+   browser=[[DLRemoteBrowserController alloc]initWithFeedURL:url apiKey:key];
+ }else{
+   browser=[[DLBrowserController alloc]initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
+   self.status.text=@"未配置云端 Chrome，内置旧版网页可能不兼容。可先返回视频来源菜单配置 DouyinBridge。";
+ }
+ [self presentViewController:browser animated:YES completion:nil];
+}
 - (void)logout{
  UIAlertController *a=[UIAlertController alertControllerWithTitle:@"退出抖音账号" message:@"将清除这台设备保存的抖音会话。" preferredStyle:UIAlertControllerStyleAlert];
  [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
