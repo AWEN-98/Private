@@ -28,7 +28,7 @@ checks={
  "No unsupported comments control": "action:@selector(openComments)" not in view,
  "Local favorites use bookmark": 'DLStyleIcon(self.likeButton,@"bookmark"' in s,
  "No obsolete corner controls": "top.tag=100;" in view and "action:@selector(addVideo)" not in view and "action:@selector(openMenu)" not in s,
- "Minimal three tabs": 'NSArray *names=@[@"首页",@"收藏",@"我的"]' in view,
+ "Compact four tabs": 'NSArray *names=@[@"首页",@"直播",@"收藏",@"我的"]' in view,
  "Stale saved session automatically requests QR": "if(ok){self.token=nil;self.qr.image=nil;}else [self startLogin];" in qr,
  "Logout starts fresh QR request": "已退出账号，正在重新申请二维码" in qr and "[self startLogin]" in qr,
  "No cloud login shortcut": 'action:@selector(openWebsite)' not in qr,
