@@ -245,3 +245,47 @@ def test_media_proxy_preserves_range_and_referer(monkeypatch):
     assert response.headers["content-range"] == "bytes 0-3/100"
     assert captured[0].headers["range"] == "bytes=0-3"
     assert captured[0].headers["referer"] == "https://www.douyin.com/"
+
+
+
+def test_real_public_card_fallback_when_feed_json_missing():
+    import asyncio
+    import json
+    from app import BrowserFeed, playable_url
+    item_id = "7234567890123456789"
+    official = "https://www.iesdouyin.com/share/video/" + item_id + "/"
+    data = {"loaderData": {"video_x/page": {"videoInfoRes": {"item_list": [{
+        "desc": "Public card", "video": {"play_addr_h264": {
+            "url_list": ["https://v26-web.douyinvod.com/card.mp4"]}}
+    }]}}}}
+    class Result:
+        status = 200
+        async def body(self):
+            return ("window._ROUTER_DATA=" + json.dumps(data)).encode()
+    class API:
+        def __init__(self):
+            self.visits = []
+        async def get(self, url, **kwargs):
+            self.visits.append(url)
+            return Result()
+    class Locator:
+        async def evaluate_all(self, js):
+            return ["https://www.douyin.com/video/" + item_id]
+    class Page:
+        url = "https://www.douyin.com/"
+        def locator(self, css):
+            assert css == "a[href]"
+            return Locator()
+    class Context:
+        request = API()
+    feed = BrowserFeed()
+    feed.page = Page()
+    feed.context = Context()
+    count = asyncio.run(feed.discover_public_cards())
+    assert count == 1
+    assert feed.items[0]["url"].endswith("/card.mp4")
+    assert feed.status == "ready"
+    assert feed.context.request.visits == [official]
+    assert asyncio.run(feed.discover_public_cards()) == 0
+    assert playable_url({"is_h265": True,
+                         "play_addr": {"url_list": ["https://v26-web.douyinvod.com/hevc.mp4"]}}) is None
