@@ -224,7 +224,7 @@ def test_media_proxy_preserves_range_and_referer(monkeypatch):
     captured = []
     def upstream(request):
         captured.append(request)
-        return httpx.Response(206, content=b"vide",
+        return httpx.Response(206, stream=httpx.ByteStream(b"vide"),
                               headers={"content-type": "video/mp4",
                                        "content-range": "bytes 0-3/100",
                                        "accept-ranges": "bytes"})
