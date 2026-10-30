@@ -45,7 +45,7 @@ static BOOL PDPeerOnWiFi(NSString *peer) {
         if(!it->ifa_addr||!it->ifa_netmask ||
            it->ifa_addr->sa_family!=AF_INET ||
            it->ifa_netmask->sa_family!=AF_INET ||
-           strcmp(it->ifa_name,"en0")!=0)continue;
+           ![[NSString stringWithUTF8String:it->ifa_name] isEqualToString:@"en0"])continue;
         uint32_t local=((struct sockaddr_in *)it->ifa_addr)->sin_addr.s_addr;
         uint32_t mask=((struct sockaddr_in *)it->ifa_netmask)->sin_addr.s_addr;
         if(mask && local!=remote.s_addr &&
