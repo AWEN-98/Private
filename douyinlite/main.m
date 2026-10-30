@@ -893,6 +893,60 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }] resume];
 }
 
+// Best-effort public trending-video fallback, only real returned video objects.
+// It does not impersonate personalized recommendation results.
+- (void)loadAnonymousHotVideos:(NSUInteger)token {
+    NSURL *url=[NSURL URLWithString:@"https://www.iesdouyin.com/web/api/v2/hotsearch/aweme/"];
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+    [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [req setValue:@"https://www.iesdouyin.com/" forHTTPHeaderField:@"Referer"];
+    [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
+    self.message.text=@"正在尝试公开视频热榜…";
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        id raw=(!error && data.length>0 && data.length<3500000)?
+            [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSDictionary *root=[raw isKindOfClass:NSDictionary.class]?raw:@{};
+        NSArray *list=[root[@"aweme_list"] isKindOfClass:NSArray.class]?root[@"aweme_list"]:@[];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(token!=self.onlineRequestID)return;
+            NSUInteger count=0;
+            NSMutableSet *known=[NSMutableSet set];
+            for(NSDictionary *entry in self.onlineVideos){
+                NSString *identity=DLText(entry[@"id"]);
+                if(!identity.length)identity=DLText(entry[@"url"]);
+                if(identity.length)[known addObject:identity];
+            }
+            for(id object in list){
+                if(![object isKindOfClass:NSDictionary.class])continue;
+                NSDictionary *entry=object;
+                NSString *address=DLPublicPlaybackURL(entry);
+                NSString *vid=DLText(entry[@"aweme_id"]);
+                if(!vid.length)vid=DLText(entry[@"id"]);
+                NSString *identity=vid.length?vid:address;
+                if(!address.length||[known containsObject:identity])continue;
+                [known addObject:identity];
+                NSDictionary *author=[entry[@"author"] isKindOfClass:NSDictionary.class]?entry[@"author"]:@{};
+                NSString *title=DLText(entry[@"desc"]);
+                if(!title.length)title=@"抖音热门视频";
+                [self.onlineVideos addObject:@{@"id":vid,@"url":address,@"title":title,
+                    @"author":DLText(author[@"nickname"]),@"source":@"douyin-hot"}];
+                if(++count>=30)break;
+            }
+            self.onlineLoading=NO;self.onlinePaging=NO;
+            if(count>0){
+                self.onlineError=nil;
+                self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
+                self.douyinEnd=YES; // static ranking has no pagination
+            }else{
+                self.onlineError=@"推荐和热门视频接口暂未返回可播放内容。\n当前网络可能需要访问验证。可以稍后刷新或在「我的」尝试扫码登录。";
+                self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
+            }
+            if(self.onlineMode && !self.presentedViewController)[self reloadCurrent];
+        });
+    }] resume];
+}
+
 - (void)loadDouyinAccountFeedWeb:(BOOL)reset {
     // Preload visitor cookies from the public home page, no account required.
     if(!self.guestPrimed && !DLAccountSession.shared.hasSession){
@@ -912,7 +966,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  NSUInteger token=++self.onlineRequestID;
  NSString *signError=nil;
  NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset error:&signError];
- if(!request){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;[self reloadCurrent];return;}
+ if(!request){
+  self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;
+  if(!self.onlineVideos.count)[self loadAnonymousHotVideos:token];
+  else [self reloadCurrent];
+  return;
+ }
  if(reset){self.message.text=DLAccountSession.shared.hasSession?@"正在加载账号推荐…":@"正在加载游客视频…";[self.loadingIndicator startAnimating];}
  [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *root,NSString *problem){
   if(token!=self.onlineRequestID)return;
@@ -944,6 +1003,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    NSString *reason=problem;
    if(!reason.length){NSString *code=DLText(root[@"status_code"]);if(!code.length)code=DLText(body[@"status_code"]);reason=code.length&&![code isEqualToString:@"0"]?[NSString stringWithFormat:@"内容接口返回状态 %@。",code]:@"未返回新的兼容视频，可能需要账号登录或网页验证。";}
    self.onlineError=[reason stringByAppendingString:@"\n当前网络暂未返回视频列表。可以稍后刷新，扫码登录为可选操作。"];
+   if(!self.onlineVideos.count){[self loadAnonymousHotVideos:token];return;}
    if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
   if(self.onlineMode && !self.presentedViewController){if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
@@ -1274,7 +1334,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":@"推荐");
+    BOOL hot=self.onlineMode && visible.count>0 &&
+        [DLText(visible[0][@"source"]) isEqualToString:@"douyin-hot"];
+    self.topText.text=self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":(hot?@"热门":@"推荐"));
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
