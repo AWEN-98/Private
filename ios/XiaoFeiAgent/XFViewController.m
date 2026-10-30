@@ -34,6 +34,15 @@ static BOOL XFIsAlibabaASRHost(NSString *host) {
         [h isEqualToString:@"dashscope-intl.aliyuncs.com"] ||
         [h hasSuffix:@".maas.aliyuncs.com"];
 }
+static BOOL XFUsesDashScopeAudioASR(NSDictionary *profile) {
+    NSString *name=[profile[@"model"] lowercaseString]?:@"";
+    NSURL *chat=[NSURL URLWithString:profile[@"chat_endpoint"]?:@""];
+    BOOL type=[name containsString:@"qwen-audio-3.1-asr-flash"] ||
+        [name containsString:@"qwen-audio-3.0-asr-flash"] ||
+        [name containsString:@"fun-asr-flash"];
+    return type && ![name containsString:@"filetrans"] &&
+        XFIsAlibabaASRHost(chat.host);
+}
 static NSURL *XFQwenASRURL(NSDictionary *profile) {
     // A custom STT endpoint is explicitly configured for the selected provider.
     NSString *overridden=profile[@"stt_override"];
@@ -1393,7 +1402,8 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             }
             // Qwen3-ASR-Flash accepts WAV input. Keep AAC for the multipart
             // providers that already work in the existing client.
-            BOOL isQwen=XFUsesQwen3ASR(p) && !XFUsesOpenRouterSTT(p);
+            BOOL isQwen=(XFUsesQwen3ASR(p) && !XFUsesOpenRouterSTT(p)) ||
+                XFUsesDashScopeAudioASR(p);
             NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:
                 isQwen?@"xf-recording.wav":@"xf-recording.m4a"];
             NSDictionary *settings=isQwen?
@@ -1435,8 +1445,8 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     NSDictionary *p=[self profileFor:@"stt"];
     if(!p){if(wasVoice)[self voiceError:@"没有语音识别模型"];return;}
     NSString *modelName=p[@"model"]?:@"未知";
-    if([[modelName lowercaseString] containsString:@"qwen3-asr-flash-filetrans"]){
-        NSString *reason=@"千问 Filetrans 需要异步任务接口；请改选 qwen3-asr-flash。";
+    if([[modelName lowercaseString] containsString:@"filetrans"]){
+        NSString *reason=@"该 Filetrans 模型只支持异步转写任务。请改选无 filetrans 后缀的实时短录音 ASR 模型。";
         [XFDiagnostics record:@"STT 模型协议" code:0 detail:reason];
         self.status.text=reason;
         if(wasVoice)[self voiceError:reason];
@@ -1457,6 +1467,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     if(!req){if(wasVoice)[self voiceError:@"请检查语音识别 API 配置"];return;}
     BOOL openRouter=XFUsesOpenRouterSTT(p);
     BOOL qwen=XFUsesQwen3ASR(p) && !openRouter;
+    BOOL dashAudio=XFUsesDashScopeAudioASR(p) && !openRouter;
     if(qwen){
         // Chat Completions is the documented interface for Qwen3-ASR-Flash.
         // Don't send a multipart POST to /audio/transcriptions (HTTP 404).
@@ -1481,6 +1492,31 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             ]}],@"stream":@NO,@"asr_options":@{@"enable_itn":@NO}};
         req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    } else if(dashAudio){
+        // New Qwen-Audio ASR and Fun-ASR flash use DashScope multimodal-generation.
+        // They require input.messages and parameters.format, not a multipart upload.
+        NSURL *chat=[NSURL URLWithString:p[@"chat_endpoint"]];
+        NSString *override=p[@"stt_override"];
+        NSString *target=(override.length?override:
+            [NSString stringWithFormat:@"https://%@/api/v1/services/aigc/multimodal-generation/generation",chat.host?:@""]);
+        NSURL *url=[NSURL URLWithString:target];
+        if(![[url.scheme lowercaseString] isEqualToString:@"https"] || !url.host.length){
+            if(wasVoice)[self voiceError:@"阿里云音频模型接口配置不正确"];
+            else self.status.text=@"阿里云音频模型接口无效";
+            return;
+        }
+        [req setURL:url];
+        NSString *format=[[[self.recorder.url pathExtension] lowercaseString] isEqualToString:@"wav"]?@"wav":@"m4a";
+        NSString *mime=[format isEqualToString:@"wav"]?@"audio/wav":@"audio/mp4";
+        NSString *uri=[NSString stringWithFormat:@"data:%@;base64,%@",mime,[audio base64EncodedStringWithOptions:0]];
+        NSDictionary *payload=@{@"model":modelName,
+            @"input":@{@"messages":@[@{@"role":@"user",@"content":@[
+                @{@"type":@"input_audio",@"input_audio":@{@"data":uri}}
+            ]}]},
+            @"parameters":@{@"format":format,@"sample_rate":@"16000"}};
+        req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        [req setValue:@"disable" forHTTPHeaderField:@"X-DashScope-SSE"];
     } else if(openRouter){
         // OpenRouter's official transcription endpoint requires raw Base64 + format.
         // Do not send a data URI and do not use a chat-completion audio envelope.
@@ -1548,7 +1584,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             if(!reason.length)reason=[NSString stringWithFormat:@"STT 请求失败。%@",shape];
             if(reason.length>170)reason=[reason substringToIndex:170];
             NSString *detail=[NSString stringWithFormat:@"服务：%@；模型：%@；HTTP %ld；路径：%@；协议：%@",
-                p[@"provider"]?:@"API",modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":(openRouter?@"OpenRouter JSON":@"multipart STT")];
+                p[@"provider"]?:@"API",modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":(dashAudio?@"DashScope Audio JSON":(openRouter?@"OpenRouter JSON":@"multipart STT"))];
             [XFDiagnostics record:@"STT 请求检查" code:code detail:detail];
             NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
             self.status.text=notice;
