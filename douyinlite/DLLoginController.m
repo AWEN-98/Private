@@ -33,7 +33,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  self.status=[[UILabel alloc]initWithFrame:CGRectMake(20,253,w-40,70)];self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:self.status];
  self.refresh=[self button:@"生成 / 刷新二维码" action:@selector(startLogin) frame:CGRectMake(20,330,w-40,38) parent:scroll];
  [self button:@"已确认登录，检查账号" action:@selector(verify) frame:CGRectMake(20,370,w-40,36) parent:scroll];
-  [self button:@"退出账号" action:@selector(logout) frame:CGRectMake(20,409,w-40,36) parent:scroll];
+  [self button:@"退出并重新扫码" action:@selector(logout) frame:CGRectMake(20,409,w-40,36) parent:scroll];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
  if(DLAccountSession.shared.hasSession){self.status.text=@"本机保存了账号会话，正在检查…";[self verify];}else [self startLogin];
@@ -96,12 +96,12 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 }
 - (void)verify{
  [self suspend];self.status.text=@"正在校验账号会话…";NSUInteger generation=self.generation;
- [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=message;if(ok){self.token=nil;self.qr.image=nil;}else [self resume];}];
+ [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=message;if(ok){self.token=nil;self.qr.image=nil;}else [self startLogin];}];
 }
 - (void)logout{
  UIAlertController *a=[UIAlertController alertControllerWithTitle:@"退出抖音账号" message:@"将清除这台设备保存的抖音会话。" preferredStyle:UIAlertControllerStyleAlert];
  [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
- [a addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self suspend];self.token=nil;self.qr.image=nil;[DLAccountSession.shared logout];self.status.text=@"已退出账号。";}]];[self presentViewController:a animated:YES completion:nil];
+ [a addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self suspend];self.token=nil;self.qr.image=nil;[DLAccountSession.shared logout];self.status.text=@"已退出账号，正在重新申请二维码…";[self startLogin];}]];[self presentViewController:a animated:YES completion:nil];
 }
 - (void)dealloc{[self.pollTimer invalidate];[[NSNotificationCenter defaultCenter] removeObserver:self];}
 @end
