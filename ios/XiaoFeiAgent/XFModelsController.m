@@ -644,10 +644,19 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *endpoint=XFEndpoint(account,capability);
     NSString *legacy=account[@"legacy_endpoint"];
     if(legacy.length && [account[@"models"] count]==1)endpoint=legacy;
+    NSString *midLower=[modelId lowercaseString];
+    BOOL imageInput=XFHas(model[@"input_modalities"],@"image") ||
+        [model[@"supports_image_in"] boolValue] ||
+        [XFKind(model) isEqualToString:@"图片理解"] ||
+        [midLower containsString:@"gpt-4o"] ||
+        [midLower containsString:@"gpt-4.1"] ||
+        [midLower containsString:@"gpt-5"] ||
+        [midLower containsString:@"gemini"] ||
+        [midLower containsString:@"qwen-vl"];
     return @{@"id":modelId,@"name":model[@"name"]?:modelId,@"model":modelId,
       @"provider":account[@"name"]?:@"API",@"endpoint":endpoint,
       @"chat_endpoint":XFEndpoint(account,@"chat"),@"capability":capability,
-      @"account_id":account[@"id"]};
+      @"supports_image":@(imageInput),@"account_id":account[@"id"]};
 }
 + (NSString *)secretForProfile:(NSDictionary *)profile {
     return XFSecret(profile[@"account_id"]?:profile[@"id"]);
