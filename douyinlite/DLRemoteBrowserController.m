@@ -10,7 +10,10 @@
 @property(nonatomic,strong) NSTimer *pollTimer;
 @property(nonatomic,assign) BOOL frameLoading;
 @property(nonatomic,assign) NSUInteger generation;
-@property(nonatomic,strong) MPMoviePlayerViewController *remotePlayer;
+@property(nonatomic,strong) MPMoviePlayerController *remotePlayer;
+@property(nonatomic,strong) UIView *streamTouchLayer;
+@property(nonatomic,strong) UIButton *streamButton;
+@property(nonatomic,assign) BOOL streamRequestPending;
 @end
 
 @implementation DLRemoteBrowserController
@@ -93,6 +96,7 @@
     UIButton *play=[UIButton buttonWithType:UIButtonTypeSystem];
     play.frame=CGRectMake(width-72,21,65,36);
     play.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
+    self.streamButton=play;
     [play setTitle:@"预览播放" forState:UIControlStateNormal];
     play.titleLabel.font=[UIFont systemFontOfSize:12];
     [play addTarget:self action:@selector(startStream) forControlEvents:UIControlEventTouchUpInside];
@@ -112,7 +116,9 @@
 - (UIView *)viewForZoomingInScrollView:(UIScrollView *)scrollView{return self.frameImage;}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];self.generation++;
+    self.frameLoading=NO;
     [self.pollTimer invalidate];
+    if(self.remotePlayer)return;
     self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:2.0 target:self selector:@selector(refreshFrame) userInfo:nil repeats:YES];
     [self refreshFrame];
 }
@@ -121,9 +127,12 @@
     if(self.remotePlayer)[self stopCloudStream];
     [super viewWillDisappear:animated];
 }
-- (void)closeViewer {[self dismissViewControllerAnimated:YES completion:nil];}
+- (void)closeViewer {
+    if(self.remotePlayer)[self stopCloudStream];
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
 - (void)refreshFrame {
-    if(self.frameLoading)return;
+    if(self.frameLoading || self.remotePlayer)return;
     NSMutableURLRequest *req=[self request:@"frame" method:@"GET" payload:nil];
     if(!req){self.statusText.text=@"请先配置有效的 DouyinBridge 地址";return;}
     self.frameLoading=YES;NSUInteger token=self.generation;
@@ -131,7 +140,7 @@
         NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
         UIImage *image=(http.statusCode==200 && data.length<2000000)?[UIImage imageWithData:data]:nil;
         dispatch_async(dispatch_get_main_queue(),^{
-            if(token!=self.generation)return;
+            if(token!=self.generation){self.frameLoading=NO;return;}
             self.frameLoading=NO;
             if(image){
                 self.frameImage.image=image;
@@ -173,36 +182,95 @@
 - (void)scrollDown {[self sendAction:@"scroll" payload:@{@"dy":@750}];}
 - (void)scrollUp {[self sendAction:@"scroll" payload:@{@"dy":@-750}];}
 - (void)startStream {
+    if(self.remotePlayer){[self stopCloudStream];return;}
+    if(self.streamRequestPending)return;
     NSMutableURLRequest *req=[self request:@"stream/start" method:@"POST" payload:nil];
     if(!req)return;
-    self.statusText.text=@"正在准备云端视频画面（暂不含声音）…";
+    self.streamRequestPending=YES;
+    self.statusText.text=@"正在准备云端播放，请检查服务器连接…";
     NSUInteger token=self.generation;
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
-        NSDictionary *body=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
-        NSString *streamURL=[body isKindOfClass:[NSDictionary class]]?body[@"url"]:nil;
+        id parsed=data.length?[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSDictionary *body=[parsed isKindOfClass:[NSDictionary class]]?(NSDictionary *)parsed:nil;
+        NSString *urlText=[body[@"url"] isKindOfClass:[NSString class]]?body[@"url"]:nil;
+        NSString *detail=[body[@"detail"] isKindOfClass:[NSString class]]?body[@"detail"]:nil;
+        BOOL audio=[body[@"audio"] respondsToSelector:@selector(boolValue)]?[body[@"audio"] boolValue]:NO;
         dispatch_async(dispatch_get_main_queue(), ^{
-            if(token!=self.generation)return;
-            if(![streamURL isKindOfClass:[NSString class]]||![streamURL hasPrefix:@"https://"]){
-                self.statusText.text=error.localizedDescription?:@"云端视频流未就绪，请检查服务器 ffmpeg";
+            self.streamRequestPending=NO;
+            if(token!=self.generation){if(urlText)[self sendStreamStop];return;}
+            NSURL *url=urlText?[NSURL URLWithString:urlText]:nil;
+            NSURL *origin=[NSURL URLWithString:self.feedURLString];
+            if(![[url.scheme lowercaseString] isEqualToString:@"https"] || ![url.host isEqualToString:origin.host]){
+                self.statusText.text=detail?:error.localizedDescription?:@"云端视频流未就绪，请检查 ffmpeg";
                 return;
             }
-            self.remotePlayer=[[MPMoviePlayerViewController alloc]initWithContentURL:[NSURL URLWithString:streamURL]];
-            self.remotePlayer.moviePlayer.controlStyle=MPMovieControlStyleFullscreen;
-            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(streamPlaybackFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:self.remotePlayer.moviePlayer];
-            [self presentMoviePlayerViewControllerAnimated:self.remotePlayer];
-            [self.remotePlayer.moviePlayer play];
+            [self.pollTimer invalidate];self.pollTimer=nil;
+            MPMoviePlayerController *player=[[MPMoviePlayerController alloc]initWithContentURL:url];
+            self.remotePlayer=player;
+            player.controlStyle=MPMovieControlStyleNone;
+            player.scalingMode=MPMovieScalingModeAspectFit;
+            player.shouldAutoplay=YES;
+            player.view.frame=self.scrollView.frame;
+            player.view.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+            [self.view insertSubview:player.view aboveSubview:self.scrollView];
+
+            UIView *touch=[[UIView alloc]initWithFrame:player.view.bounds];
+            touch.backgroundColor=[UIColor clearColor];
+            touch.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+            [player.view addSubview:touch];self.streamTouchLayer=touch;
+            UISwipeGestureRecognizer *up=[[UISwipeGestureRecognizer alloc]initWithTarget:self action:@selector(streamSwiped:)];
+            up.direction=UISwipeGestureRecognizerDirectionUp;[touch addGestureRecognizer:up];
+            UISwipeGestureRecognizer *down=[[UISwipeGestureRecognizer alloc]initWithTarget:self action:@selector(streamSwiped:)];
+            down.direction=UISwipeGestureRecognizerDirectionDown;[touch addGestureRecognizer:down];
+            UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc]initWithTarget:self action:@selector(streamTapped:)];
+            [touch addGestureRecognizer:tap];
+            [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(streamPlaybackFinished:)
+                name:MPMoviePlayerPlaybackDidFinishNotification object:player];
+            [self.streamButton setTitle:@"停止预览" forState:UIControlStateNormal];
+            self.statusText.text=audio?@"云端视频和声音预览，上滑切换":@"云端视频预览（无音频），上滑切换";
+            [player prepareToPlay];[player play];
         });
     }] resume];
 }
-- (void)streamPlaybackFinished:(NSNotification *)notification {
-    [self stopCloudStream];
+- (void)streamSwiped:(UISwipeGestureRecognizer *)gesture {
+    if(gesture.state!=UIGestureRecognizerStateRecognized)return;
+    NSInteger distance=gesture.direction==UISwipeGestureRecognizerDirectionUp?950:-950;
+    [self sendAction:@"scroll" payload:@{@"dy":@(distance)}];
 }
-- (void)stopCloudStream {
+- (void)streamTapped:(UITapGestureRecognizer *)gesture {
+    UIView *view=gesture.view;
+    if(!view)return;
+    CGPoint p=[gesture locationInView:view];
+    CGFloat w=view.bounds.size.width,h=view.bounds.size.height;
+    if(w<=0||h<=0)return;
+    CGFloat videoW=MIN(w,h*1.6),videoH=videoW/1.6;
+    CGFloat offsetX=(w-videoW)/2,offsetY=(h-videoH)/2;
+    if(p.x<offsetX||p.x>offsetX+videoW||p.y<offsetY||p.y>offsetY+videoH)return;
+    CGFloat x=(p.x-offsetX)/videoW*1280.0,y=(p.y-offsetY)/videoH*800.0;
+    [self sendAction:@"tap" payload:@{@"x":@(x),@"y":@(y)}];
+}
+- (void)streamPlaybackFinished:(NSNotification *)notification {
+    if(!self.remotePlayer)return;
+    [self stopCloudStream];
+    self.statusText.text=@"云端预览已经结束，可以重新开始";
+}
+- (void)sendStreamStop {
     NSMutableURLRequest *request=[self request:@"stream/stop" method:@"POST" payload:nil];
     if(request)[[[NSURLSession sharedSession] dataTaskWithRequest:request] resume];
+}
+- (void)stopCloudStream {
+    [self sendStreamStop];
     if(self.remotePlayer){
-        [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.remotePlayer.moviePlayer];
-        self.remotePlayer=nil;
+        [[NSNotificationCenter defaultCenter] removeObserver:self name:MPMoviePlayerPlaybackDidFinishNotification object:self.remotePlayer];
+        [self.remotePlayer stop];
+        [self.streamTouchLayer removeFromSuperview];self.streamTouchLayer=nil;
+        [self.remotePlayer.view removeFromSuperview];self.remotePlayer=nil;
+    }
+    [self.streamButton setTitle:@"预览播放" forState:UIControlStateNormal];
+    if(self.isViewLoaded && self.view.window){
+        [self.pollTimer invalidate];
+        self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:2.0 target:self selector:@selector(refreshFrame) userInfo:nil repeats:YES];
+        [self refreshFrame];
     }
 }
 - (void)dealloc {
