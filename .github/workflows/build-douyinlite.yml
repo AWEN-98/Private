@@ -34,6 +34,7 @@ jobs:
           git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS10.3.sdk
           cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
       - name: Compile and package
+        # V0.10.3: compile remote Chrome viewer and package ARMv7 DEB
         # Retry V0.10.3 package with retained diagnostic output
         run: |
           set -euo pipefail
