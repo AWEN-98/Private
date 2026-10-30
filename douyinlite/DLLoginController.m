@@ -43,14 +43,17 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 - (void)resume{if(self.presentedViewController)return;if(self.token.length&&self.deadline.timeIntervalSinceNow>0&&!self.completing){[self.pollTimer invalidate];self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:2 target:self selector:@selector(poll) userInfo:nil repeats:YES];[self poll];}}
 - (void)viewWillDisappear:(BOOL)animated{[self suspend];[super viewWillDisappear:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];[self resume];}
-- (NSString *)params{return @"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&is_frontier=false&service=https%3A%2F%2Fwww.douyin.com%2F&next=https%3A%2F%2Fwww.douyin.com%2F";}
+- (NSString *)params{return @"aid=6383&language=zh&is_new_login=1&need_logo=false";}
 - (void)startLogin{
  [self suspend];self.token=nil;self.qr.image=nil;self.provider=0;self.scanned=NO;self.completing=NO;self.refresh.enabled=NO;self.status.text=@"正在向抖音申请登录二维码…";
  NSUInteger generation=self.generation;
  [DLAccountSession.shared prepareLogin:^{if(generation==self.generation)[self createQRForGeneration:generation];}];
 }
 - (void)createQRForGeneration:(NSUInteger)generation{
- NSString *base=self.provider==0?@"https://www.douyin.com/passport/web/get_qrcode/?":(self.provider==1?@"https://login.douyin.com/passport/web/get_qrcode/?":@"https://sso.douyin.com/get_qrcode/?");
+ // The QR JSON endpoint is hosted on login.douyin.com. www may redirect to
+ // an HTML SSO login page; keep it only as a bounded secondary attempt.
+ NSString *base=self.provider==0?@"https://login.douyin.com/passport/web/get_qrcode/?":
+    @"https://www.douyin.com/passport/web/get_qrcode/?";
  [DLAccountSession.shared requestJSON:[DLAccountSession.shared webRequest:[base stringByAppendingString:[self params]]] completion:^(NSDictionary *json,NSString *problem){
   if(generation!=self.generation)return;
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
@@ -58,8 +61,10 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
   NSURL *qrURL=[NSURL URLWithString:url];NSString *h=qrURL.host.lowercaseString;BOOL allowed=NO;
   for(NSString *domain in @[@"douyin.com",@"snssdk.com",@"amemv.com",@"iesdouyin.com"])if([h isEqualToString:domain]||[h hasSuffix:[@"." stringByAppendingString:domain]])allowed=YES;
   if(!token.length||!allowed||![qrURL.scheme.lowercaseString isEqualToString:@"https"]){
-   if(self.provider<2){self.provider++;[self createQRForGeneration:generation];return;}
-   self.refresh.enabled=YES;self.status.text=problem?:@"三个官方扫码接口均未返回可用二维码。可能需要现代浏览器完成访问验证。";return;
+   if(self.provider==0){self.provider=1;[self createQRForGeneration:generation];return;}
+   self.refresh.enabled=YES;
+   self.status.text=[NSString stringWithFormat:@"官方扫码接口没有返回二维码数据。%@\n可以继续使用游客模式，稍后重试。",problem?:@"接口可能已变更或要求网页验证。"];
+   return;
   }
   CIFilter *filter=[CIFilter filterWithName:@"CIQRCodeGenerator"];[filter setValue:[url dataUsingEncoding:NSUTF8StringEncoding] forKey:@"inputMessage"];[filter setValue:@"M" forKey:@"inputCorrectionLevel"];
   CIImage *output=filter.outputImage;CIContext *context=[CIContext contextWithOptions:nil];CGImageRef raw=[context createCGImage:output fromRect:output.extent];
@@ -75,10 +80,14 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  if(self.polling||self.completing||!self.token.length)return;
  if(self.deadline.timeIntervalSinceNow<=0){[self suspend];self.qr.image=nil;self.status.text=@"二维码已过期，点击刷新重新获取。";return;}
  self.polling=YES;NSUInteger generation=self.generation;
- NSString *base=self.provider==0?@"https://www.douyin.com/passport/web/check_qrconnect/?":(self.provider==1?@"https://login.douyin.com/passport/web/check_qrconnect/?":@"https://sso.douyin.com/check_qrconnect/?");
- NSString *query=[[self params] stringByAppendingFormat:@"&token=%@",DLFormEncode(self.token)];
+ NSString *base=self.provider==0?@"https://login.douyin.com/passport/web/check_qrconnect/?":
+    @"https://www.douyin.com/passport/web/check_qrconnect/?";
+ NSString *query=[NSString stringWithFormat:@"aid=6383&token=%@",DLFormEncode(self.token)];
  NSMutableURLRequest *r=[DLAccountSession.shared webRequest:[base stringByAppendingString:query]];
- if(self.provider<2){r.HTTPMethod=@"POST";r.HTTPBody=[query dataUsingEncoding:NSUTF8StringEncoding];[r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];}
+ r.HTTPMethod=@"POST";
+ NSString *body=[NSString stringWithFormat:@"need_logo=false&is_frontier=true&token=%@&is_new_login=1&next=https%%3A%%2F%%2Fwww.douyin.com&need_short_url=true",DLFormEncode(self.token)];
+ r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];
+ [r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
  [DLAccountSession.shared requestJSON:r completion:^(NSDictionary *json,NSString *problem){
   if(generation!=self.generation)return;self.polling=NO;
   if(problem){self.status.text=problem;return;}
