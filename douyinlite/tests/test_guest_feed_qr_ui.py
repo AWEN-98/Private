@@ -6,7 +6,7 @@ s=(root/"main.m").read_text(encoding="utf-8")
 qr=(root/"DLLoginController.m").read_text(encoding="utf-8")
 session=(root/"DLAccountSession.m").read_text(encoding="utf-8")
 view=s[s.index("- (void)viewDidLoad {"):s.index("- (void)viewDidLayoutSubviews")]
-menu=s[s.index("- (void)openMenu {"):s.index("- (void)viewWillDisappear:(BOOL)animated")]
+tabs=s[s.index("- (void)tabPressed:"):s.index("- (BOOL)gestureRecognizer:")]
 checks={
  "Guest home loads without session check": "self.onlineMode=YES;self.demoMode=NO;self.index=0;" in view and "[self loadOnlineFeed:YES]" in view,
  "Public mobile feed attempted first": "[self requestMobileFeed:0 token:token reset:reset];" in s,
@@ -17,7 +17,7 @@ checks={
  "Preflight anonymous visitor cookies": "if(!self.guestPrimed && !DLAccountSession.shared.hasSession)" in s,
  "Uses browser-equivalent signed feed": "/aweme/v2/web/module/feed/" in session and "a_bogus" in session,
  "Anonymous attempt does not require QR login": "[DLAccountSession.shared prepareLogin:" in s and "if(!self.guestPrimed" in s,
- "QR login is an optional menu action": "扫码登录抖音" in menu,
+ "My tab opens QR login directly": "else if(tab==2){[self openAccount];}" in tabs,
  "Official QR endpoint": "passport/web/get_qrcode/" in qr,
  "QR polling endpoint": "passport/web/check_qrconnect/" in qr,
  "QR code actually rendered": "CIQRCodeGenerator" in qr,
@@ -27,9 +27,10 @@ checks={
  "No fake doubletap likes": "doubleTapVideo:" not in s,
  "No unsupported comments control": "action:@selector(openComments)" not in view,
  "Local favorites use bookmark": 'DLStyleIcon(self.likeButton,@"bookmark"' in s,
- "No obsolete corner controls": "top.tag=100;" in view and "action:@selector(addVideo)" not in view and "action:@selector(openMenu)" not in view,
+ "No obsolete corner controls": "top.tag=100;" in view and "action:@selector(addVideo)" not in view and "action:@selector(openMenu)" not in s,
  "Minimal three tabs": 'NSArray *names=@[@"首页",@"收藏",@"我的"]' in view,
- "No import in visible menu": "粘贴抖音视频" not in menu,
+ "Stale saved session automatically requests QR": "if(ok){self.token=nil;self.qr.image=nil;}else [self startLogin];" in qr,
+ "Logout starts fresh QR request": "已退出账号，正在重新申请二维码" in qr and "[self startLogin]" in qr,
  "No cloud login shortcut": 'action:@selector(openWebsite)' not in qr,
 }
 for k,v in checks.items():print(("PASS" if v else "FAIL")+": "+k)
