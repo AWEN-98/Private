@@ -85,6 +85,40 @@ static NSString *PDSafeName(NSString *name){
     if(!safe.length || [safe hasPrefix:@"."] || [safe isEqualToString:@".."])return nil;
     return safe;
 }
+// Clean only visible regular files directly inside the PocketDrop inbox.
+// In-progress hidden uploads, symlinks, subdirectories and other data remain.
+static NSArray *PDInboxSnapshot(void){
+    NSString *directory=PDDir();
+    NSArray *names=[[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL];
+    NSMutableArray *items=[NSMutableArray array];
+    for(NSString *name in names){
+        if(![name isKindOfClass:[NSString class]] || !name.length ||
+           [name hasPrefix:@"."] || ![PDSafeName(name) isEqualToString:name])continue;
+        NSString *file=[directory stringByAppendingPathComponent:name];
+        NSDictionary *attrs=[[NSFileManager defaultManager] attributesOfItemAtPath:file error:NULL];
+        if(![attrs.fileType isEqualToString:NSFileTypeRegular])continue;
+        [items addObject:@{@"name":name,@"size":@([attrs fileSize])}];
+    }
+    return items;
+}
+static NSDictionary *PDClearInbox(void){
+    NSArray *items=PDInboxSnapshot();
+    NSUInteger removed=0,failed=0;
+    unsigned long long bytesFreed=0;
+    for(NSDictionary *entry in items){
+        NSString *name=entry[@"name"];
+        NSString *path=[PDDir() stringByAppendingPathComponent:name];
+        NSDictionary *attr=[[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+        if(![attr.fileType isEqualToString:NSFileTypeRegular])continue;
+        NSError *error=nil;
+        if([[NSFileManager defaultManager] removeItemAtPath:path error:&error]){
+            removed++;
+            bytesFreed+=[entry[@"size"] unsignedLongLongValue];
+        }else failed++;
+    }
+    return @{@"removed":@(removed),@"failed":@(failed),@"bytesFreed":@(bytesFreed)};
+}
+
 static BOOL PDSend(int fd,const void *bytes,size_t length){
     const char *p=bytes;
     while(length){
@@ -118,11 +152,11 @@ static NSString *PDHTML(void){
     "<input type='file' id='file'><button onclick='upload()'>上传文件</button><div id='progress'></div></section>"
     "<section><b>② 传文字 / 链接</b><textarea id='text' rows='3' placeholder='复制文字、网址或安装说明'></textarea>"
     "<button onclick='sendText()'>发送到手机剪贴板</button><button onclick='readText()'>读取手机共享文字</button></section>"
-    "<section><b>③ 从手机下载文件</b><button onclick='refresh()'>刷新列表</button><ul id='files'></ul><small>删除按钮需二次确认，只影响 PocketDrop 收件箱。</small></section>"
+    "<section><b>③ 从手机下载文件</b><button onclick='refresh()'>刷新列表</button><button onclick='clearInbox()' style='background:#b43d48'>一键清理</button><ul id='files'></ul><small>仅清理收件箱中的普通文件，二次确认后执行，无法撤销。</small></section>"
     "<p><small>仅用于可信局域网。HTTP 未加密，其他已获准设备能查看本次共享。手机上停止传输即可撤销所有连接。</small></p>"
     "<script>"
-    "async function refresh(){try{let r=await fetch('/api/files',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);"
-    "let data=await r.json();document.getElementById('status').textContent='已连接 · 免配对码';"
+    "let inboxCount=0;async function refresh(){try{let r=await fetch('/api/files',{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);"
+    "let data=await r.json();inboxCount=data.files.length;document.getElementById('status').textContent='已连接 · 免配对码';"
     "document.getElementById('files').innerHTML='';for(let f of data.files){let li=document.createElement('li');let a=document.createElement('a');"
     "a.href='/file?name='+encodeURIComponent(f.name);a.textContent=f.name+' ('+Math.ceil(f.size/1024)+' KB)';"
     "let del=document.createElement('button');del.textContent='删除';del.style.cssText='float:right;background:#8791a8;padding:5px 8px';"
@@ -140,6 +174,11 @@ static NSString *PDHTML(void){
     "async function removeFile(name){if(!confirm('确定删除手机里的 '+name+' 吗？'))return;"
     "try{let r=await fetch('/delete?name='+encodeURIComponent(name),{method:'DELETE'});"
     "if(!r.ok)throw new Error('HTTP '+r.status);refresh()}catch(e){alert('删除失败：'+e.message)}}"
+    "async function clearInbox(){if(!inboxCount)return alert('收件箱已经是空的');"
+    "if(!confirm('清理手机 PocketDrop 收件箱的 '+inboxCount+' 个文件？此操作不可撤销。'))return;"
+    "try{let r=await fetch('/api/files',{method:'DELETE'});if(!r.ok)throw new Error('HTTP '+r.status);"
+    "let data=await r.json();alert('已清理 '+data.removed+' 个文件'+(data.failed?'，失败 '+data.failed+' 个':''));await refresh()}"
+    "catch(e){alert('清理失败：'+e.message)}}"
     "async function ping(){if(document.hidden)return;try{let r=await fetch('/ping',{cache:'no-store'});"
     "document.getElementById('status').textContent=r.ok?'已连接 · 保持在线':('连接已失效 '+r.status)}"
     "catch(e){document.getElementById('status').textContent='已断开，请确认手机保持前台'}}"
@@ -173,15 +212,34 @@ static NSString *PDHTML(void){
     dispatch_async(dispatch_get_main_queue(),^{self.state.text=message;});
 }
 - (void)reloadFiles{
-    NSArray *list=[[NSFileManager defaultManager] contentsOfDirectoryAtPath:PDDir() error:NULL];
     NSMutableArray *files=[NSMutableArray array];
-    for(NSString *name in list)if(![name hasPrefix:@"."]){
-        NSString *path=[PDDir() stringByAppendingPathComponent:name];
-        BOOL isDirectory=NO;
-        if([[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDirectory]&&!isDirectory)[files addObject:name];
-    }
+    for(NSDictionary *entry in PDInboxSnapshot())[files addObject:entry[@"name"]];
     [files sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
     self.items=files;[self.table reloadData];
+}
+- (void)clearInbox {
+    NSArray *items=PDInboxSnapshot();
+    if(items.count==0){self.state.text=@"收件箱已经是空的";return;}
+    unsigned long long total=0;
+    for(NSDictionary *item in items)total+=[item[@"size"] unsignedLongLongValue];
+    NSString *detail=[NSString stringWithFormat:@"将永久删除 PocketDrop 收件箱中的 %lu 个文件（约 %.1f MB）。\n不会清除剪贴板、其他目录及正在上传的临时文件。此操作无法撤销。",
+        (unsigned long)items.count,(double)total/(1024.0*1024.0)];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"确认一键清理？"
+        message:detail preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"清理文件" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
+        self.state.text=@"正在清理收件箱…";
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT,0),^{
+            NSDictionary *report=PDClearInbox();
+            dispatch_async(dispatch_get_main_queue(),^{
+                [self reloadFiles];
+                self.state.text=[NSString stringWithFormat:@"已清理 %@ 个文件，释放约 %.1f MB%@",
+                    report[@"removed"],[report[@"bytesFreed"] doubleValue]/(1024.0*1024.0),
+                    [report[@"failed"] integerValue]>0?[NSString stringWithFormat:@"，失败 %@ 个",report[@"failed"]]:@""];
+            });
+        });
+    }]];
+    [self.root presentViewController:alert animated:YES completion:nil];
 }
 - (void)sendFile:(int)client name:(NSString *)name {
     NSString *safe=PDSafeName(name);
@@ -321,14 +379,15 @@ static NSString *PDHTML(void){
             if(success)dispatch_async(dispatch_get_main_queue(),^{[self reloadFiles];});
             close(client);return;
         }
+        if([method isEqualToString:@"DELETE"] && [base isEqualToString:@"/api/files"]){
+            NSDictionary *report=PDClearInbox();
+            NSData *json=[NSJSONSerialization dataWithJSONObject:report options:0 error:NULL];
+            PDReply(client,200,@"application/json; charset=utf-8",json);
+            dispatch_async(dispatch_get_main_queue(),^{[self reloadFiles];});
+            close(client);return;
+        }
         if([method isEqualToString:@"GET"] && [base isEqualToString:@"/api/files"]){
-            NSMutableArray *files=[NSMutableArray array];
-            NSArray *all=[[NSFileManager defaultManager] contentsOfDirectoryAtPath:PDDir() error:NULL];
-            for(NSString *name in all){
-                if([name hasPrefix:@"."])continue;
-                NSDictionary *attr=[[NSFileManager defaultManager] attributesOfItemAtPath:[PDDir() stringByAppendingPathComponent:name] error:NULL];
-                if([attr.fileType isEqualToString:NSFileTypeRegular]) [files addObject:@{@"name":name,@"size":@([attr fileSize])}];
-            }
+            NSArray *files=PDInboxSnapshot();
             NSData *json=[NSJSONSerialization dataWithJSONObject:@{@"files":files} options:0 error:NULL];
             PDReply(client,200,@"application/json; charset=utf-8",json);close(client);return;
         }
@@ -508,7 +567,8 @@ static NSString *PDHTML(void){
     self.textBox.font=[UIFont systemFontOfSize:14];[scroll addSubview:self.textBox];
     [self button:@"读取剪贴板" frame:CGRectMake(15,378,133,37) action:@selector(shareClipboard) on:scroll];
     [self button:@"复制文字" frame:CGRectMake(157,378,113,37) action:@selector(copyReceived) on:scroll];
-    [self label:@"传输文件" frame:CGRectMake(15,431,w-106,25) font:[UIFont boldSystemFontOfSize:15] on:scroll];
+    [self label:@"传输文件" frame:CGRectMake(15,431,w-167,25) font:[UIFont boldSystemFontOfSize:15] on:scroll];
+    [self button:@"清理" frame:CGRectMake(w-151,427,60,34) action:@selector(clearInbox) on:scroll];
     [self button:@"刷新" frame:CGRectMake(w-88,427,72,34) action:@selector(reloadFiles) on:scroll];
     self.table=[[UITableView alloc] initWithFrame:CGRectMake(15,460,w-30,190) style:UITableViewStylePlain];
     self.table.layer.cornerRadius=8;self.table.dataSource=self;self.table.delegate=self;self.table.rowHeight=47;
