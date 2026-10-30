@@ -95,6 +95,29 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  NSMutableURLRequest *r=[self webRequest:[@"https://www.douyin.com/aweme/v2/web/module/feed/?" stringByAppendingString:query]];r.HTTPMethod=@"POST";r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];[r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
  if(websign){[r setValue:uifid forHTTPHeaderField:@"uifid"];[r setValue:websign forHTTPHeaderField:@"x-secsdk-web-signature"];[r setValue:stamp forHTTPHeaderField:@"x-secsdk-web-expire"];}return r;
 }
+- (NSMutableURLRequest *)searchRequestForKeyword:(NSString *)keyword offset:(NSInteger)offset error:(NSString **)error {
+ if(!self.signer){
+  NSString *path=[NSBundle.mainBundle pathForResource:@"DLSigner" ofType:@"js"];
+  NSString *source=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;
+  if(source.length){self.signer=[JSContext new];[self.signer evaluateScript:source];}
+ }
+ if(!self.signer||self.signer.exception){if(error)*error=@"搜索签名组件暂不可用";return nil;}
+ NSString *word=[keyword stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+ if(!word.length||word.length>48){if(error)*error=@"请输入不超过48个字的关键词";return nil;}
+ NSString *query=[NSString stringWithFormat:@"search_channel=aweme_general&enable_history=1&keyword=%@&search_source=tab_search&query_correct_type=1&is_filter_search=0&offset=%ld&count=12&need_filter_settings=1&list_type=multi&device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&cookie_enabled=true&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Windows&os_version=10",
+     DLFormEncode(word),(long)MAX(0,offset)];
+ NSString *webid=[self cookieValue:@"webid"];if(webid.length)query=[query stringByAppendingFormat:@"&webid=%@",DLFormEncode(webid)];
+ NSString *token=[self cookieValue:@"msToken"];if(token.length)query=[query stringByAppendingFormat:@"&msToken=%@",DLFormEncode(token)];
+ self.signer.exception=nil;
+ JSValue *fn=self.signer[@"DLSigner"][@"sign"];
+ JSValue *value=[fn callWithArguments:@[query,@"",DLWebUserAgent(),@(floor(NSDate.date.timeIntervalSince1970*1000))]];
+ NSString *signature=value.isString?value.toString:nil;
+ if(self.signer.exception||!signature.length){if(error)*error=@"搜索请求签名失败";return nil;}
+ NSString *full=[NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/general/search/single/?%@&a_bogus=%@",query,DLFormEncode(signature)];
+ NSMutableURLRequest *request=[self webRequest:full];
+ [request setValue:[@"https://www.douyin.com/search/" stringByAppendingString:DLFormEncode(word)] forHTTPHeaderField:@"Referer"];
+ return request;
+}
 - (void)requestJSON:(NSURLRequest *)request completion:(void (^)(NSDictionary *,NSString *))completion{
  if(!request){completion(nil,@"请求地址无效");return;}
  NSUInteger generation=self.sessionGeneration;
