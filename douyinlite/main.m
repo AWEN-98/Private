@@ -691,6 +691,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.fullscreenMode=!self.fullscreenMode;
     self.topBar.hidden=self.fullscreenMode;
     self.bottomHidden=self.fullscreenMode;
+    [[UIDevice currentDevice] setValue:@(self.fullscreenMode?UIInterfaceOrientationLandscapeRight:UIInterfaceOrientationPortrait) forKey:@"orientation"];
     [UIViewController attemptRotationToDeviceOrientation];
     ((AVPlayerLayer *)self.surface.layer).videoGravity=self.fullscreenMode?
         AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;
