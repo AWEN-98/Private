@@ -192,7 +192,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.speechSynth=[[AVSpeechSynthesizer alloc] init];
     self.speechSynth.delegate=self;
     CGFloat w=self.view.bounds.size.width;
-    self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,66)];
+    self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,20,w,66)];
     self.headerBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.headerBar.backgroundColor=[UIColor whiteColor];
     [self.view addSubview:self.headerBar];
@@ -204,7 +204,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     XFLineButton *historyIcon=[[XFLineButton alloc] initWithSymbol:@"history"];
     self.sessionsButton=historyIcon;
     self.sessionsButton.frame=CGRectMake(12,5,44,38);
-    historyIcon.symbolColor=XFInk();
+    historyIcon.symbolColor=XFAccent();
     self.sessionsButton.backgroundColor=XFCanvas();
     self.sessionsButton.layer.cornerRadius=12;
     self.sessionsButton.accessibilityLabel=@"历史对话";
@@ -278,7 +278,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 
     self.message=[[UITextView alloc] initWithFrame:CGRectZero];
     self.message.scrollEnabled=YES;
-    self.message.backgroundColor=XFCanvas();
+    self.message.backgroundColor=XFPaper();
     self.message.textColor=[self ink];
     self.message.font=[UIFont systemFontOfSize:15];
     self.message.layer.cornerRadius=15;
@@ -305,8 +305,8 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.footerBar addSubview:self.sendButton];
     XFLineButton *addIcon=[[XFLineButton alloc] initWithSymbol:@"plus"];
     self.composerAttachButton=addIcon;
-    addIcon.symbolColor=XFInk();
-    self.composerAttachButton.backgroundColor=XFCanvas();
+    addIcon.symbolColor=XFAccent();
+    self.composerAttachButton.backgroundColor=XFAccentPale();
     self.composerAttachButton.layer.cornerRadius=13;
     [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
         forControlEvents:UIControlEventTouchUpInside];
@@ -421,19 +421,22 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
     if(h<1 || w<1)return;
     self.keyboardOffset=MAX(0,MIN(height,h));
+    CGFloat offsetY=[self.view convertPoint:CGPointZero toView:nil].y;
+    CGFloat statusInset=[UIApplication sharedApplication].statusBarHidden?0:MAX(0,MIN(20,20-offsetY));
+    self.headerBar.frame=CGRectMake(0,statusInset,w,66);
     BOOL typing=self.keyboardOffset>1;
     // Leave a small gap above the Chinese predictive-word bar.
     CGFloat availableBottom=MAX(0,h-self.keyboardOffset-(typing?5:0));
     self.headerBar.hidden=typing;
     // Image actions remain visible with the keyboard; text paste lives in the + menu.
     self.pasteButton.hidden=YES;
-    CGFloat top=typing?0:66;
+    CGFloat top=typing?statusInset:statusInset+66;
     BOOL hasImage=self.pendingImage!=nil;
     CGFloat footerHeight=typing?MIN(hasImage?102:58,availableBottom):(hasImage?115:62);
     CGFloat footerY=MAX(0,availableBottom-footerHeight);
     self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
-    self.recordingBadge.frame=CGRectMake(12,typing?4:72,w-24,28);
+    self.recordingBadge.frame=CGRectMake(12,typing?statusInset+4:statusInset+72,w-24,28);
     if(typing){
         CGFloat margin=8,gap=6,attachW=38,generateW=38,sendW=53;
         CGFloat inputW=MAX(80,w-2*margin-3*gap-attachW-generateW-sendW);

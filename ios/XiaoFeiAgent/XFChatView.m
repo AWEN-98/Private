@@ -113,7 +113,7 @@
 - (XFChatBubble *)makeBubble:(NSString *)text user:(BOOL)user notice:(BOOL)notice imageName:(NSString *)imageName {
     XFChatBubble *bubble=[[XFChatBubble alloc] initWithFrame:CGRectZero];
     bubble.user=user;bubble.notice=notice;
-    bubble.backgroundColor=notice?XFAccentPale():(user?XFInk():XFPaper());
+    bubble.backgroundColor=notice?XFAccentPale():(user?XFAccent():XFPaper());
     bubble.layer.cornerRadius=15;
     bubble.layer.borderWidth=notice?0:0.7;
     bubble.layer.borderColor=XFLine().CGColor;
