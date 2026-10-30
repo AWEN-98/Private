@@ -47,7 +47,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 - (void)resume{if(self.presentedViewController)return;if(self.token.length&&self.deadline.timeIntervalSinceNow>0&&!self.completing){[self.pollTimer invalidate];self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:2 target:self selector:@selector(poll) userInfo:nil repeats:YES];[self poll];}}
 - (void)viewWillDisappear:(BOOL)animated{[self suspend];[super viewWillDisappear:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];[self resume];}
-- (NSString *)params{return @"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&is_frontier=0&service=https%3A%2F%2Fwww.douyin.com%2F&next=https%3A%2F%2Fwww.douyin.com%2F";}
+- (NSString *)params{return @"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&is_frontier=true&service=https%3A%2F%2Fwww.douyin.com%2F&next=https%3A%2F%2Fwww.douyin.com%2F";}
 - (void)startLogin{
  [self suspend];self.token=nil;self.qr.image=nil;self.provider=0;self.scanned=NO;self.completing=NO;self.refresh.enabled=NO;self.status.text=@"正在向抖音申请登录二维码…";
  NSUInteger generation=self.generation;
