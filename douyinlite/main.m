@@ -1294,40 +1294,72 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.liveLoading=YES;
     NSUInteger generation=++self.liveGeneration;
     self.message.text=@"正在获取直播间…";
-    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:
-        [NSURL URLWithString:@"https://webcast.amemv.com/webcast/ranklist/hot/?aid=6383&app_name=douyin_web"]
+    [self loadLiveListAtStage:0 generation:generation];
+}
+- (void)loadLiveListAtStage:(NSInteger)stage generation:(NSUInteger)generation {
+    // Try the browser live-square entry, then the older hot ranking source.
+    // These public endpoints can be restricted without a current web session.
+    NSArray *urls=@[
+        @"https://live.douyin.com/webcast/feed/?aid=6383&app_name=douyin_web&device_platform=web&count=12",
+        @"https://webcast.amemv.com/webcast/ranklist/hot/?aid=6383&app_name=douyin_web"
+    ];
+    if(stage>=(NSInteger)urls.count){
+        self.liveLoading=NO;
+        if(generation!=self.liveGeneration||!self.liveMode)return;
+        if(!self.liveVideos.count)
+            self.message.text=@"抖音直播广场暂未返回可播放直播。点击右上角搜索，可输入官方直播间链接或编号。";
+        return;
+    }
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:urls[stage]]
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
-    [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [req setValue:@"https://live.douyin.com/" forHTTPHeaderField:@"Referer"];
+    [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
-        id value=(!error&&data.length>0&&data.length<3500000)?
+        id raw=(!error&&data.length>0&&data.length<3500000)?
             [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
-        NSDictionary *json=[value isKindOfClass:NSDictionary.class]?value:@{};
-        NSDictionary *payload=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
-        NSArray *ranks=[payload[@"ranks"] isKindOfClass:NSArray.class]?payload[@"ranks"]:@[];
+        NSDictionary *root=[raw isKindOfClass:NSDictionary.class]?raw:@{};
+        id payload=root[@"data"];
+        id ranks=nil;
+        if([payload isKindOfClass:NSDictionary.class]){
+            for(NSString *key in @[@"ranks",@"data",@"room_list",@"rooms",@"feed",@"list"]){
+                if([payload[key] isKindOfClass:NSArray.class]){ranks=payload[key];break;}
+            }
+        }
+        if(!ranks&&[payload isKindOfClass:NSArray.class])ranks=payload;
+        if(!ranks&&[root[@"room_list"] isKindOfClass:NSArray.class])ranks=root[@"room_list"];
         dispatch_async(dispatch_get_main_queue(),^{
             if(generation!=self.liveGeneration)return;
-            self.liveLoading=NO;
-            if(!self.liveMode)return;
+            if(!self.liveMode){self.liveLoading=NO;return;}
+            NSArray *items=[ranks isKindOfClass:NSArray.class]?ranks:@[];
             NSMutableSet *seen=[NSMutableSet set];
             NSUInteger started=0;
-            for(id obj in ranks){
+            for(id obj in items){
                 if(![obj isKindOfClass:NSDictionary.class])continue;
                 NSDictionary *row=obj;
-                NSDictionary *room=[row[@"room"] isKindOfClass:NSDictionary.class]?row[@"room"]:@{};
-                NSDictionary *owner=[row[@"user"] isKindOfClass:NSDictionary.class]?row[@"user"]:@{};
-                NSString *rid=DLText(room[@"id"]);
-                if(!rid.length)rid=DLText(room[@"id_str"]);
+                NSDictionary *item=[row[@"data"] isKindOfClass:NSDictionary.class]?row[@"data"]:row;
+                NSDictionary *room=[item[@"room"] isKindOfClass:NSDictionary.class]?item[@"room"]:item;
+                NSDictionary *owner=[item[@"user"] isKindOfClass:NSDictionary.class]?item[@"user"]:
+                    ([room[@"owner"] isKindOfClass:NSDictionary.class]?room[@"owner"]:@{});
+                NSString *rid=DLText(room[@"id_str"]);
+                if(!rid.length)rid=DLText(room[@"id"]);
+                if(!rid.length)rid=DLText(room[@"room_id"]);
                 if(!rid.length||[seen containsObject:rid])continue;
+                NSString *status=DLText(room[@"status"]);
+                if(status.length&&![status isEqualToString:@"2"])continue;
                 [seen addObject:rid];
                 NSString *title=DLText(room[@"title"]);
                 if(!title.length)title=@"抖音直播";
-                NSString *name=DLText(owner[@"nickname"]);
-                // Resolve each room to an actual playable HLS stream.
-                [self resolveLiveRoomID:rid title:title author:name stage:0 generation:generation];
+                [self resolveLiveRoomID:rid title:title author:DLText(owner[@"nickname"])
+                    stage:0 generation:generation];
                 if(++started>=12)break;
             }
-            if(!started)self.message.text=@"当前直播榜单未返回直播间，可点右上角搜索图标输入官方直播间链接。";
-            else self.message.text=@"正在连接直播流…";
+            if(started){
+                self.liveLoading=NO;
+                self.message.text=@"正在连接直播流…";
+            }else{
+                [self loadLiveListAtStage:stage+1 generation:generation];
+            }
         });
     }] resume];
 }
