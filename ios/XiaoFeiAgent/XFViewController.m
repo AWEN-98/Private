@@ -386,6 +386,13 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // If the user deleted the currently open conversation in History,
+    // select another valid session instead of writing to a missing ID.
+    if(self.conversationID.length && ![XFChatStore conversationForID:self.conversationID]){
+        NSArray *all=[XFChatStore conversations];
+        NSString *cid=all.count?all[0][@"id"]:[XFChatStore createConversation];
+        [self loadConversation:cid];
+    }
     [self refreshStatus];
 }
 - (void)refreshStatus {
@@ -537,6 +544,10 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)historyTapped {
+    if(self.isWorking || self.isRecording){
+        [self showAlert:@"当前任务进行中" detail:@"请先完成或停止当前请求，再切换会话。"];
+        return;
+    }
     [self.message resignFirstResponder];
     XFHistoryController *controller=[[XFHistoryController alloc] initWithStyle:UITableViewStylePlain];
     controller.onChoose=^(NSString *cid){[self loadConversation:cid];};
