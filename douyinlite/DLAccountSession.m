@@ -41,7 +41,7 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  for(NSHTTPCookie *c in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]])if([c.name isEqualToString:name])return c.value;
  return @"";
 }
-- (BOOL)hasSession{return [self cookieValue:@"sessionid"].length||[self cookieValue:@"sessionid_ss"].length;}
+- (BOOL)hasSession{return [self cookieValue:@"sessionid"].length||[self cookieValue:@"sessionid_ss"].length||[self cookieValue:@"sid_tt"].length;}
 - (BOOL)saveSession{
  NSMutableArray *rows=[NSMutableArray array];for(NSHTTPCookie *c in NSHTTPCookieStorage.sharedHTTPCookieStorage.cookies){
   NSString *domain=[c.domain hasPrefix:@"."]?[c.domain substringFromIndex:1]:c.domain;
@@ -113,7 +113,9 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  [self requestJSON:[self webRequest:@"https://www.douyin.com/passport/web/account/info/?aid=6383&account_sdk_source=web"] completion:^(NSDictionary *json,NSString *problem){
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
   NSString *uid=DLString(data[@"user_id"]);if(!uid.length)uid=DLString(data[@"uid"]);if(!uid.length)uid=DLString(data[@"user_id_str"]);
-  BOOL ok=!problem&&[DLString(json[@"message"]) isEqualToString:@"success"]&&uid.length&&![uid isEqualToString:@"0"];
+  NSString *code=DLString(json[@"status_code"]);NSString *message=[DLString(json[@"message"]) lowercaseString];
+  BOOL apiSuccess=([code isEqualToString:@"0"]||[message isEqualToString:@"success"]);
+  BOOL ok=!problem&&apiSuccess&&uid.length&&![uid isEqualToString:@"0"];
   if(ok){BOOL saved=[self saveSession];[[NSNotificationCenter defaultCenter] postNotificationName:DLAccountDidChangeNotification object:self];completion(YES,saved?@"账号已验证，登录会话已保存。":@"账号已验证，但会话保存失败，重开应用后可能需要重新登录。");}
   else completion(NO,problem?:([self hasSession]?@"已取得会话，但账号接口尚未确认登录有效。":@"尚未取得有效登录会话，请重新扫码。"));
  }];
