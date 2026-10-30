@@ -17,7 +17,7 @@ checks={
  "Preflight anonymous visitor cookies": "if(!self.guestPrimed && !DLAccountSession.shared.hasSession)" in s,
  "Uses browser-equivalent signed feed": "/aweme/v2/web/module/feed/" in session and "a_bogus" in session,
  "Anonymous attempt does not require QR login": "[DLAccountSession.shared prepareLogin:" in s and "if(!self.guestPrimed" in s,
- "My tab opens QR login directly": "else if(tab==2){[self openAccount];}" in tabs,
+ "My tab opens QR login directly": "else if(tab==3)[self openAccount];" in tabs,
  "Official QR endpoint": "passport/web/get_qrcode/" in qr,
  "QR polling endpoint": "passport/web/check_qrconnect/" in qr,
  "QR code actually rendered": "CIQRCodeGenerator" in qr,
