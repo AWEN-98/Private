@@ -334,12 +334,12 @@ static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
     return result;
 }
 static NSString *DLLiveHLS(id node,NSInteger depth){
-    if(depth>7||!node||node==(id)[NSNull null])return nil;
+    if(depth>12||!node||node==(id)[NSNull null])return nil;
     if([node isKindOfClass:NSString.class]){
         NSString *v=(NSString *)node;
         if(([v hasPrefix:@"https://"]||[v hasPrefix:@"http://"]) &&
            [v rangeOfString:@".m3u8" options:NSCaseInsensitiveSearch].location!=NSNotFound)return v;
-        if([v hasPrefix:@"{"] && v.length<200000){
+        if(([v hasPrefix:@"{"]||[v hasPrefix:@"["]) && v.length<200000){
             id decoded=[NSJSONSerialization JSONObjectWithData:[v dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
             if(decoded)return DLLiveHLS(decoded,depth+1);
         }
@@ -356,6 +356,8 @@ static NSString *DLLiveHLS(id node,NSInteger depth){
         id v=d[key];if(!v)continue;
         NSString *h=DLLiveHLS(v,depth+1);if(h.length)return h;
     }
+    // Stream metadata often arrives below dynamic quality/codec keys.
+    for(id key in d){NSString *h=DLLiveHLS(d[key],depth+1);if(h.length)return h;}
     return nil;
 }
 static NSString *DLLiveID(NSString *text){
