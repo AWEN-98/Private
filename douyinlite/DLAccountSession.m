@@ -105,7 +105,17 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
   if(error)problem=[NSString stringWithFormat:@"网络连接失败（%ld），请检查网络、系统日期和证书。",(long)error.code];
   else if(http.statusCode<200||http.statusCode>=300)problem=[NSString stringWithFormat:@"服务器返回 HTTP %ld%@",(long)http.statusCode,http.statusCode==403?@"，会话或请求被拒绝。":@""];
   else if(!data.length)problem=@"服务器返回空内容，当前会话未获准访问。";
-  else if(!json)problem=@"服务器返回了网页或验证页面，未取得接口数据。";
+  else if(!json){
+   NSString *mime=response.MIMEType.lowercaseString?:@"unknown";
+   NSString *host=request.URL.host.lowercaseString?:@"unknown";
+   NSString *route=request.URL.path?:@"/";
+   if(route.length>80)route=[route substringToIndex:80];
+   NSString *html=data.length?[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,MIN((NSUInteger)2000,data.length))] encoding:NSUTF8StringEncoding]:@"";
+   BOOL challenge=[html rangeOfString:@"captcha" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
+      [html rangeOfString:@"验证码"].location!=NSNotFound ||
+      [html rangeOfString:@"verify" options:NSCaseInsensitiveSearch].location!=NSNotFound;
+   problem=[NSString stringWithFormat:@"接口被返回网页%@（HTTP %ld，%@，%@%@）。请尝试刷新二维码；若多次发生，当前旧设备可能需要现代浏览器登录。",challenge?@" / 验证页":@"",(long)http.statusCode,mime,host,route];
+  }
   dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.sessionGeneration){completion(nil,@"账号会话已切换，请重新操作。");return;}completion(problem?nil:json,problem);});
  }] resume];
 }
