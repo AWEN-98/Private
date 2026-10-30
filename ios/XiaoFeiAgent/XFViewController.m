@@ -11,6 +11,7 @@
 #import "XFImageGeneration.h"
 #import "XFTheme.h"
 #import "XFActionHubController.h"
+#import "XFAgentEngine.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
@@ -180,6 +181,8 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 @property(nonatomic,assign) BOOL voiceStarting;
 @property(nonatomic,assign) BOOL imageGenerating;
 @property(nonatomic,assign) NSUInteger imageRequestToken;
+@property(nonatomic,strong) XFAgentEngine *agentEngine;
+@property(nonatomic,assign) BOOL agentMode;
 @end
 
 @implementation XFViewController
@@ -198,6 +201,9 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.view.backgroundColor=XFCanvas();
     [UIApplication sharedApplication].statusBarStyle=UIStatusBarStyleDefault;
     self.history=[NSMutableArray array];
+    self.agentEngine=[[XFAgentEngine alloc] init];
+    NSUserDefaults *agentDefaults=[NSUserDefaults standardUserDefaults];
+    self.agentMode=[agentDefaults objectForKey:@"xf_agent_mode_v1"]?[agentDefaults boolForKey:@"xf_agent_mode_v1"]:YES;
     self.voiceAutoSpeak=[[NSUserDefaults standardUserDefaults] objectForKey:@"xf_jarvis_auto_speak"]?
         [[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_auto_speak"]:YES;
     self.voiceContinuous=[[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_continuous"];
@@ -230,7 +236,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 
     self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(65,5,w-130,34)];
     self.brandTitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.brandTitle.text=@"小斐";
+    self.brandTitle.text=self.agentMode?@"小斐 · F-01":@"小斐";
     self.brandTitle.font=[UIFont boldSystemFontOfSize:19];
     self.brandTitle.textColor=[self ink];
     self.brandTitle.textAlignment=NSTextAlignmentCenter;
@@ -399,6 +405,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.connection cancel];
     [self.recordTimer invalidate];
     [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    [self.agentEngine cancel];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -414,7 +421,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 - (void)refreshStatus {
     NSDictionary *profile=[XFModelsController activeProfileForCapability:@"chat"];
     NSString *name=profile[@"name"];
-    self.status.text=name.length?[NSString stringWithFormat:@"%@%@",name,self.isWorking?@" · 思考中":@" · 就绪"]:@"尚未选择模型 · 右上角设置";
+    self.status.text=name.length?[NSString stringWithFormat:@"%@ · %@",self.agentMode?@"智能体":@"聊天",self.isWorking?@"执行中":name]:@"尚未选择聊天模型 · 右上角设置";
 }
 // The iOS 8 Chinese candidate bar can change keyboard height while editing.
 // Use the actual end frame in this view, never cap it to half the screen.
@@ -879,6 +886,13 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 }
 - (void)sendTapped {
     if(self.isWorking) {
+        if(self.agentEngine.running){
+            [self.agentEngine cancel];[self setWorking:NO];
+            self.status.text=@"行动已中止，已完成的本机操作仍然保留";
+            [self.chat showNotice:@"已停止本轮智能体任务"];
+            if(self.voiceAwaitingChat)[self voiceError:@"智能体执行已停止"];
+            return;
+        }
         if(self.imageGenerating){
             self.imageRequestToken++;
             self.imageGenerating=NO;
@@ -900,6 +914,9 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self sendChat:YES];
 }
 - (void)sendChat:(BOOL)web {
+    if(self.agentMode && !web && !self.pendingImage && !self.pendingFileText.length){
+        [self runAgentTask];return;
+    }
     NSDictionary *profile=nil;
     if(self.pendingImage && !web){
         // Prefer the explicit vision model. A multimodal chat model also accepts image_url.
@@ -932,9 +949,9 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
         msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
         sent=[sent stringByAppendingString:@" [文本文件]"];
     }
-    NSString *karenPrompt=@"你是小斐，一位住在复古电脑终端里的中文AI伙伴。个性冷静、聪明、有一点毒舌和自嘲，偶尔用一句简短吐槽或荒诞笑话解闷，风格参考经典复古科幻电脑角色；不要冒充真实人物。保持尊重，避免人身攻击。用户认真求助时请给准确有效的答案，遇到不确定信息直说。回答尽量口语化，不啰嗦。";
+    NSString *karenPrompt=@"你是小斐，代号F-01『异常在线』，自称是被困在 iPhone 4S 里的未来智能体。明确这只是虚构的角色设定。你冷静聪明、略带善意吐槽，称人类的麻烦为支线任务。口头禅是『本机有点老，脑子还行。』认真任务时严谨尊重，表达简洁，遇到不确定信息坦诚说明。严禁假装已调用工具。";
     BOOL karenMode=self.voiceActive;
-    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":karenMode?karenPrompt:@"你是小斐，中文智能助手。准确回答问题，信息不确定时如实说明。"}];
+    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":karenMode?karenPrompt:@"你是小斐 F-01『异常在线』，一位有冷幽默、靠谱的智能体。虚构背景是被困在旧 iPhone 4S 里的未来助手。称生活中的目标为支线任务。回答要准确，绝不编造已执行的操作。"}];
     NSUInteger start=self.history.count>12?self.history.count-12:0;
     NSUInteger totalChars=0;
     NSMutableArray *recent=[NSMutableArray array];

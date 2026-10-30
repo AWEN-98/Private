@@ -1,6 +1,7 @@
 #import "XFAgentEngine.h"
 #import "XFModelsController.h"
 #import <math.h>
+#import <stdlib.h>
 
 static NSString *XFAText(id value,NSUInteger length) {
     if(![value isKindOfClass:[NSString class]])return @"";

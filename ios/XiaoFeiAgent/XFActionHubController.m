@@ -44,7 +44,7 @@
 @implementation XFActionHubController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title=@"工具箱";
+    self.title=@"小斐 · 行动中心";
     XFApplyNavigation(self.navigationController);
     self.tableView.backgroundColor=XFCanvas();
     self.tableView.separatorColor=XFLine();
@@ -55,6 +55,10 @@
         style:UIBarButtonItemStylePlain target:self action:@selector(close)];
     // title, short explanatory copy, action key, and vector icon.
     self.sections=@[
+      @{@"title":@"智能体 F-01",@"items":@[
+        @[@"切换智能体模式",@"默认开启；自动规划并调用本机工具",@"agenttoggle",@"models"],
+        @[@"行动档案",@"查看已保存的待办与记事",@"agentboard",@"history"],
+        @[@"认识小斐",@"了解 F-01 的个性、能力与边界",@"agentintro",@"spark"]]},
       @{@"title":@"快速开始",@"items":@[
         @[@"选择图片",@"从相册发图或让模型识图",@"photo",@"image"],
         @[@"语音助手",@"打开小斐语音终端",@"jarvis",@"mic"],
