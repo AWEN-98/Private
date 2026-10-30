@@ -205,7 +205,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.sessionsButton=historyIcon;
     self.sessionsButton.frame=CGRectMake(12,5,44,38);
     historyIcon.symbolColor=XFAccent();
-    self.sessionsButton.backgroundColor=XFCanvas();
+    self.sessionsButton.backgroundColor=[UIColor clearColor];
     self.sessionsButton.layer.cornerRadius=12;
     self.sessionsButton.accessibilityLabel=@"历史对话";
     [self.sessionsButton addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -225,7 +225,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.modelsButton.frame=CGRectMake(w-56,5,44,38);
     self.modelsButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
     modelIcon.symbolColor=XFAccent();
-    self.modelsButton.backgroundColor=XFAccentPale();
+    self.modelsButton.backgroundColor=[UIColor clearColor];
     self.modelsButton.layer.cornerRadius=12;
     self.modelsButton.accessibilityLabel=@"模型库与 API 管理";
     [self.modelsButton addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
@@ -295,18 +295,17 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.messagePlaceholder.userInteractionEnabled=NO;
     [self.footerBar addSubview:self.messagePlaceholder];
 
-    self.sendButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    [self.sendButton setTitle:@"发送" forState:UIControlStateNormal];
-    self.sendButton.titleLabel.font=[UIFont boldSystemFontOfSize:14];
-    [self styleNavigationButton:self.sendButton filled:YES];
-    self.sendButton.layer.cornerRadius=13;
+    XFLineButton *sendIcon=[[XFLineButton alloc] initWithSymbol:@"send"];
+    self.sendButton=sendIcon;
+    sendIcon.symbolColor=XFAccent();
+    self.sendButton.backgroundColor=[UIColor clearColor];
     self.sendButton.accessibilityLabel=@"发送消息或停止当前生成";
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.footerBar addSubview:self.sendButton];
     XFLineButton *addIcon=[[XFLineButton alloc] initWithSymbol:@"plus"];
     self.composerAttachButton=addIcon;
     addIcon.symbolColor=XFAccent();
-    self.composerAttachButton.backgroundColor=XFAccentPale();
+    self.composerAttachButton.backgroundColor=[UIColor clearColor];
     self.composerAttachButton.layer.cornerRadius=13;
     [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
         forControlEvents:UIControlEventTouchUpInside];
@@ -316,7 +315,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     XFLineButton *imageIcon=[[XFLineButton alloc] initWithSymbol:@"image"];
     self.composerGenerateButton=imageIcon;
     imageIcon.symbolColor=XFAccent();
-    self.composerGenerateButton.backgroundColor=XFAccentPale();
+    self.composerGenerateButton.backgroundColor=[UIColor clearColor];
     self.composerGenerateButton.layer.cornerRadius=13;
     [self.composerGenerateButton addTarget:self action:@selector(generateImage)
         forControlEvents:UIControlEventTouchUpInside];
@@ -590,7 +589,10 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 }
 - (void)setWorking:(BOOL)value {
     self.isWorking=value;
-    [self.sendButton setTitle:value?@"停止":@"发送" forState:UIControlStateNormal];
+    XFLineButton *sendIcon=(XFLineButton *)self.sendButton;
+    sendIcon.symbol=value?@"stop":@"send";
+    sendIcon.symbolColor=value?XFDanger():XFAccent();
+    self.sendButton.accessibilityLabel=value?@"停止当前生成":@"发送消息";
     self.composerGenerateButton.enabled=!value;
     self.composerGenerateButton.alpha=value?.45:1.0;
 }

@@ -17,7 +17,7 @@
 @property(nonatomic,strong) UIScrollView *scroll;
 @property(nonatomic,strong) NSMutableArray *bubbles;
 @property(nonatomic,strong) UILabel *welcomeTitle;
-@property(nonatomic,strong) UILabel *welcomeMark;
+@property(nonatomic,strong) XFLineButton *welcomeMark;
 @property(nonatomic,strong) UIButton *ideaButton;
 @property(nonatomic,strong) UIButton *helpButton;
 @property(nonatomic,strong) UILabel *welcomeSubtitle;
@@ -57,14 +57,10 @@
 - (void)showWelcome {
     [self clearBubbles];
     if(!self.welcomeTitle){
-        UILabel *mark=[[UILabel alloc] init];
-        mark.text=@"斐";
-        mark.textColor=XFAccent();
-        mark.font=[UIFont boldSystemFontOfSize:30];
-        mark.textAlignment=NSTextAlignmentCenter;
-        mark.backgroundColor=XFAccentPale();
-        mark.layer.cornerRadius=26;
-        mark.layer.masksToBounds=YES;
+        XFLineButton *mark=[[XFLineButton alloc] initWithSymbol:@"wave"];
+        mark.symbolColor=XFAccent();
+        mark.backgroundColor=[UIColor clearColor];
+        mark.userInteractionEnabled=NO;
         [self addSubview:mark];
         self.welcomeMark=mark;
         UILabel *title=[[UILabel alloc] init];

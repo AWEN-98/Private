@@ -12,7 +12,7 @@
         self.backgroundColor=XFPaper();
         self.glyph=[[XFLineButton alloc] initWithSymbol:@"plus"];
         self.glyph.symbolColor=XFAccent();
-        self.glyph.backgroundColor=XFAccentPale();
+        self.glyph.backgroundColor=[UIColor clearColor];
         self.glyph.layer.cornerRadius=11;
         self.glyph.userInteractionEnabled=NO;
         [self.contentView addSubview:self.glyph];

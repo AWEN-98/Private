@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small antialiased native icon for iOS 8, stdlib only."""
+"""Transparent, antialiased 4S SpringBoard icon. No nonstdlib dependencies."""
 import math
 import struct
 import zlib
@@ -13,30 +13,19 @@ def icon(size, filename):
     for y in range(size):
         rgba.append(0)
         for x in range(size):
-            # 3x3 supersampling keeps curved vector marks legible at 57px.
-            rr = gg = bb = 0.0
+            hits = 0
             for sy in (0.17, 0.50, 0.83):
                 for sx in (0.17, 0.50, 0.83):
                     u = ((x + sx) / size - .5) * 2
                     v = ((y + sy) / size - .5) * 2
-                    radial = min(1, math.hypot(u, v))
-                    bg = (14 + 12 * radial, 49 - 7 * radial, 39 - 2 * radial)
-                    # A phosphor ring and three uneven bars: XiaoFei's voice identity.
-                    ring = abs(math.hypot(u, v) - .655) < .029
-                    # Small open segment gives the monogram a distinct silhouette.
-                    ring = ring and not (u > .30 and v > .31)
-                    # Rounded vertical sound bars.
+                    ring = abs(math.hypot(u, v) - .68) < .035 and not (u > .32 and v > .32)
                     def bar(cx, half_h):
-                        dx = max(0.0, abs(u-cx)-.070)
+                        dx = max(0.0, abs(u-cx)-.035)
                         dy = max(0.0, abs(v)-half_h)
-                        return math.hypot(dx,dy)<.050
-                    mark = ring or bar(-.29,.12) or bar(0,.29) or bar(.29,.19)
-                    # Glowing dot just outside upper-right voice ring.
-                    spark = math.hypot(u-.61,v+.56)<.055
-                    fg = (232,255,240) if mark else (105,236,170)
-                    color = fg if mark or spark else bg
-                    rr+=color[0];gg+=color[1];bb+=color[2]
-            rgba.extend((round(rr/9),round(gg/9),round(bb/9),255))
+                        return math.hypot(dx,dy)<.043
+                    if ring or bar(-.29,.12) or bar(0,.29) or bar(.29,.19):
+                        hits += 1
+            rgba.extend((74,124,255,round(255*hits/9)))
     def chunk(tag, data):
         return struct.pack(">I",len(data))+tag+data+struct.pack(">I",zlib.crc32(tag+data)&0xffffffff)
     png=(b"\x89PNG\r\n\x1a\n"+

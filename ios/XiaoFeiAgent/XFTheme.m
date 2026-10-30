@@ -15,6 +15,10 @@
     return self;
 }
 - (void)setSymbol:(NSString *)symbol{_symbol=[symbol copy];[self setNeedsDisplay];}
+- (void)setBackgroundColor:(UIColor *)color {
+    // No tinted backgrounds behind any icon-only controls.
+    [super setBackgroundColor:[UIColor clearColor]];
+}
 - (void)setSymbolColor:(UIColor *)symbolColor{_symbolColor=symbolColor;[self setNeedsDisplay];}
 - (void)drawRect:(CGRect)r{
     [super drawRect:r];
@@ -28,12 +32,20 @@
     CGContextSetLineWidth(c,1.85);
     CGContextSetLineCap(c,kCGLineCapRound);
     CGContextSetLineJoin(c,kCGLineJoinRound);
-    CGFloat scale=MIN(r.size.width/24.0,r.size.height/24.0);
+    // Large tap targets, compact 24-point line glyphs.
+    CGFloat scale=MIN(1.0,MIN(r.size.width/24.0,r.size.height/24.0));
     CGContextTranslateCTM(c,(r.size.width-24*scale)/2.0,(r.size.height-24*scale)/2.0);
     CGContextScaleCTM(c,scale,scale);
     if([n isEqualToString:@"plus"]){
         CGContextMoveToPoint(c,12,5);CGContextAddLineToPoint(c,12,19);
         CGContextMoveToPoint(c,5,12);CGContextAddLineToPoint(c,19,12);
+    }else if([n isEqualToString:@"wave"]){
+        CGContextMoveToPoint(c,2,12);CGContextAddLineToPoint(c,6,12);
+        CGContextAddCurveToPoint(c,7,12,7,5,9,5);
+        CGContextAddCurveToPoint(c,11,5,10,19,12,19);
+        CGContextAddCurveToPoint(c,14,19,13,8,15,8);
+        CGContextAddCurveToPoint(c,17,8,16,12,19,12);
+        CGContextAddLineToPoint(c,22,12);
     }else if([n isEqualToString:@"send"]){
         CGContextMoveToPoint(c,4,12);CGContextAddLineToPoint(c,20,4);
         CGContextAddLineToPoint(c,14,20);CGContextAddLineToPoint(c,11,13);
