@@ -80,7 +80,8 @@ jobs:
           test "$(stat -c '%a' /tmp/surf-verify/usr/libexec/surf-update-v2)" = 4755
           # Non-root dpkg-deb -x extracts files as the runner. Inspect the
           # actual tar ownership recorded in the DEB instead.
-          dpkg-deb -c "$deb" | grep -E 'root/root.*Applications/Surf.app/Surf
+          dpkg-deb -c "$deb" | grep 'root/root' | grep -F '/Applications/Surf.app/Surf'
+          dpkg-deb -c "$deb" | grep 'root/root' | grep -F '/usr/libexec/surf-update-v2'
           python3 - <<'PY'
           import plistlib
           p=plistlib.load(open('/tmp/surf-verify/Applications/Surf.app/Info.plist','rb'))
