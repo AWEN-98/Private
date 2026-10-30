@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "DLAccountSession.h"
+#import "DLRemoteBrowserController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <math.h>
 @interface DLBrowserController : UIViewController
@@ -634,6 +635,18 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         }
         [self fetchOnlineCandidates:items index:i+1 token:token before:before];
     }];
+}
+- (void)openCloudChrome {
+    NSString *address=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
+    NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
+    NSURL *url=[NSURL URLWithString:address];
+    if(![url.scheme isEqualToString:@"https"]||![url.path hasSuffix:@"/api/feed"]||!url.host.length||!key.length){
+        [self alert:@"请先连接云端" message:@"在视频来源中选择「连接 DouyinBridge」，填写已部署服务器的 HTTPS /api/feed 地址和密钥，再打开云端 Chrome。"];
+        return;
+    }
+    [self.player pause];
+    DLRemoteBrowserController *viewer=[[DLRemoteBrowserController alloc]initWithFeedURL:url apiKey:key];
+    [self presentViewController:viewer animated:YES completion:nil];
 }
 - (void)checkBridgeLoginStatus {
  NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"];
@@ -1490,6 +1503,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       [self loadOnlineFeed:YES];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"连接 DouyinBridge（云端浏览器）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"云端 Chrome · 登录 / 浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openCloudChrome];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"检查 DouyinBridge 登录状态" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self checkBridgeLoginStatus];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
