@@ -631,6 +631,22 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
         else [self showAlert:@"暂无可复制的回复" detail:@"收到 AI 回复后即可复制。"];
         return;
     }
+    if([name isEqualToString:@"agenttoggle"]) {
+        if(self.isWorking){[self showAlert:@"请先结束当前任务" detail:@"执行期间无法切换模式"];return;}
+        self.agentMode=!self.agentMode;
+        [[NSUserDefaults standardUserDefaults] setBool:self.agentMode forKey:@"xf_agent_mode_v1"];
+        self.brandTitle.text=self.agentMode?@"小斐 · F-01":@"小斐";
+        [self refreshStatus];
+        [self.chat showNotice:self.agentMode?@"F-01 已上线。现在可以交代任务，我会试着调用工具执行。":@"已切换为普通聊天模式。"];
+        return;
+    }
+    if([name isEqualToString:@"agentboard"]) {
+        [self showAlert:@"F-01 · 行动档案" detail:[XFAgentEngine taskBoard]];return;
+    }
+    if([name isEqualToString:@"agentintro"]) {
+        [self.chat showNotice:@"本机有点老，脑子还行。我是 F-01，小斐。生活上的麻烦算支线任务，正事我会认真处理。能保存待办和记事、计算、设置本机提醒、读取经允许的剪贴板，也可以经确认后打开网页。"];
+        return;
+    }
     if([name isEqualToString:@"jarvis"]) {[self openJarvis];return;}
     if([name isEqualToString:@"photo"]) {[self pickImage];return;}
     if([name isEqualToString:@"paste"]) {[self pasteTapped];return;}
@@ -913,6 +929,61 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     if(self.isWorking)return;
     [self sendChat:YES];
 }
+- (void)runAgentTask {
+    if(self.agentEngine.running)return;
+    NSDictionary *profile=[XFModelsController activeProfileForCapability:@"chat"];
+    if(!profile){[self showAlert:@"智能体未就绪" detail:@"先在模型库选择支持文字聊天的模型。"];return;}
+    NSString *task=[self.message.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if(!task.length){self.status.text=@"交给 F-01 一件事，例如：规划今天三件任务并保存待办";return;}
+    if(task.length>6000){[self showAlert:@"任务太长" detail:@"请把任务缩短到 6000 字以内"];return;}
+    self.sendingContent=task;
+    self.lastSubmittedDraft=task;
+    self.message.text=@"";
+    [self textViewDidChange:self.message];
+    [self.message resignFirstResponder];
+    [self appendLine:[NSString stringWithFormat:@"我：%@",task]];
+    [self.chat showNotice:@"F-01 · 已建立行动档案"];
+    NSMutableArray *context=[NSMutableArray array];
+    NSUInteger start=self.history.count>6?self.history.count-6:0;
+    for(NSUInteger i=start;i<self.history.count;i++){
+        NSDictionary *row=self.history[i];
+        NSString *value=[row[@"content"] isKindOfClass:[NSString class]]?row[@"content"]:@"";
+        if(value.length)[context addObject:[NSString stringWithFormat:@"%@：%@",row[@"role"]?:@"user",
+             value.length>350?[value substringToIndex:350]:value]];
+    }
+    [self setWorking:YES];
+    self.status.text=@"F-01 正在执行任务…";
+    __weak XFViewController *weakSelf=self;
+    self.agentEngine.onProgress=^(NSString *progress){
+        XFViewController *owner=weakSelf;if(!owner)return;
+        owner.status.text=progress;
+        [owner.chat showNotice:[@"F-01 · " stringByAppendingString:progress]];
+        if(owner.voiceAwaitingChat)[owner voiceUpdate:@"thinking" message:progress];
+    };
+    self.agentEngine.onApproval=^(NSString *title,NSString *detail,void (^decision)(BOOL)){
+        XFViewController *owner=weakSelf;
+        if(!owner){decision(NO);return;}
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:title message:detail preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"拒绝" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){decision(NO);}]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"允许这一次" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){decision(YES);}]];
+        UIViewController *presenter=owner.voiceActive&&owner.jarvisNavigation?owner.jarvisNavigation:owner;
+        [presenter presentViewController:alert animated:YES completion:nil];
+    };
+    self.agentEngine.onFinished=^(NSString *answer){
+        XFViewController *owner=weakSelf;if(!owner)return;
+        [owner setWorking:NO];
+        [owner.chat addMessage:answer fromUser:NO];
+        [owner addExchange:owner.sendingContent answer:answer];
+        owner.lastSubmittedDraft=nil;
+        owner.status.text=@"F-01 · 本轮任务已归档";
+        if(owner.voiceAwaitingChat){
+            owner.voiceAwaitingChat=NO;
+            [owner voiceReadAnswer:answer];
+        }
+    };
+    [self.agentEngine start:task context:[context componentsJoinedByString:@"\n"] profile:profile];
+}
+
 - (void)sendChat:(BOOL)web {
     if(self.agentMode && !web && !self.pendingImage && !self.pendingFileText.length){
         [self runAgentTask];return;
