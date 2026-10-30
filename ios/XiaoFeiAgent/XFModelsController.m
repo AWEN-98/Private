@@ -220,6 +220,9 @@ static void XFDropAccount(NSString *aid){
 @property(nonatomic,strong) UITextField *baseField;
 @property(nonatomic,strong) UITextField *listField;
 @property(nonatomic,strong) UITextField *keyField;
+@property(nonatomic,strong) UIButton *advancedButton;
+@property(nonatomic,strong) UILabel *advancedNote;
+@property(nonatomic,assign) BOOL showAdvanced;
 @property(nonatomic,copy) void (^onSaved)(NSDictionary *account,NSString *newKey);
 @end
 @implementation XFAPIEditor
@@ -237,28 +240,53 @@ static void XFDropAccount(NSString *aid){
     f.delegate=self;f.returnKeyType=UIReturnKeyDone;[self.scroll addSubview:f];return f;
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"API 服务配置";
+    [super viewDidLoad];self.title=self.account[@"id"]?@"编辑 API 服务":@"连接 API 服务";
     XFStyleNav(self.navigationController);
     self.view.backgroundColor=XFUIBackground();
     self.scroll=[[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:self.scroll];
-    self.titleField=[self fieldAt:10 label:@"服务名称（如 OpenRouter）" value:self.account[@"name"]];
-    self.baseField=[self fieldAt:88 label:@"API Base URL（通常以 /v1 结尾）" value:self.account[@"base"]];
+    self.titleField=[self fieldAt:12 label:@"服务名称" value:self.account[@"name"]];
+    self.baseField=[self fieldAt:90 label:@"接口地址（Base URL）" value:self.account[@"base"]];
     self.baseField.keyboardType=UIKeyboardTypeURL;
-    self.listField=[self fieldAt:166 label:@"模型列表地址（留空自动推导 /models）" value:self.account[@"models_url"]];
-    self.listField.keyboardType=UIKeyboardTypeURL;
-    self.keyField=[self fieldAt:244 label:@"API Key（编辑时留空保持原密钥）" value:nil];
+    self.keyField=[self fieldAt:168 label:self.account[@"id"]?@"API 密钥（留空保留原密钥）":@"API 密钥" value:nil];
     self.keyField.secureTextEntry=YES;
-    UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(14,335,self.view.bounds.size.width-28,96)];
-    hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;hint.numberOfLines=0;
-    hint.font=[UIFont systemFontOfSize:12];hint.textColor=[UIColor grayColor];
-    hint.text=@"一个服务只需要保存一次密钥。保存后会自动读取模型列表。部分厂商不提供标准 /models，可以手动指定模型列表地址或手动添加模型。";
+    self.advancedButton=[UIButton buttonWithType:UIButtonTypeSystem];
+    self.advancedButton.frame=CGRectMake(14,260,self.view.bounds.size.width-28,38);
+    self.advancedButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
+    [self.advancedButton setTitle:@"高级设置  ▾" forState:UIControlStateNormal];
+    [self.advancedButton addTarget:self action:@selector(toggleAdvanced) forControlEvents:UIControlEventTouchUpInside];
+    [self.scroll addSubview:self.advancedButton];
+    self.listField=[self fieldAt:305 label:@"模型列表地址（可留空）" value:self.account[@"models_url"]];
+    self.listField.keyboardType=UIKeyboardTypeURL;
+    self.advancedNote=[[UILabel alloc] initWithFrame:CGRectMake(14,383,self.view.bounds.size.width-28,72)];
+    self.advancedNote.font=[UIFont systemFontOfSize:12];
+    self.advancedNote.textColor=XFUIHint();
+    self.advancedNote.numberOfLines=0;
+    self.advancedNote.text=@"默认自动获取模型列表。无法同步时，可填写服务商提供的 /models 地址，或保存后手动添加模型。";
+    [self.scroll addSubview:self.advancedNote];
+    UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(14,234,self.view.bounds.size.width-28,25)];
+    hint.font=[UIFont systemFontOfSize:11.5];hint.textColor=XFUIHint();
+    hint.text=@"密钥只保存在设备里。保存后可同步模型。";
     [self.scroll addSubview:hint];
-    self.scroll.contentSize=CGSizeMake(self.view.bounds.size.width,480);
+    self.showAdvanced=XFTrim(self.account[@"models_url"]).length>0;
+    [self updateAdvancedLayout];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(save)];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboard:) name:UIKeyboardWillShowNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboardClose) name:UIKeyboardWillHideNotification object:nil];
+}
+- (void)toggleAdvanced {
+    self.showAdvanced=!self.showAdvanced;
+    [self updateAdvancedLayout];
+}
+- (void)updateAdvancedLayout {
+    self.listField.hidden=!self.showAdvanced;
+    self.advancedNote.hidden=!self.showAdvanced;
+    for(UIView *v in self.scroll.subviews){
+        if([v isKindOfClass:[UILabel class]] && [((UILabel *)v).text hasPrefix:@"模型列表地址"])v.hidden=!self.showAdvanced;
+    }
+    [self.advancedButton setTitle:self.showAdvanced?@"高级设置  ▴":@"高级设置  ▾" forState:UIControlStateNormal];
+    self.scroll.contentSize=CGSizeMake(self.view.bounds.size.width,self.showAdvanced?480:315);
 }
 - (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
 - (void)keyboard:(NSNotification *)n {
@@ -286,6 +314,36 @@ static void XFDropAccount(NSString *aid){
 }
 @end
 
+@interface XFAPIPresetPicker : UITableViewController
+@property(nonatomic,strong) NSArray *presets;
+@property(nonatomic,copy) void (^choose)(NSDictionary *preset);
+@end
+@implementation XFAPIPresetPicker
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title=@"选择 API 服务";
+    self.tableView.backgroundColor=XFUIBackground();
+    self.tableView.rowHeight=52;
+    self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
+}
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {return self.presets.count;}
+- (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)index {
+    UITableViewCell *cell=[t dequeueReusableCellWithIdentifier:@"preset"];
+    if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"preset"];
+    NSDictionary *p=self.presets[(NSUInteger)index.row];
+    cell.textLabel.text=p[@"name"];cell.textLabel.font=[UIFont boldSystemFontOfSize:15];
+    cell.detailTextLabel.text=[p[@"base"] isEqualToString:@"https://"]?@"手动输入自定义服务地址":p[@"base"];
+    cell.detailTextLabel.font=[UIFont systemFontOfSize:10.5];
+    cell.detailTextLabel.textColor=XFUIHint();
+    cell.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+- (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)index {
+    [t deselectRowAtIndexPath:index animated:YES];
+    if(self.choose)self.choose(self.presets[(NSUInteger)index.row]);
+}
+@end
+
 @interface XFAPIAccountsController : UITableViewController
 @property(nonatomic,copy) void (^changed)(void);
 @end
@@ -298,34 +356,53 @@ static void XFDropAccount(NSString *aid){
       @{@"name":@"智谱 GLM",@"base":@"https://open.bigmodel.cn/api/paas/v4",@"models_url":@"https://open.bigmodel.cn/api/paas/v4/models"},
       @{@"name":@"MiniMax",@"base":@"https://api.minimax.io/v1",@"models_url":@"https://api.minimax.io/v1/models"},
       @{@"name":@"OpenRouter",@"base":@"https://openrouter.ai/api/v1",@"models_url":@"https://openrouter.ai/api/v1/models"},
+      @{@"name":@"OpenAI",@"base":@"https://api.openai.com/v1",@"models_url":@"https://api.openai.com/v1/models"},
+      @{@"name":@"Groq",@"base":@"https://api.groq.com/openai/v1",@"models_url":@"https://api.groq.com/openai/v1/models"},
       @{@"name":@"自定义 API",@"base":@"https://",@"models_url":@""}
     ];
 }
 - (void)viewDidLoad {
-    [super viewDidLoad];self.title=@"API 服务";
+    [super viewDidLoad];self.title=@"API 管理";
     XFStyleNav(self.navigationController);
     self.tableView.backgroundColor=XFUIBackground();
-    self.tableView.rowHeight=65;
+    self.tableView.rowHeight=64;
     self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.95 alpha:1];
-    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(add)];
+    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"添加" style:UIBarButtonItemStylePlain target:self action:@selector(add)];
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
 }
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {return XFAccounts().count;}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 2;}
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
+    return s==0?XFAccounts().count:1;
+}
+- (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)s {
+    return s==0?@"已连接的服务":@"连接新的服务";
+}
+- (NSString *)tableView:(UITableView *)t titleForFooterInSection:(NSInteger)s {
+    return s==0?@"点按服务可编辑密钥，右侧详情可同步模型或手动添加。":@"一个 API 服务保存一次密钥，之后在模型库按用途选择。";
+}
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c=[t dequeueReusableCellWithIdentifier:@"account"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"account"];
-    NSDictionary *a=XFAccounts()[ip.row];
     c.backgroundColor=[UIColor whiteColor];
+    if(ip.section==1){
+        c.textLabel.text=@"+ 添加 API 服务";c.textLabel.textColor=XFUIAccent();
+        c.detailTextLabel.text=@"选择服务商，填写密钥";
+        c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
+        return c;
+    }
+    NSDictionary *a=XFAccounts()[(NSUInteger)ip.row];
+    BOOL keyed=XFSecret(a[@"id"]).length>0;
     c.textLabel.text=a[@"name"];c.textLabel.font=[UIFont boldSystemFontOfSize:15.5];
     c.textLabel.textColor=XFUIText();
-    c.detailTextLabel.text=[NSString stringWithFormat:@"%lu 个可用模型  ·  点击同步与编辑",(unsigned long)[a[@"models"] count]];
+    c.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %lu 个模型",keyed?@"已配置密钥":@"缺少密钥",(unsigned long)[a[@"models"] count]];
     c.detailTextLabel.font=[UIFont systemFontOfSize:12];
-    c.detailTextLabel.textColor=XFUIHint();
-    c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;return c;
+    c.detailTextLabel.textColor=keyed?XFUIHint():[UIColor colorWithRed:.76 green:.32 blue:.25 alpha:1];
+    c.accessoryType=UITableViewCellAccessoryDetailButton;return c;
 }
-- (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip {return YES;}
+- (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip {return ip.section==0;}
 - (void)tableView:(UITableView *)t commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)ip {
     if(style!=UITableViewCellEditingStyleDelete)return;
+    if(ip.section!=0)return;
     NSString *aid=XFAccounts()[ip.row][@"id"];
     UIAlertController *a=[UIAlertController alertControllerWithTitle:@"删除 API 服务？"
        message:@"该服务下保存的模型及密钥会一并删除。" preferredStyle:UIAlertControllerStyleAlert];
@@ -337,7 +414,12 @@ static void XFDropAccount(NSString *aid){
 }
 - (void)tableView:(UITableView *)t didSelectRowAtIndexPath:(NSIndexPath *)ip {
     [t deselectRowAtIndexPath:ip animated:YES];
-    NSDictionary *account=XFAccounts()[ip.row];
+    if(ip.section==1){[self add];return;}
+    [self editor:XFAccounts()[(NSUInteger)ip.row]];
+}
+- (void)tableView:(UITableView *)t accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)ip {
+    if(ip.section!=0)return;
+    NSDictionary *account=XFAccounts()[(NSUInteger)ip.row];
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:account[@"name"]
       message:[NSString stringWithFormat:@"当前保存 %lu 个模型",(unsigned long)[account[@"models"] count]]
       preferredStyle:UIAlertControllerStyleAlert];
@@ -354,15 +436,11 @@ static void XFDropAccount(NSString *aid){
     [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)add {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"添加 API 服务"
-        message:@"只需要添加一次服务，之后自动同步模型库" preferredStyle:UIAlertControllerStyleAlert];
-    for(NSDictionary *preset in [self presets]) {
-        [menu addAction:[UIAlertAction actionWithTitle:preset[@"name"] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self editor:preset];
-        }]];
-    }
-    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:menu animated:YES completion:nil];
+    XFAPIPresetPicker *picker=[[XFAPIPresetPicker alloc] initWithStyle:UITableViewStylePlain];
+    picker.presets=[self presets];
+    __weak XFAPIAccountsController *weakSelf=self;
+    picker.choose=^(NSDictionary *preset){[weakSelf editor:preset];};
+    [self.navigationController pushViewController:picker animated:YES];
 }
 - (void)editor:(NSDictionary *)account {
     XFAPIEditor *editor=[[XFAPIEditor alloc] init];
@@ -401,7 +479,7 @@ static void XFDropAccount(NSString *aid){
     NSDictionary *old=XFAccountForID(a[@"id"]);
     if(old && ![old[@"base"] isEqualToString:a[@"base"]]) [XFModelProbe clearAccount:a[@"id"]];
     XFReplaceAccount(a);
-    [self.navigationController popViewControllerAnimated:YES];
+    [self.navigationController popToViewController:self animated:YES];
     [self.tableView reloadData];if(self.changed)self.changed();
     [self fetchModels:a];
 }
@@ -453,10 +531,10 @@ static void XFDropAccount(NSString *aid){
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:location];
     request.HTTPMethod=@"GET";request.timeoutInterval=35;
     [request setValue:[@"Bearer " stringByAppendingString:secret] forHTTPHeaderField:@"Authorization"];
-    self.title=@"正在获取模型…";
+    self.title=@"正在同步…";
     [NSURLConnection sendAsynchronousRequest:request queue:[NSOperationQueue mainQueue]
       completionHandler:^(NSURLResponse *response,NSData *data,NSError *error) {
-        self.title=@"API 服务";
+        self.title=@"API 管理";
         if(error){[self alert:[NSString stringWithFormat:@"模型同步失败（网络错误 %ld）。旧版 iOS 可能无法连接现代 HTTPS。可手动添加模型。",(long)error.code]];return;}
         NSInteger status=[(NSHTTPURLResponse *)response statusCode];
         if(status<200 || status>=300){[self alert:[NSString stringWithFormat:@"模型接口返回 HTTP %ld。请检查密钥及厂商专用模型列表地址。",(long)status]];return;}
