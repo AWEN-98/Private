@@ -1,9 +1,10 @@
 name: Publish PocketDrop Direct Downloads
 # Verified packages in downloads/ are intentionally tracked
 on:
-  push:
-    paths:
-      - '.github/workflows/publish-pocketdrop-download.yml'
+  workflow_run:
+    workflows: ["Build iOS 8 rootful DEB"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 concurrency:
   group: pocketdrop-direct-download
@@ -13,6 +14,7 @@ permissions:
   actions: read
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -26,27 +28,31 @@ jobs:
           mkdir -p /tmp/verified
           # Reuse the most recent verified ARMv7 build. The package metadata
           # is checked below before it is ever published.
-          RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --branch main --json databaseId,status,conclusion --limit 30 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            RUN_ID="${{ github.event.workflow_run.id }}"
+          else
+            RUN_ID="$(gh run list --workflow "Build iOS 8 rootful DEB" --branch main --json databaseId,status,conclusion --limit 30 | python3 -c 'import json,sys; runs=json.load(sys.stdin); print(next((str(r["databaseId"]) for r in runs if r["status"]=="completed" and r["conclusion"]=="success"), ""))')"
+          fi
           test -n "$RUN_ID"
           gh run download "$RUN_ID" -R AWEN-98/Private -n 'pocketdrop-ios8-deb' -D /tmp/verified
           DEB="$(find /tmp/verified -maxdepth 2 -name '*.deb' -print -quit)"
           test -n "$DEB"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "iphoneos-arm"
-          test "$(dpkg-deb -f "$DEB" Version)" = "0.4.0"
+          test "$(dpkg-deb -f "$DEB" Version)" = "0.4.1"
           ar t "$DEB" | grep -qx data.tar.gz
           mkdir -p downloads
-          cp "$DEB" "downloads/PocketDrop-iOS8-v0.4.0.deb"
-          (cd downloads && zip -q -9 "PocketDrop-iOS8-v0.4.0.zip" "PocketDrop-iOS8-v0.4.0.deb")
-          unzip -t "downloads/PocketDrop-iOS8-v0.4.0.zip"
-          sha256sum "downloads/PocketDrop-iOS8-v0.4.0.deb" "downloads/PocketDrop-iOS8-v0.4.0.zip"
+          cp "$DEB" "downloads/PocketDrop-iOS8-v0.4.1.deb"
+          (cd downloads && zip -q -9 "PocketDrop-iOS8-v0.4.1.zip" "PocketDrop-iOS8-v0.4.1.deb")
+          unzip -t "downloads/PocketDrop-iOS8-v0.4.1.zip"
+          sha256sum "downloads/PocketDrop-iOS8-v0.4.1.deb" "downloads/PocketDrop-iOS8-v0.4.1.zip"
       - name: Commit binary downloads for direct links
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/PocketDrop-iOS8-v0.4.0.deb downloads/PocketDrop-iOS8-v0.4.0.zip
+          git add downloads/PocketDrop-iOS8-v0.4.1.deb downloads/PocketDrop-iOS8-v0.4.1.zip
           if ! git diff --cached --quiet; then
-            git commit -m "release: publish verified PocketDrop 0.4.0 direct download files [skip ci]"
+            git commit -m "release: publish verified PocketDrop 0.4.1 direct download files [skip ci]"
             for attempt in 1 2 3 4 5; do
               git pull --rebase origin main
               if git push origin HEAD:main; then exit 0; fi
