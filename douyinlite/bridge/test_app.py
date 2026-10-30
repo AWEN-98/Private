@@ -88,3 +88,15 @@ def test_remote_browser_coordinates_clamped():
         BrowserTap(x=1281,y=200)
     with pytest.raises(ValidationError):
         BrowserScroll(dy=99999)
+
+
+def test_hls_segment_safety_and_ticket():
+    from streamer import valid_segment, playlist_with_ticket
+    assert valid_segment("chunk000042.ts")
+    assert not valid_segment("../secret.txt")
+    assert not valid_segment("chunk000042.ts/../secret")
+    assert not valid_segment("evil.ts")
+    manifest = "#EXTM3U\\n#EXTINF:2.0,\\nchunk000001.ts\\n#EXTINF:2.0,\\nchunk000002.ts\\n"
+    translated = playlist_with_ticket(manifest, "testtoken")
+    assert "chunk000001.ts?ticket=testtoken" in translated
+    assert "chunk000002.ts?ticket=testtoken" in translated
