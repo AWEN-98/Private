@@ -111,6 +111,7 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
    NSString *route=request.URL.path?:@"/";
    if(route.length>80)route=[route substringToIndex:80];
    NSString *html=data.length?[[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(0,MIN((NSUInteger)2000,data.length))] encoding:NSUTF8StringEncoding]:@"";
+   if(!html)html=@"";
    BOOL challenge=[html rangeOfString:@"captcha" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
       [html rangeOfString:@"验证码"].location!=NSNotFound ||
       [html rangeOfString:@"verify" options:NSCaseInsensitiveSearch].location!=NSNotFound;
