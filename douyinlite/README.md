@@ -1,4 +1,4 @@
-# DouyinLite 0.10.8
+# DouyinLite 0.11.0
 
 Native ARMv7 application for jailbroken iPhone 4S, iOS 8.0 and later.
 
@@ -64,3 +64,10 @@ pair the phone before pressing the new option.
 
 Actual Douyin browser access, account verification and video autoplay depend
 on the website and network; a build test alone does not verify those.
+
+
+## V0.11.0 手机独立版
+
+无需电脑、远程浏览器或自己部署的服务器。右上角加号粘贴官方抖音公开视频链接，软件依次尝试两个官方移动视频接口以及两条官方分享页路径，成功获取的 H.264 视频交给 iOS 原生播放器。
+
+此版本保留本机账号推荐试验功能，并从菜单隐藏需要外部设备或云端服务的操作。没有可靠的匿名首页推荐接口；真实抖音播放是否成功取决于平台对当前网络的访问控制、旧版系统证书及媒体编码，仍需真机测试。
