@@ -1,5 +1,6 @@
 #import "XFCompareController.h"
 #import "XFModelsController.h"
+#import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
 
 @interface XFComparePicker : UITableViewController <UISearchBarDelegate>
@@ -19,6 +20,9 @@
     self.tableView.tableHeaderView=self.search;
     self.tableView.rowHeight=60;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
+    self.tableView.backgroundColor=XFCanvas();
+    self.tableView.separatorColor=XFLine();
+    self.search.searchBarStyle=UISearchBarStyleMinimal;
 }
 - (void)searchBar:(UISearchBar *)bar textDidChange:(NSString *)text {
     if(!text.length){self.filtered=self.all;}
@@ -68,11 +72,12 @@
 @end
 
 @implementation XFCompareController
-- (UIColor *)accent {return [UIColor colorWithRed:.32 green:.38 blue:.79 alpha:1];}
+- (UIColor *)accent {return XFAccent();}
 - (UIButton *)buttonWithTitle:(NSString *)title selector:(SEL)selector {
     UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];
     [b setTitle:title forState:UIControlStateNormal];
-    b.backgroundColor=[UIColor whiteColor];b.layer.cornerRadius=8;
+    XFCard(b,12);
+    [b setTitleColor:XFAccent() forState:UIControlStateNormal];
     b.titleLabel.font=[UIFont systemFontOfSize:13];
     [b addTarget:self action:selector forControlEvents:UIControlEventTouchUpInside];
     [self.scroll addSubview:b];
@@ -81,18 +86,20 @@
 - (UITextView *)textArea:(NSString *)text {
     UITextView *view=[[UITextView alloc] init];
     view.font=[UIFont systemFontOfSize:14];view.text=text;
-    view.backgroundColor=[UIColor whiteColor];view.layer.cornerRadius=8;
+    XFCard(view,12);
+    view.textColor=XFInk();
     [self.scroll addSubview:view];return view;
 }
 - (UILabel *)label:(NSString *)text {
     UILabel *label=[[UILabel alloc] init];
     label.text=text;label.font=[UIFont boldSystemFontOfSize:13];
-    label.textColor=[UIColor colorWithRed:.17 green:.21 blue:.31 alpha:1];
+    label.textColor=XFInk();
     label.numberOfLines=1;[self.scroll addSubview:label];return label;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];self.title=@"双模型对比";
-    self.view.backgroundColor=[UIColor colorWithRed:.96 green:.97 blue:.99 alpha:1];
+    self.view.backgroundColor=XFCanvas();
+    XFApplyNavigation(self.navigationController);
     self.scroll=[[UIScrollView alloc] initWithFrame:self.view.bounds];
     self.scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     self.scroll.alwaysBounceVertical=YES;[self.view addSubview:self.scroll];
@@ -103,7 +110,7 @@
     self.compareButton.backgroundColor=[self accent];
     [self.compareButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.hint=[self label:@"相同问题，两份独立回答；每次可能产生两笔费用"];
-    self.hint.textColor=[UIColor grayColor];self.hint.font=[UIFont systemFontOfSize:11.5];
+    self.hint.textColor=XFSecondary();self.hint.font=[UIFont systemFontOfSize:11.5];
     self.headA=[self label:@"模型 A"];
     self.resultA=[self textArea:@"等待回答…"];self.resultA.editable=NO;
     self.headB=[self label:@"模型 B"];
