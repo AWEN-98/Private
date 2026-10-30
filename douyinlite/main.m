@@ -437,6 +437,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSUInteger searchGeneration;
 @property(nonatomic,assign) NSInteger searchOffset;
 @property(nonatomic,assign) BOOL searchLoading;
+@property(nonatomic,assign) BOOL searchEnd;
 
 @property(nonatomic,strong) NSArray *tabButtons;
 @property(nonatomic,strong) NSArray *tabLabels;
@@ -619,7 +620,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self layoutScreen];
     [self reloadCurrent];
     [self loadOnlineFeed:YES];
+    [self showBottomTemporarily];
 }
+- (BOOL)prefersStatusBarHidden {return self.fullscreenMode;}
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self layoutScreen];}
 - (void)layoutScreen {
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
@@ -636,7 +639,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.fullscreenButton.frame=CGRectMake(w-38,4,36,35);
     self.topText.frame=CGRectMake(24,6,w-105,30);
     self.topText.textAlignment=NSTextAlignmentLeft;
-    self.categoryScroll.hidden=self.favoritesOnly||self.liveMode||self.historyOnly||self.searchMode||self.fullscreenMode;
+    self.categoryScroll.hidden=self.favoritesOnly||self.liveMode||self.historyOnly||self.fullscreenMode||[self.category isEqualToString:@"搜索"];
     self.topText.hidden=!self.categoryScroll.hidden||self.fullscreenMode;
     self.searchButton.hidden=self.fullscreenMode;
     self.fullscreenButton.hidden=self.fullscreenMode;
@@ -672,7 +675,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.progress.frame=CGRectMake(0,h-(self.tabBar.hidden?2:40),w,2);
 }
 - (void)hideBottomAfterDelay {
-    if(self.presentedViewController||self.fullscreenMode)return;
+    if(self.presentedViewController||self.fullscreenMode||self.player.rate<.01f||![self visibleVideos].count)return;
     self.bottomHidden=YES;[self layoutScreen];
 }
 - (void)showBottomTemporarily {
@@ -688,6 +691,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     ((AVPlayerLayer *)self.surface.layer).videoGravity=self.fullscreenMode?
         AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;
     [self layoutScreen];
+    [self setNeedsStatusBarAppearanceUpdate];
     if(!self.fullscreenMode)[self showBottomTemporarily];
 }
 
@@ -1401,6 +1405,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *categories=@[@"推荐",@"热门",@"游戏",@"音乐",@"生活"];
     if(idx<0||idx>=(NSInteger)categories.count)return;
     self.category=categories[idx];
+    self.liveGeneration++;
     self.liveMode=NO;self.historyOnly=NO;self.favoritesOnly=NO;self.demoMode=NO;
     self.searchMode=NO;self.onlineMode=YES;self.index=0;
     self.onlineRequestID++;self.onlineLoading=NO;self.onlinePaging=NO;
@@ -1431,9 +1436,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)searchVideos:(NSString *)keyword reset:(BOOL)reset {
     if(!keyword.length)return;
-    if(self.searchLoading && !reset)return;
+    if(!reset && (self.searchLoading||self.searchEnd))return;
     if(reset){self.searchOffset=0;self.index=0;self.searchResults=@[];}
     self.searchQuery=keyword;self.searchMode=YES;self.liveMode=NO;
+    if(reset)self.searchEnd=NO;
     self.favoritesOnly=NO;self.historyOnly=NO;self.onlineMode=NO;
     self.searchLoading=YES;
     NSUInteger generation=++self.searchGeneration;
@@ -1450,9 +1456,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.searchLoading=NO;
         NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:json;
         NSArray *items=[data[@"data"] isKindOfClass:NSArray.class]?data[@"data"]:@[];
+        if(!items.count&&[json[@"data"] isKindOfClass:NSArray.class])items=json[@"data"];
         if(!items.count&&[data[@"aweme_list"] isKindOfClass:NSArray.class])items=data[@"aweme_list"];
         if(!items.count&&[data[@"search_result"] isKindOfClass:NSArray.class])items=data[@"search_result"];
-        NSMutableArray *results=[reset?[NSMutableArray array]:[self.searchResults mutableCopy] mutableCopy];
+        NSUInteger previousCount=reset?0:self.searchResults.count;
+        NSMutableArray *results=reset?[NSMutableArray array]:[self.searchResults mutableCopy];
         NSMutableSet *seen=[NSMutableSet set];
         for(NSDictionary *prior in results)[seen addObject:DLText(prior[@"id"]).length?DLText(prior[@"id"]):DLText(prior[@"url"])];
         for(id raw in items){
@@ -1473,6 +1481,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         }
         self.searchResults=results;
         if(items.count)self.searchOffset+=items.count;
+        if(!items.count||results.count==previousCount)self.searchEnd=YES;
         if(results.count){self.message.text=@"";[self reloadCurrent];}
         else{
             self.message.text=problem.length?problem:@"搜索未返回可播放视频，可能需要登录或访问验证。";
@@ -1486,16 +1495,19 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSInteger tab=button.tag-200;
     [self showBottomTemporarily];
     if(tab==0){
+        self.searchGeneration++;self.liveGeneration++;
         self.liveMode=NO;self.demoMode=NO;self.searchMode=NO;self.onlineMode=YES;
         self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
         if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
     }else if(tab==1){
+        self.searchGeneration++;
         self.liveMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;
         self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
         if(!self.liveVideos.count)[self loadLiveRanking];
     }else if(tab==2){
+        self.searchGeneration++;self.liveGeneration++;
         self.liveMode=NO;self.onlineMode=NO;self.searchMode=NO;self.demoMode=NO;
         self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
     }else if(tab==3)[self openAccount];
@@ -1622,7 +1634,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.subtitleText.text=@"";
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
-    self.rightRail.hidden=!visible.count;
+    self.rightRail.hidden=self.fullscreenMode||self.liveMode||!visible.count;
     BOOL hot=self.onlineMode && visible.count>0 &&
         [DLText(visible[0][@"source"]) isEqualToString:@"douyin-hot"];
     self.topText.text=self.liveMode?@"直播":(self.searchMode?self.searchQuery:(self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":(hot?@"热门":@"推荐"))));
@@ -1663,7 +1675,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.item];
     [self.player replaceCurrentItemWithPlayerItem:self.item];
     self.player.muted=self.muted;
-    if(self.searchMode && self.index+4>=self.searchResults.count && !self.searchLoading && self.searchOffset>0)[self searchVideos:self.searchQuery reset:NO];
+    if(self.searchMode && self.index+4>=self.searchResults.count && !self.searchLoading && !self.searchEnd && self.searchOffset>0)[self searchVideos:self.searchQuery reset:NO];
     if(self.onlineMode && self.index+5>=self.onlineVideos.count && !self.onlineLoading && !self.onlinePaging)
         [self loadOnlineFeed:NO];
 }
@@ -1683,11 +1695,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if(!self.presentedViewController && UIApplication.sharedApplication.applicationState==UIApplicationStateActive)[self.player play];
             [self prepareNextAsset];
             self.playButton.hidden=YES;
+            [self showBottomTemporarily];
             NSArray *shown=[self visibleVideos];
             if(!shown.count || self.index>=shown.count)return;
             NSDictionary *clip=shown[self.index];
             NSString *key=DLText(clip[@"url"]);
-            if([DLText(clip[@"source"]) isEqualToString:@"peertube"]){
+            if(![DLText(clip[@"source"]) isEqualToString:@"demo"]){
                 BOOL stored=NO;
                 for(NSDictionary *existing in self.videos)
                     if([DLText(existing[@"url"]) isEqualToString:key]){stored=YES;break;}
@@ -1709,7 +1722,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 [self inspectPublicShare:[NSURL URLWithString:origin]];
                 return;
             }
-            self.message.text=self.onlineMode?@"这个公开视频源暂时无法在 iPhone 4S 播放。\n上滑切换下一条，或从菜单切换来源":@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权";
+            self.message.text=self.onlineMode?@"当前视频无法播放，上滑切换下一条":@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权";
             self.playButton.hidden=NO;
         }
     });
@@ -1728,7 +1741,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         [self transitionToIndex:0 direction:1];return;
     }
     [self.player pause];self.playButton.hidden=NO;
-    self.message.text=@"播放结束 · 上滑继续或导入新视频";
+    self.message.text=@"播放结束 · 上滑继续";
 }
 - (void)videoFailed:(NSNotification *)notification {
     [self.player pause];self.playButton.hidden=NO;
