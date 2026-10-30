@@ -359,6 +359,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSUInteger onlineRequestID;
 @property(nonatomic,assign) BOOL onlinePaging;
 @property(nonatomic,assign) BOOL accountReloadPending;
+@property(nonatomic,assign) BOOL guestPrimed;
 @property(nonatomic,assign) BOOL douyinEnd;
 @property(nonatomic,strong) NSDate *douyinRetryAfter;
 @property(nonatomic,copy) NSString *onlineError;
@@ -893,6 +894,17 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 
 - (void)loadDouyinAccountFeedWeb:(BOOL)reset {
+    // Preload visitor cookies from the public home page, no account required.
+    if(!self.guestPrimed && !DLAccountSession.shared.hasSession){
+        self.guestPrimed=YES;
+        NSUInteger generation=self.onlineRequestID;
+        self.message.text=@"正在准备游客浏览…";
+        [DLAccountSession.shared prepareLogin:^{
+            if(generation!=self.onlineRequestID)return;
+            [self loadDouyinAccountFeedWeb:reset];
+        }];
+        return;
+    }
  if(self.onlineLoading&&!reset)return;
  if(!reset&&(self.douyinEnd||self.douyinRetryAfter.timeIntervalSinceNow>0))return;
  if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;}
@@ -901,7 +913,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  NSString *signError=nil;
  NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset error:&signError];
  if(!request){self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;[self reloadCurrent];return;}
- if(reset){self.message.text=DLAccountSession.shared.hasSession?@"正在用本机账号加载抖音内容…":@"正在连接抖音，可在「我」中登录账号";[self.loadingIndicator startAnimating];}
+ if(reset){self.message.text=DLAccountSession.shared.hasSession?@"正在加载账号推荐…":@"正在加载游客视频…";[self.loadingIndicator startAnimating];}
  [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *root,NSString *problem){
   if(token!=self.onlineRequestID)return;
   id nested=root[@"data"];
@@ -931,7 +943,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    if(!problem&&[body[@"has_more"] respondsToSelector:@selector(boolValue)]&&![body[@"has_more"] boolValue])self.douyinEnd=YES;
    NSString *reason=problem;
    if(!reason.length){NSString *code=DLText(root[@"status_code"]);if(!code.length)code=DLText(body[@"status_code"]);reason=code.length&&![code isEqualToString:@"0"]?[NSString stringWithFormat:@"内容接口返回状态 %@。",code]:@"未返回新的兼容视频，可能需要账号登录或网页验证。";}
-   self.onlineError=[reason stringByAppendingString:@"\n也可以点右上角＋，粘贴公开视频分享链接直接播放。"];
+   self.onlineError=[reason stringByAppendingString:@"\n当前网络暂未返回视频列表。可以稍后刷新，扫码登录为可选操作。"];
    if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
   if(self.onlineMode && !self.presentedViewController){if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
@@ -1792,6 +1804,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)viewDidAppear:(BOOL)animated {
  [super viewDidAppear:animated];
  if(self.accountReloadPending){
+   self.guestPrimed=NO;
   self.accountReloadPending=NO;
   [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
   [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
@@ -1816,77 +1829,23 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self presentViewController:browser animated:YES completion:nil];
 }
 - (void)openMenu {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
-        message:@"本机直接连接抖音。可以粘贴公开视频分享链接；账号推荐是否可用取决于登录与平台接口。" preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"纯手机 · 粘贴抖音视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"从剪贴板连续导入（最多12条）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        [self importText:[UIPasteboard generalPasteboard].string?:@""];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"重新获取当前视频地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        NSArray *shown=[self visibleVideos];
-        NSDictionary *clip=(self.index>=0&&self.index<(NSInteger)shown.count)?shown[self.index]:nil;
-        NSString *origin=DLText(clip[@"originURL"]);
-        if(!origin.length){[self alert:@"没有原分享链接" message:@"此视频没有保存抖音分享来源。可以重新粘贴分享链接。"];return;}
-        [self.refreshedShareOrigins removeObject:origin];
-        [self inspectPublicShare:[NSURL URLWithString:origin]];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:(DLAccountSession.shared.hasSession?@"抖音账号 · 检查 / 重新登录":@"抖音账号 · 扫码登录") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"抖音内容 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-      [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
-      [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
-      self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
-      [self loadOnlineFeed:YES];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"所有视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"我的收藏" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"观看历史" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;[self reloadCurrent];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"轻量动画：%@",self.animationsEnabled?@"开":@"关"]
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"我的"
+        message:DLAccountSession.shared.hasSession?@"已保存账号会话":@"当前为游客模式，登录可选"
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"刷新推荐"
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.animationsEnabled=!self.animationsEnabled;
-        [[NSUserDefaults standardUserDefaults] setBool:self.animationsEnabled forKey:@"dl_animations_enabled_v1"];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"下一条预加载：%@",self.preloadEnabled?@"开":@"关"]
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.preloadEnabled=!self.preloadEnabled;
-        [[NSUserDefaults standardUserDefaults] setBool:self.preloadEnabled forKey:@"dl_preload_enabled_v1"];
-        if(self.preloadEnabled)[self prepareNextAsset];
-        else {self.nextAsset=nil;self.nextURL=nil;self.preloadSourceURL=nil;}
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:[NSString stringWithFormat:@"自动下一条：%@",self.autoplayNext?@"开":@"关"]
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.autoplayNext=!self.autoplayNext;
-        [[NSUserDefaults standardUserDefaults] setBool:self.autoplayNext forKey:@"dl_autonext_enabled_v1"];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"导入视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"复制当前视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self copyLink];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"扫描本地视频" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self scanLocalVideos];}]];
-    NSArray *currentClips=[self visibleVideos];
-    NSString *source=(currentClips.count && self.index<currentClips.count)?DLText(currentClips[self.index][@"source"]):@"";
-    BOOL canRemove=currentClips.count && self.index<currentClips.count && ![source isEqualToString:@"demo"] && ![source isEqualToString:@"peertube"];
-    if(canRemove){
-        [menu addAction:[UIAlertAction actionWithTitle:@"移除当前视频" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a){
-            NSArray *clips=[self visibleVideos];
-            if(!clips.count)return;
-            NSString *url=DLText(clips[self.index][@"url"]);
-            NSIndexSet *indices=[self.videos indexesOfObjectsPassingTest:^BOOL(NSDictionary *item,NSUInteger idx,BOOL *stop){
-                return [url isEqualToString:DLText(item[@"url"])];
-            }];
-            [self.videos removeObjectsAtIndexes:indices];
-            [self.favorites removeObject:url];[self.history removeObject:url];
-            [self.positions removeObjectForKey:url];
-            [[NSUserDefaults standardUserDefaults] setObject:self.positions forKey:@"dl_positions_v1"];
-            self.index=0;[self storeLibrary];[self reloadCurrent];
+            self.demoMode=NO;self.onlineMode=YES;self.searchMode=NO;
+            self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+            [self loadOnlineFeed:YES];
         }]];
-    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"扫码登录抖音"
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"观看历史"
+        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+            self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;
+            self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;
+            [self reloadCurrent];
+        }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:menu animated:YES completion:nil];
 }
