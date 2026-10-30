@@ -104,3 +104,16 @@ media access, audible playback, and iPhone 4S performance need real-world tests.
 
 The 90-second idle limit stops an abandoned encoder. The remote browser's
 login and access challenges still require normal human completion.
+
+## Public share resolution and media forwarding (0.10.6)
+
+POST /api/resolve reads the normal official public Douyin mobile share page
+for a user-supplied HTTPS Douyin link. It cannot bypass a login challenge.
+Media links exposed by /api/feed and /api/resolve use temporary unguessable
+/api/media/{ticket} URLs on a private bridge deployment. Native iOS 8
+players may request the content using GET or HEAD and HTTP byte ranges.
+Media requests use standard mobile-browser headers and each redirected
+destination must belong to a supported Douyin/CDN domain. Media is relayed
+without transcoding. The bridge still requires a server, TLS, and a secret.
+Direct mobile-SSR link parsing can work without a bridge when the device
+can reach the official public share page.

@@ -1,4 +1,4 @@
-# DouyinLite 0.10.0
+# DouyinLite 0.10.6
 
 Native ARMv7 application for jailbroken iPhone 4S, iOS 8.0 and later.
 
@@ -25,3 +25,16 @@ Run node douyinlite/tests/test_signer.js for standard SM3 vectors, complete cros
 Official QR endpoints can return a challenge page. A valid login does not guarantee recommendation access. The app reports those states and cannot solve platform challenges automatically. iOS 8 TLS, certificates and decoding remain device-dependent. Optional bridge, PeerTube and imported/local playback tools remain explicit alternatives.
 
 The ES5 signer derives from Apache-2.0 upstream code. See bundled ThirdPartyNotices.txt and Apache-2.0.txt.
+
+## 0.10.6 public Douyin video viewing
+
+Paste an official public Douyin share link using the Add Video button.
+The native client tries the official mobile share page with the ID from
+the supplied link or its redirect. A compatible H.264 video is opened in
+the iOS 8 video player when public metadata is available.
+
+When DouyinBridge has been configured explicitly, failed local extraction
+can fall back to the bridge /api/resolve endpoint. The bridge provides
+temporary CDN-compatible media URLs with byte-range support. Browser
+verification, expired video links, iOS TLS errors, and unsupported codecs
+can still prevent playback. CI success does not prove real-device playback.

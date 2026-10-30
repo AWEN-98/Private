@@ -1398,7 +1398,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)addVideo {
     UIAlertController *input=[UIAlertController alertControllerWithTitle:@"添加视频"
-      message:@"粘贴可访问的 MP4 / HLS 视频直链，或尝试粘贴抖音分享链接。公开视频页面能否解析取决于平台限制。"
+      message:@"粘贴抖音官方分享链接，优先读取公开分享页的视频数据。也可导入 MP4 或 HLS 直链。"
       preferredStyle:UIAlertControllerStyleAlert];
     [input addTextFieldWithConfigurationHandler:^(UITextField *field){
         field.placeholder=@"粘贴视频链接或分享文案";
