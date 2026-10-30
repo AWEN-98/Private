@@ -456,6 +456,22 @@ static void XFDropAccount(NSString *aid){
     [menu addAction:[UIAlertAction actionWithTitle:@"手动添加模型" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         [self manualModel:account];
     }]];
+    NSURL *baseURL=[NSURL URLWithString:account[@"base"]];
+    if([[baseURL.host lowercaseString] hasSuffix:@"openrouter.ai"]){
+        [menu addAction:[UIAlertAction actionWithTitle:@"一键启用 Whisper 语音识别" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"启用 Whisper 语音识别"
+                message:@"选择 OpenRouter 的 openai/whisper-1 作为 STT 模型。使用语音识别会消耗你的 OpenRouter API 额度。"
+                preferredStyle:UIAlertControllerStyleAlert];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            [confirm addAction:[UIAlertAction actionWithTitle:@"启用" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+                if([XFModelsController activateOpenRouterWhisperForAccountID:account[@"id"]]){
+                    [self.tableView reloadData];if(self.changed)self.changed();
+                    [self alert:@"已启用 OpenRouter Whisper。返回小斐语音终端即可开始录音。"];
+                }else [self alert:@"启用失败，请检查 OpenRouter 服务地址及 API Key。"];
+            }]];
+            [self presentViewController:confirm animated:YES completion:nil];
+        }]];
+    }
     [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:menu animated:YES completion:nil];
 }
@@ -659,6 +675,27 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 @implementation XFModelsController
 
 + (NSDictionary *)activeProfile {return [self activeProfileForCapability:@"chat"];}
++ (BOOL)activateOpenRouterWhisperForAccountID:(NSString *)accountID {
+    NSDictionary *account=XFAccountForID(accountID);
+    NSURL *base=[NSURL URLWithString:account[@"base"]];
+    if(![[base.host lowercaseString] hasSuffix:@"openrouter.ai"] || !XFSecret(accountID).length)return NO;
+    NSString *mid=@"openai/whisper-1";
+    NSMutableDictionary *updated=[account mutableCopy];
+    NSMutableArray *models=[account[@"models"] mutableCopy]?:[NSMutableArray array];
+    BOOL found=NO;
+    for(NSUInteger i=0;i<models.count;i++){
+        NSDictionary *m=models[i];
+        if(![m[@"id"] isEqualToString:mid])continue;
+        NSMutableDictionary *entry=[m mutableCopy];
+        entry[@"user_category"]=@"语音识别";
+        models[i]=entry;found=YES;break;
+    }
+    if(!found)[models addObject:@{@"id":mid,@"name":@"Whisper 1 · 语音识别",@"user_category":@"语音识别"}];
+    updated[@"models"]=models;
+    XFReplaceAccount(updated);
+    XFSelect(@"stt",accountID,mid);
+    return YES;
+}
 + (NSDictionary *)activeProfileForCapability:(NSString *)capability {
     NSDictionary *selected=XFSelected(capability);
     if(!selected)return nil;

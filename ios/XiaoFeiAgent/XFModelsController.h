@@ -4,4 +4,5 @@
 + (NSDictionary *)activeProfileForCapability:(NSString *)capability;
 + (NSString *)secretForProfile:(NSDictionary *)profile;
 + (NSArray *)allChatProfiles;
++ (BOOL)activateOpenRouterWhisperForAccountID:(NSString *)accountID;
 @end
