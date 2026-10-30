@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 @interface XFChatView : UIView
 @property(nonatomic,copy) void (^onImageTap)(UIImage *image);
+@property(nonatomic,copy) void (^onQuickPrompt)(NSString *prompt);
 - (void)showWelcome;
 - (void)showConversation:(NSArray *)messages;
 - (void)addMessage:(NSString *)text fromUser:(BOOL)user;
