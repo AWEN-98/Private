@@ -352,6 +352,7 @@ static void XFDropAccount(NSString *aid){
     return @[
       @{@"name":@"DeepSeek",@"base":@"https://api.deepseek.com",@"models_url":@"https://api.deepseek.com/models"},
       @{@"name":@"通义千问（北京）",@"base":@"https://dashscope.aliyuncs.com/compatible-mode/v1",@"models_url":@"https://dashscope.aliyuncs.com/api/v1/models"},
+      @{@"name":@"通义千问（新加坡）",@"base":@"https://dashscope-intl.aliyuncs.com/compatible-mode/v1",@"models_url":@""},
       @{@"name":@"Kimi",@"base":@"https://api.moonshot.cn/v1",@"models_url":@"https://api.moonshot.cn/v1/models"},
       @{@"name":@"智谱 GLM",@"base":@"https://open.bigmodel.cn/api/paas/v4",@"models_url":@"https://open.bigmodel.cn/api/paas/v4/models"},
       @{@"name":@"MiniMax",@"base":@"https://api.minimax.io/v1",@"models_url":@"https://api.minimax.io/v1/models"},
