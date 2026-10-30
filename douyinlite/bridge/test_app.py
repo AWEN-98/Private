@@ -43,3 +43,48 @@ def test_guest_session_is_not_falsely_marked_logged_in():
     engine.context = FakeContext()
     status = asyncio.run(engine.session_info())
     assert status["session_cookie_present"] is False
+
+def test_remote_browser_frame_and_tap_are_authorized(monkeypatch):
+    import asyncio
+    import app as bridge
+    from fastapi import HTTPException
+    class FakeRequest:
+        headers={"authorization":"Bearer a-valid-test-secret"}
+    class FakePage:
+        def __init__(self):
+            self.taps=[]
+        async def screenshot(self, **kwargs):
+            assert kwargs["type"]=="jpeg"
+            return b"fake-jpeg-bytes"
+        class Mouse:
+            def __init__(self, parent): self.parent=parent
+            async def click(self, x, y, **kwargs): self.parent.taps.append((x,y))
+        @property
+        def mouse(self): return self.Mouse(self)
+    page=FakePage()
+    monkeypatch.setattr(bridge,"KEY","a-valid-test-secret")
+    monkeypatch.setattr(bridge.engine,"page",page)
+    frame=asyncio.run(bridge.browser_frame(FakeRequest()))
+    assert frame.body==b"fake-jpeg-bytes"
+    assert frame.headers["cache-control"].startswith("private")
+    assert frame.headers["x-viewport-width"]=="1280"
+    result=asyncio.run(bridge.browser_tap(FakeRequest(),bridge.BrowserTap(x=120,y=180)))
+    assert result["ok"] and page.taps==[(120.0,180.0)]
+    class BadRequest:
+        headers={"authorization":"Bearer invalid"}
+    try:
+        asyncio.run(bridge.browser_frame(BadRequest()))
+        assert False, "Remote browser leaked screen without the bridge key"
+    except HTTPException as exc:
+        assert exc.status_code==401
+
+def test_remote_browser_coordinates_clamped():
+    import pytest
+    from pydantic import ValidationError
+    from app import BrowserTap, BrowserScroll
+    with pytest.raises(ValidationError):
+        BrowserTap(x=-1,y=200)
+    with pytest.raises(ValidationError):
+        BrowserTap(x=1281,y=200)
+    with pytest.raises(ValidationError):
+        BrowserScroll(dy=99999)
