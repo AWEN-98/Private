@@ -28,6 +28,16 @@ docker compose -f compose.yml logs -f bridge
 
 Your API endpoint is `https://YOUR_DOMAIN/api/feed`.
 
+## iPhone 4S native remote Chrome (experimental)
+
+The iPhone's iOS 8 WebKit engine cannot render many modern web applications. DouyinLite now has a native remote viewer that renders **JPEG screenshots of the server-side Chromium browser** instead of trying to run Douyin's JavaScript on the phone.
+
+Once the VPS bridge is deployed and the app is configured with the HTTPS `/api/feed` address and `BRIDGE_KEY`, open DouyinLite's source menu → **云端 Chrome · 登录 / 浏览**. You can tap the screenshot to click browser elements, double-tap to zoom, and use the native 上滑 / 下滑 / 后退 / 首页 buttons. You can also open the cloud viewer from the account login screen after configuring the bridge.
+
+The browser desktop is 1280 × 800; the screenshot is refreshed about every two seconds. It supports human QR-code login and some verification screens, but **this is a low-frame-rate remote-control view, not full video streaming**. To play actual Douyin videos smoothly, the separate original AVPlayer video feed still requires accessible H.264 media URLs. Some site challenges can be unsuitable for a remote viewer or require a physical browser.
+
+The remote-screen and input endpoints are protected by the same private Bearer API key as the feed. Don't expose the key or a public unauthenticated browser endpoint: screenshots can contain account information. Server resources and a domain with trusted HTTPS are required. This does **not** run Chromium on the iPhone or remove Douyin's access-control restrictions.
+
 ## Log in with your Douyin account
 
 **Login is optional but supported.** Use the remote Chromium window, open the normal Douyin login dialog, and scan its QR code with the Douyin app on a second device. If required, complete SMS or other human verification there. Do not send account passwords, SMS codes, or cookies to DouyinLite or this repository.
