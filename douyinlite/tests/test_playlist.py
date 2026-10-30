@@ -15,7 +15,7 @@ checks={
  "persistent video ID": '@"id":videoID' in s,
  "old CDN URL replaced by share identity": '[DLText(old[@"originURL"]) isEqualToString:origin]' in s,
  "refresh bounded to one attempt": "[self.refreshedShareOrigins containsObject:origin]" in s,
- "manual retry offered": 'actionWithTitle:@"重新获取当前视频地址"' in s,
+ "old share links auto refresh once": "[self inspectPublicShare:[NSURL URLWithString:origin]]" in s,
  "batch errors do not present repeated alerts": "if(self.batchInProgress){" in s[s.index("- (void)failImportedVideo:"):s.index("- (void)inspectPublicShare:")],
  "native API and share fallback remain": "api5-normal-c-hl.amemv.com/aweme/v1/feed/" in s and "iesdouyin.com/share/video/" in s,
  "video playback stays native": "AVPlayerItem playerItemWithAsset" in s,
