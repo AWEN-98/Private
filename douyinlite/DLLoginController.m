@@ -1,11 +1,7 @@
 #import "DLAccountSession.h"
-#import "DLRemoteBrowserController.h"
 #import <CoreImage/CoreImage.h>
 #import <math.h>
 
-@interface DLBrowserController : UIViewController
-- (instancetype)initWithURL:(NSURL *)url;
-@end
 static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v respondsToSelector:@selector(stringValue)]?[v stringValue]:@"");}
 @interface DLLoginController ()
 @property(nonatomic,strong) UILabel *status;
@@ -31,14 +27,13 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  [super viewDidLoad];self.view.backgroundColor=[UIColor colorWithWhite:.07 alpha:1];CGFloat w=self.view.bounds.size.width;
  [self button:@"关闭" action:@selector(close) frame:CGRectMake(8,23,52,36) parent:self.view];
  UILabel *title=[[UILabel alloc]initWithFrame:CGRectMake(65,23,w-130,36)];title.text=@"抖音账号";title.textColor=UIColor.whiteColor;title.textAlignment=NSTextAlignmentCenter;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;[self.view addSubview:title];
- UIScrollView *scroll=[[UIScrollView alloc]initWithFrame:CGRectMake(0,64,w,self.view.bounds.size.height-64)];scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;scroll.contentSize=CGSizeMake(w,490);[self.view addSubview:scroll];
- UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(20,5,w-40,40)];hint.numberOfLines=2;hint.text=@"用另一台设备的抖音扫码并确认\n登录完成后返回原生播放器";hint.font=[UIFont systemFontOfSize:13];hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.lightGrayColor;hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:hint];
+ UIScrollView *scroll=[[UIScrollView alloc]initWithFrame:CGRectMake(0,64,w,self.view.bounds.size.height-64)];scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;scroll.contentSize=CGSizeMake(w,428);[self.view addSubview:scroll];
+ UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(20,5,w-40,40)];hint.numberOfLines=2;hint.text=@"无需登录也可以浏览公开视频\n扫码登录可获取账号相关内容";hint.font=[UIFont systemFontOfSize:13];hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.lightGrayColor;hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:hint];
  self.qr=[[UIImageView alloc]initWithFrame:CGRectMake((w-192)/2,53,192,192)];self.qr.backgroundColor=UIColor.whiteColor;self.qr.contentMode=UIViewContentModeScaleAspectFit;self.qr.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;[scroll addSubview:self.qr];
  self.status=[[UILabel alloc]initWithFrame:CGRectMake(20,253,w-40,70)];self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:self.status];
  self.refresh=[self button:@"生成 / 刷新二维码" action:@selector(startLogin) frame:CGRectMake(20,330,w-40,38) parent:scroll];
  [self button:@"已确认登录，检查账号" action:@selector(verify) frame:CGRectMake(20,370,w-40,36) parent:scroll];
- [self button:@"云端 Chrome 登录 / 官方网页" action:@selector(openWebsite) frame:CGRectMake(20,409,w-40,36) parent:scroll];
- [self button:@"退出账号并清除本机会话" action:@selector(logout) frame:CGRectMake(20,450,w-40,36) parent:scroll];
+  [self button:@"退出账号" action:@selector(logout) frame:CGRectMake(20,409,w-40,36) parent:scroll];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
  if(DLAccountSession.shared.hasSession){self.status.text=@"本机保存了账号会话，正在检查…";[self verify];}else [self startLogin];
@@ -102,20 +97,6 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 - (void)verify{
  [self suspend];self.status.text=@"正在校验账号会话…";NSUInteger generation=self.generation;
  [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=message;if(ok){self.token=nil;self.qr.image=nil;}else [self resume];}];
-}
-- (void)openWebsite{
- [self suspend];
- NSString *endpoint=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
- NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
- NSURL *url=[NSURL URLWithString:endpoint];
- UIViewController *browser=nil;
- if([url.scheme isEqualToString:@"https"]&&[url.path hasSuffix:@"/api/feed"]&&url.host.length&&key.length){
-   browser=[[DLRemoteBrowserController alloc]initWithFeedURL:url apiKey:key];
- }else{
-   browser=[[DLBrowserController alloc]initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
-   self.status.text=@"未配置云端 Chrome，内置旧版网页可能不兼容。可先返回视频来源菜单配置 DouyinBridge。";
- }
- [self presentViewController:browser animated:YES completion:nil];
 }
 - (void)logout{
  UIAlertController *a=[UIAlertController alertControllerWithTitle:@"退出抖音账号" message:@"将清除这台设备保存的抖音会话。" preferredStyle:UIAlertControllerStyleAlert];
