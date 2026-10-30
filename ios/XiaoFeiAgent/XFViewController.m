@@ -17,6 +17,10 @@
 
 // Qwen3-ASR-Flash uses OpenAI-compatible Chat Completions with input_audio.
 // Other STT providers continue using multipart /audio/transcriptions.
+static BOOL XFUsesOpenRouterSTT(NSDictionary *profile) {
+    NSURL *url=[NSURL URLWithString:profile[@"endpoint"]?:@""];
+    return [[url.host lowercaseString] hasSuffix:@"openrouter.ai"];
+}
 static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     NSString *model=[profile[@"model"] isKindOfClass:[NSString class]]?[profile[@"model"] lowercaseString]:@"";
     // Providers sometimes prefix the model ID with a namespace.
@@ -733,7 +737,20 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     NSDictionary *chat=[XFModelsController activeProfileForCapability:@"chat"];
     if(!chat){[self voiceError:@"请先在模型库选择文字聊天模型"];return;}
     if(!stt || ![XFModelsController secretForProfile:stt].length){
-        [self voiceError:@"请先在模型库配置语音识别（STT）模型与 API Key"];
+        NSURL *url=[NSURL URLWithString:chat[@"chat_endpoint"]];
+        BOOL openRouter=[[url.host lowercaseString] hasSuffix:@"openrouter.ai"];
+        if(openRouter && [XFModelsController secretForProfile:chat].length){
+            UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"启用语音识别"
+                message:@"检测到 OpenRouter 聊天账户。可以使用同一个 API Key 选择 Whisper 1 转写语音，调用会消耗 API 额度。"
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:@"启用 Whisper" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+                if([XFModelsController activateOpenRouterWhisperForAccountID:chat[@"account_id"]])
+                    [self voiceUpdate:@"idle" message:@"Whisper 语音识别已启用。请再次点击开始说话。"];
+                else [self voiceError:@"启用失败，请检查 OpenRouter 账户与密钥"];
+            }]];
+            [self.jarvisNavigation presentViewController:alert animated:YES completion:nil];
+        }else [self voiceError:@"请在模型库选择真正支持语音转写的 STT 模型。OpenRouter 可在 API 服务菜单一键启用 Whisper。"];
         return;
     }
     self.voiceCapture=YES;
@@ -1376,7 +1393,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             }
             // Qwen3-ASR-Flash accepts WAV input. Keep AAC for the multipart
             // providers that already work in the existing client.
-            BOOL isQwen=XFUsesQwen3ASR(p);
+            BOOL isQwen=XFUsesQwen3ASR(p) && !XFUsesOpenRouterSTT(p);
             NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:
                 isQwen?@"xf-recording.wav":@"xf-recording.m4a"];
             NSDictionary *settings=isQwen?
@@ -1438,7 +1455,8 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     }
     NSMutableURLRequest *req=[self requestForProfile:p];
     if(!req){if(wasVoice)[self voiceError:@"请检查语音识别 API 配置"];return;}
-    BOOL qwen=XFUsesQwen3ASR(p);
+    BOOL openRouter=XFUsesOpenRouterSTT(p);
+    BOOL qwen=XFUsesQwen3ASR(p) && !openRouter;
     if(qwen){
         // Chat Completions is the documented interface for Qwen3-ASR-Flash.
         // Don't send a multipart POST to /audio/transcriptions (HTTP 404).
@@ -1463,6 +1481,16 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             ]}],@"stream":@NO,@"asr_options":@{@"enable_itn":@NO}};
         req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    } else if(openRouter){
+        // OpenRouter's official transcription endpoint requires raw Base64 + format.
+        // Do not send a data URI and do not use a chat-completion audio envelope.
+        NSString *encoded=[audio base64EncodedStringWithOptions:0];
+        NSString *format=[[[self.recorder.url pathExtension] lowercaseString] isEqualToString:@"wav"]?@"wav":@"m4a";
+        NSDictionary *payload=@{@"model":modelName,
+            @"input_audio":@{@"data":encoded,@"format":format},
+            @"response_format":@"json"};
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
     } else {
         NSString *boundary=[[NSUUID UUID] UUIDString];
         [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
@@ -1520,14 +1548,28 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             if(!reason.length)reason=[NSString stringWithFormat:@"STT 请求失败。%@",shape];
             if(reason.length>170)reason=[reason substringToIndex:170];
             NSString *detail=[NSString stringWithFormat:@"服务：%@；模型：%@；HTTP %ld；路径：%@；协议：%@",
-                p[@"provider"]?:@"API",modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":@"multipart STT"];
+                p[@"provider"]?:@"API",modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":(openRouter?@"OpenRouter JSON":@"multipart STT")];
             [XFDiagnostics record:@"STT 请求检查" code:code detail:detail];
             NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
             self.status.text=notice;
             NSString *instructions=wrongPath?@"请核对模型是否提供录音转写能力、API 服务 Base URL、转写接口完整路径和地域。":shape;
             NSString *explain=[NSString stringWithFormat:@"%@\n请求：%@\n模型：%@\n%@",
                 notice,safeEndpoint,modelName,instructions];
-            if(wasVoice)[self voiceError:[NSString stringWithFormat:@"%@；请求：%@",notice,safeEndpoint]];
+            if(wasVoice && openRouter && (code==404 || code==400 || code==422) &&
+                ![modelName isEqualToString:@"openai/whisper-1"]){
+                [self voiceError:@"当前 OpenRouter STT 模型无法转写，建议切换到 Whisper 1。"];
+                UIAlertController *fix=[UIAlertController alertControllerWithTitle:@"修复语音识别"
+                   message:[NSString stringWithFormat:@"当前模型：%@\nHTTP %ld\n尝试改用 OpenRouter 官方支持的 Whisper 1。使用时会消耗 API 额度。",modelName,(long)code]
+                   preferredStyle:UIAlertControllerStyleAlert];
+                [fix addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                [fix addAction:[UIAlertAction actionWithTitle:@"切换 Whisper 1" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+                    if([XFModelsController activateOpenRouterWhisperForAccountID:p[@"account_id"]])
+                        [self voiceUpdate:@"idle" message:@"已切换 Whisper 1。请重新点击开始说话。"];
+                    else [self voiceError:@"切换失败，请检查 API Key"];
+                }]];
+                [self.jarvisNavigation presentViewController:fix animated:YES completion:nil];
+            } else if(wasVoice)
+                [self voiceError:[NSString stringWithFormat:@"%@；请求：%@",notice,safeEndpoint]];
             else [self showAlert:@"语音识别失败" detail:explain];
             return;
         }
