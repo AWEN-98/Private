@@ -1329,8 +1329,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.playButton.hidden=YES;
     self.message.text=@"";
     self.titleText.text=@"";
-    NSString *author=DLText(clip[@"author"]);
-    self.subtitleText.text=author.length?[@"@" stringByAppendingString:author]:@"";
+    self.subtitleText.text=@"";
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
@@ -1354,7 +1353,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
-    self.subtitleText.text=@"";
+    NSString *author=DLText(clip[@"author"]);
+    self.subtitleText.text=author.length?[@"@" stringByAppendingString:author]:@"";
     self.countText.text=@"";
     BOOL liked=[self.favorites containsObject:address];
     DLStyleIcon(self.likeButton,@"bookmark",27,liked?[UIColor colorWithRed:1 green:.84 blue:.42 alpha:1]:[UIColor whiteColor]);
