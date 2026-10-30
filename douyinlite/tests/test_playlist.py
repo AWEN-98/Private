@@ -11,7 +11,7 @@ checks={
  "batch import is sequential": "self.pendingShareURLs[0]" in s and "[self processNextShareBatch]" in s,
  "failed video does not stop batch": "self.batchFailed++;" in s,
  "batch preserves playlist order": "[self.videos addObject:entry]" in s and "self.index=existing;" in s,
- "persistent original share URL": '@"originURL": origin' in s,
+ "persistent original share URL": '@"originURL":origin' in s or '@"originURL": origin' in s,
  "persistent video ID": '@"id":videoID' in s,
  "old CDN URL replaced by share identity": '[DLText(old[@"originURL"]) isEqualToString:origin]' in s,
  "refresh bounded to one attempt": "[self.refreshedShareOrigins containsObject:origin]" in s,
