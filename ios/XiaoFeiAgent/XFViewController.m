@@ -391,6 +391,9 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     [menu addAction:[UIAlertAction actionWithTitle:@"录音转文字" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         [self toggleRecord];
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"导入文本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self pickFile];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"新对话" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         if(self.isWorking){[self showAlert:@"正在回复" detail:@"请先停止当前请求再创建新对话。"];return;}
         [self loadConversation:[XFChatStore createConversation]];
@@ -404,7 +407,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
 - (void)showMoreTools {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"更多工具" message:nil
         preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *actions=@[@[@"导入文本",@"file"],@[@"提示词工具箱",@"prompts"],
+    NSArray *actions=@[@[@"粘贴文字",@"paste"],@[@"提示词工具箱",@"prompts"],
        @[@"双模型对比",@"compare"],@[@"联网提问",@"web"],
        @[@"朗读回复",@"tts"],@[@"复制回复",@"copyreply"],
        @[@"生图协议",@"imagemode"],@[@"诊断",@"diagnostics"]];
@@ -525,6 +528,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     }
     if([name isEqualToString:@"jarvis"]) {[self openJarvis];return;}
     if([name isEqualToString:@"photo"]) {[self pickImage];return;}
+    if([name isEqualToString:@"paste"]) {[self pasteTapped];return;}
     if([name isEqualToString:@"file"]) {[self pickFile];return;}
     if([name isEqualToString:@"prompts"]) {[self showPromptToolbox];return;}
     if([name isEqualToString:@"compare"]) {[self showComparison];return;}
@@ -1223,9 +1227,9 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     }
     NSTimeInterval elapsed=[[NSDate date] timeIntervalSinceDate:self.recordStarted];
     NSInteger seconds=MAX(0,(NSInteger)elapsed);
-    self.recordingBadge.text=[NSString stringWithFormat:@"● 正在录音 %02ld:%02ld · 点击停止",
+    self.recordingBadge.text=[NSString stringWithFormat:@"录音 %02ld:%02ld · 左下角停止",
          (long)(seconds/60),(long)(seconds%60)];
-    self.status.text=@"录音中，点红色「停止录音」结束";
+    self.status.text=@"正在录音，点击左下角红色按钮停止";
     if(self.voiceCapture && self.voiceActive) {
         [self.recorder updateMeters];
         float db=[self.recorder averagePowerForChannel:0];
