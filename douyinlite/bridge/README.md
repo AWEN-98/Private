@@ -117,3 +117,11 @@ destination must belong to a supported Douyin/CDN domain. Media is relayed
 without transcoding. The bridge still requires a server, TLS, and a secret.
 Direct mobile-SSR link parsing can work without a bridge when the device
 can reach the official public share page.
+
+## 0.10.7 publicly visible Chrome card fallback
+
+If the user-operated Chromium page displays public video cards but network
+API responses provide no usable media, DouyinBridge checks up to four unique
+video links visible in the page on each feed attempt. Each video must have
+public share-page metadata and a reachable media URL to join the feed.
+An empty page or required login still produces an explicit empty status.

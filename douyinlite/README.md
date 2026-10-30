@@ -1,4 +1,4 @@
-# DouyinLite 0.10.6
+# DouyinLite 0.10.7
 
 Native ARMv7 application for jailbroken iPhone 4S, iOS 8.0 and later.
 
@@ -38,3 +38,11 @@ can fall back to the bridge /api/resolve endpoint. The bridge provides
 temporary CDN-compatible media URLs with byte-range support. Browser
 verification, expired video links, iOS TLS errors, and unsupported codecs
 can still prevent playback. CI success does not prove real-device playback.
+
+## 0.10.7 additional feed fallback
+
+DouyinBridge tries the normal browser JSON responses first. When the Chrome
+site is accessible but its JSON feed is empty, it also reads actual public
+video links already displayed in the page, then checks their official
+public share pages. It never invents recommendations or assumes a login
+challenge is solved. Only returned accessible media URLs are sent to iOS.
