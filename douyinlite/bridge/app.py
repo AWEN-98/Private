@@ -16,7 +16,10 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 from streamer import CloudStream, playlist_with_ticket, valid_segment
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+import httpx
+from urllib.parse import urljoin
+from media import MediaRegistry, allowed_media_url, valid_byte_range
 from share import MOBILE_UA, MAX_HTML_SIZE, official_link, video_id, mobile_share_url, parse_public_html
 
 KEY = os.environ.get("BRIDGE_KEY", "")
@@ -223,6 +226,14 @@ class BrowserFeed:
 
 engine = BrowserFeed()
 cloud_stream = CloudStream()
+media_registry = MediaRegistry()
+
+def media_link(request, original):
+    # M3U8 playlists contain relative segment links and must be kept intact.
+    if urlparse(original).path.lower().endswith('.m3u8'):
+        return original
+    token = media_registry.add(original)
+    return str(request.url_for('media_proxy', ticket=token)) if token else original
 
 @asynccontextmanager
 async def lifespan(app):
@@ -265,10 +276,11 @@ async def feed(request: Request, cursor: int = 0):
         raise HTTPException(status_code=400, detail="Invalid cursor")
     await engine.ensure_items(cursor + 12)
     items = engine.items[cursor:cursor + 12]
+    safe_items = [{**item, "url": media_link(request, item["url"])} for item in items]
     next_cursor = cursor + len(items)
     next_url = (str(request.url_for("feed")) + "?cursor=" + str(next_cursor)) if items and next_cursor < MAX_CACHE else None
     return {
-        "data": items, "next": next_url,
+        "data": safe_items, "next": next_url,
         "status": engine.status, "message": engine.error or (
             "请在云端浏览器正常完成人工验证" if engine.status == "verification_required"
             else "暂无可访问的视频，请检查浏览器页面" if not items else ""
@@ -310,13 +322,91 @@ async def resolve_public_share(request: Request, value: PublicShareRequest):
             if len(content) <= MAX_HTML_SIZE:
                 clip = parse_public_html(content.decode("utf-8", errors="replace"))
                 if clip:
-                    return clip
+                    return {**clip, "url": media_link(request, clip["url"])}
         if item_id:
             mobile = mobile_share_url(item_id)
             if mobile not in seen and mobile not in queue:
                 queue.append(mobile)
     raise HTTPException(status_code=422, detail=(
         "公开分享页未提供可播放的视频数据。可能需要登录验证，或该视频已失效、当前地区无法访问。"))
+
+
+@app.api_route("/api/media/{ticket}", methods=["GET", "HEAD"], name="media_proxy")
+async def media_proxy(ticket: str, request: Request):
+    """Serve eligible, previously obtained public media with Range support.
+
+    Random capability URLs allow native AVPlayer to access the media without
+    storing a Bearer API key in movie-player configuration. URLs expire.
+    """
+    source = media_registry.get(ticket)
+    if not source:
+        raise HTTPException(status_code=404, detail="视频链接已过期，请重新加载")
+    user_range = request.headers.get("range")
+    if not valid_byte_range(user_range):
+        raise HTTPException(status_code=416, detail="Unsupported Range")
+    headers = {
+        "User-Agent": MOBILE_UA,
+        "Referer": "https://www.douyin.com/",
+        "Accept": "*/*",
+        "Accept-Encoding": "identity",
+    }
+    if user_range:
+        headers["Range"] = user_range
+    client = httpx.AsyncClient(timeout=httpx.Timeout(25.0, connect=10.0),
+                               follow_redirects=False)
+    upstream = None
+    current = source
+    try:
+        for _ in range(6):
+            if not allowed_media_url(current):
+                raise HTTPException(status_code=502, detail="视频 CDN 地址不受支持")
+            req = client.build_request(request.method, current, headers=headers)
+            upstream = await client.send(req, stream=True)
+            if upstream.status_code not in (301, 302, 303, 307, 308):
+                break
+            location = upstream.headers.get("location")
+            await upstream.aclose()
+            upstream = None
+            if not location:
+                raise HTTPException(status_code=502, detail="CDN 跳转地址为空")
+            current = urljoin(current, location)
+        else:
+            raise HTTPException(status_code=502, detail="CDN 重定向次数过多")
+
+        if upstream.status_code not in (200, 206, 416):
+            raise HTTPException(status_code=502, detail=(
+                "媒体请求失败（CDN HTTP %d），视频可能已失效" % upstream.status_code))
+        out_headers = {"Cache-Control": "private, no-store", "Accept-Ranges": "bytes"}
+        for key in ("content-range", "content-length", "etag", "last-modified"):
+            if key in upstream.headers:
+                out_headers[key] = upstream.headers[key]
+        mime = upstream.headers.get("content-type") or "video/mp4"
+        if request.method == "HEAD":
+            status = upstream.status_code
+            await upstream.aclose()
+            await client.aclose()
+            return Response(status_code=status, headers=out_headers, media_type=mime)
+
+        async def body():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await client.aclose()
+
+        return StreamingResponse(body(), status_code=upstream.status_code,
+                                 headers=out_headers, media_type=mime)
+    except HTTPException:
+        if upstream:
+            await upstream.aclose()
+        await client.aclose()
+        raise
+    except (httpx.HTTPError, ValueError):
+        if upstream:
+            await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="连接视频 CDN 失败")
 
 @app.post("/api/refresh")
 async def refresh(request: Request):
