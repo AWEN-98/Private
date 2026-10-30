@@ -310,7 +310,7 @@ static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
         CGContextMoveToPoint(c,4,14);CGContextAddLineToPoint(c,4,20);CGContextAddLineToPoint(c,10,20);
         CGContextMoveToPoint(c,14,20);CGContextAddLineToPoint(c,20,20);CGContextAddLineToPoint(c,20,14);CGContextStrokePath(c);
     }else if([kind isEqualToString:@"live"]){
-        CGContextAddRoundedRect(c,CGRectMake(3.5,6,17,13),3,3);
+        CGContextStrokeRect(c,CGRectMake(3.5,6,17,13));
         CGContextMoveToPoint(c,8,9);CGContextAddLineToPoint(c,15,12.5);
         CGContextAddLineToPoint(c,8,16);CGContextClosePath(c);CGContextStrokePath(c);
     }else if([kind isEqualToString:@"user"]){
@@ -1144,6 +1144,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }];
 }
 - (NSArray *)visibleVideos {
+    if(self.liveMode)return self.liveVideos?:@[];
     if(self.searchMode)return self.searchResults?:@[];
     if(self.onlineMode&&!self.favoritesOnly&&!self.historyOnly)return self.onlineVideos;
     if(self.demoMode && !self.favoritesOnly && !self.historyOnly)return self.demoVideos;
@@ -1239,10 +1240,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 
 - (void)refreshTabBar {
-    NSInteger selected=self.favoritesOnly?1:(self.historyOnly?2:0);
+    NSInteger selected=self.liveMode?1:(self.favoritesOnly?2:((self.historyOnly)?3:0));
     if(selected==self.paintedTab)return;
     self.paintedTab=selected;
-    NSArray *kinds=@[@"home",@"bookmark",@"user"];
+    NSArray *kinds=@[@"home",@"live",@"bookmark",@"user"];
     for(NSInteger i=0;i<self.tabButtons.count;i++){
         UIButton *button=self.tabButtons[i];BOOL active=i==selected;
         UIColor *color=active?[UIColor whiteColor]:[UIColor colorWithWhite:.62 alpha:1];
@@ -1251,57 +1252,116 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         label.font=active?[UIFont boldSystemFontOfSize:10]:[UIFont systemFontOfSize:10];
     }
 }
+- (void)categoryPressed:(UIButton *)button {
+    NSInteger idx=button.tag-300;
+    NSArray *categories=@[@"推荐",@"热门",@"游戏",@"音乐",@"生活"];
+    if(idx<0||idx>=(NSInteger)categories.count)return;
+    self.category=categories[idx];
+    self.liveMode=NO;self.historyOnly=NO;self.favoritesOnly=NO;self.demoMode=NO;
+    self.searchMode=NO;self.onlineMode=YES;self.index=0;
+    self.onlineRequestID++;self.onlineLoading=NO;self.onlinePaging=NO;
+    [self showBottomTemporarily];
+    if(idx==0){[self loadOnlineFeed:YES];}
+    else if(idx==1){
+        [self.onlineVideos removeAllObjects];
+        self.onlineError=nil;self.message.text=@"正在获取公开视频热榜…";
+        [self loadAnonymousHotVideos:++self.onlineRequestID];
+    }else [self searchVideos:categories[idx] reset:YES];
+    [self reloadCurrent];[self layoutScreen];
+}
 - (void)openSearch {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"搜索我的视频"
-        message:@"仅搜索已经导入的视频和公开样片；不提供抖音平台全站搜索。" preferredStyle:UIAlertControllerStyleAlert];
+    if(self.liveMode){[self promptLiveRoom];return;}
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"搜索视频"
+        message:@"输入关键词搜索抖音公开视频" preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
-        field.placeholder=@"搜索标题或文件名";
-        field.text=self.searchQuery?:@"";
+        field.placeholder=@"搜索关键词";field.text=self.searchQuery?:@"";
         field.clearButtonMode=UITextFieldViewModeWhileEditing;
     }];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"搜索" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        NSString *query=[DLText(((UITextField *)alert.textFields.firstObject).text) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if(!query.length){[self openSearch];return;}
-        self.searchQuery=query;
-        NSMutableArray *result=[NSMutableArray array];
-        NSMutableSet *known=[NSMutableSet set];
-        NSMutableArray *all=[NSMutableArray arrayWithArray:self.videos];
-        [all addObjectsFromArray:self.onlineVideos];
-        [all addObjectsFromArray:self.demoVideos];
-        for(NSDictionary *clip in all){
-            NSString *title=DLText(clip[@"title"]);
-            NSString *address=DLText(clip[@"url"]);
-            if([title rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound &&
-               [address rangeOfString:query options:NSCaseInsensitiveSearch].location==NSNotFound)continue;
-            if([known containsObject:address])continue;
-            [known addObject:address];[result addObject:clip];
-        }
-        self.searchResults=result;
-        self.searchMode=YES;self.onlineMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
-        [self reloadCurrent];[self refreshTabBar];
+    [alert addAction:[UIAlertAction actionWithTitle:@"搜索" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSString *word=[DLText(((UITextField *)alert.textFields.firstObject).text)
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if(word.length){self.category=@"搜索";[self searchVideos:word reset:YES];}
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
+- (void)searchVideos:(NSString *)keyword reset:(BOOL)reset {
+    if(!keyword.length)return;
+    if(self.searchLoading && !reset)return;
+    if(reset){self.searchOffset=0;self.index=0;self.searchResults=@[];}
+    self.searchQuery=keyword;self.searchMode=YES;self.liveMode=NO;
+    self.favoritesOnly=NO;self.historyOnly=NO;self.onlineMode=NO;
+    self.searchLoading=YES;
+    NSUInteger generation=++self.searchGeneration;
+    self.message.text=[NSString stringWithFormat:@"正在搜索%@…",keyword];
+    NSString *issue=nil;
+    NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:keyword offset:self.searchOffset error:&issue];
+    if(!request){
+        self.searchLoading=NO;
+        self.message.text=issue.length?issue:@"无法发起搜索请求";
+        [self layoutScreen];return;
+    }
+    [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *json,NSString *problem){
+        if(generation!=self.searchGeneration)return;
+        self.searchLoading=NO;
+        NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:json;
+        NSArray *items=[data[@"data"] isKindOfClass:NSArray.class]?data[@"data"]:@[];
+        if(!items.count&&[data[@"aweme_list"] isKindOfClass:NSArray.class])items=data[@"aweme_list"];
+        if(!items.count&&[data[@"search_result"] isKindOfClass:NSArray.class])items=data[@"search_result"];
+        NSMutableArray *results=[reset?[NSMutableArray array]:[self.searchResults mutableCopy] mutableCopy];
+        NSMutableSet *seen=[NSMutableSet set];
+        for(NSDictionary *prior in results)[seen addObject:DLText(prior[@"id"]).length?DLText(prior[@"id"]):DLText(prior[@"url"])];
+        for(id raw in items){
+            if(![raw isKindOfClass:NSDictionary.class])continue;
+            NSDictionary *entry=raw;
+            if([entry[@"aweme_info"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme_info"];
+            NSString *link=DLPublicPlaybackURL(entry);
+            NSString *idString=DLText(entry[@"aweme_id"]);
+            if(!idString.length)idString=DLText(entry[@"id"]);
+            NSString *identity=idString.length?idString:link;
+            if(!link.length||[seen containsObject:identity])continue;
+            [seen addObject:identity];
+            NSDictionary *author=[entry[@"author"] isKindOfClass:NSDictionary.class]?entry[@"author"]:@{};
+            NSString *title=DLText(entry[@"desc"]);if(!title.length)title=@"抖音视频";
+            [results addObject:@{@"url":link,@"id":idString,@"title":title,
+                @"author":DLText(author[@"nickname"]),@"source":@"douyin-search"}];
+            if(results.count>=80)break;
+        }
+        self.searchResults=results;
+        if(items.count)self.searchOffset+=items.count;
+        if(results.count){self.message.text=@"";[self reloadCurrent];}
+        else{
+            self.message.text=problem.length?problem:@"搜索未返回可播放视频，可能需要登录或访问验证。";
+            [self reloadCurrent];
+            self.message.text=problem.length?problem:@"暂无可播放的搜索结果，试试其他关键词";
+        }
+        [self layoutScreen];
+    }];
+}
 - (void)tabPressed:(UIButton *)button {
     NSInteger tab=button.tag-200;
+    [self showBottomTemporarily];
     if(tab==0){
-        self.demoMode=NO;self.onlineMode=YES;self.searchMode=NO;
-        self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+        self.liveMode=NO;self.demoMode=NO;self.searchMode=NO;self.onlineMode=YES;
+        self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
         if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
     }else if(tab==1){
-        self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;
-        self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
+        self.liveMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;
+        self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
-    }else if(tab==2){[self openAccount];}
-    [self refreshTabBar];
+        if(!self.liveVideos.count)[self loadLiveRanking];
+    }else if(tab==2){
+        self.liveMode=NO;self.onlineMode=NO;self.searchMode=NO;self.demoMode=NO;
+        self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;[self reloadCurrent];
+    }else if(tab==3)[self openAccount];
+    [self refreshTabBar];[self layoutScreen];
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
     if(![recognizer isKindOfClass:[UIPanGestureRecognizer class]])return YES;
     CGPoint point=[touch locationInView:self.view];
     CGFloat h=self.view.bounds.size.height;
-    if(point.y<58 || point.y>h-57)return NO;
+    if(point.y<44 || point.y>h-(self.tabBar.hidden?4:40))return NO;
     UIView *v=touch.view;
     while(v && v!=self.view){
         if([v isKindOfClass:[UIControl class]])return NO;
@@ -1342,7 +1402,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(self.transitioning)return;
     CGPoint translation=[gesture translationInView:self.view];
     CGPoint velocity=[gesture velocityInView:self.view];
-    if(gesture.state==UIGestureRecognizerStateBegan){self.panning=YES;return;}
+    if(gesture.state==UIGestureRecognizerStateBegan){self.panning=YES;self.bottomHidden=YES;[self layoutScreen];return;}
     if(gesture.state==UIGestureRecognizerStateChanged){
         if(fabs(translation.y)<fabs(translation.x))return;
         if(self.animationsEnabled&&!UIAccessibilityIsReduceMotionEnabled()){
@@ -1421,7 +1481,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.rightRail.hidden=!visible.count;
     BOOL hot=self.onlineMode && visible.count>0 &&
         [DLText(visible[0][@"source"]) isEqualToString:@"douyin-hot"];
-    self.topText.text=self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":(hot?@"热门":@"推荐"));
+    self.topText.text=self.liveMode?@"直播":(self.searchMode?self.searchQuery:(self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":(hot?@"热门":@"推荐"))));
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
@@ -1429,9 +1489,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 (self.onlineError.length?self.onlineError:@"暂时没有可播放的推荐视频");
             if(self.onlineLoading)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
         }else{
-            self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":
+            self.message.text=self.liveMode?@"正在获取直播间…":(self.searchMode?@"没有找到可播放的视频":
                 (self.favoritesOnly?@"还没有收藏的视频":
-                (self.historyOnly?@"暂无观看历史":@"暂无视频"));
+                (self.historyOnly?@"暂无观看历史":@"暂无视频")));
         }
         return;
     }
@@ -1459,6 +1519,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(videoFailed:) name:AVPlayerItemFailedToPlayToEndTimeNotification object:self.item];
     [self.player replaceCurrentItemWithPlayerItem:self.item];
     self.player.muted=self.muted;
+    if(self.searchMode && self.index+4>=self.searchResults.count && !self.searchLoading && self.searchOffset>0)[self searchVideos:self.searchQuery reset:NO];
     if(self.onlineMode && self.index+5>=self.onlineVideos.count && !self.onlineLoading && !self.onlinePaging)
         [self loadOnlineFeed:NO];
 }
@@ -1559,7 +1620,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }
     [self tick];
 }
-- (void)tapVideo:(UITapGestureRecognizer *)tap {if(tap.state==UIGestureRecognizerStateEnded)[self togglePlay];}
+- (void)tapVideo:(UITapGestureRecognizer *)tap {
+    if(tap.state!=UIGestureRecognizerStateEnded)return;
+    if(self.fullscreenMode){[self toggleFullscreen];return;}
+    if(self.bottomHidden){[self showBottomTemporarily];return;}
+    [self togglePlay];
+}
 - (void)holdVideo:(UILongPressGestureRecognizer *)hold {
     if(hold.state==UIGestureRecognizerStateBegan){
         self.wasPlaying=self.player.rate>.01f;self.holdingSpeed=YES;
