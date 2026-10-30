@@ -113,6 +113,8 @@
 @property(nonatomic,strong) UIButton *stopButton;
 @property(nonatomic,strong) UIButton *teaseButton;
 @property(nonatomic,strong) UIButton *autoButton;
+@property(nonatomic,strong) UIButton *continuousButton;
+@property(nonatomic,strong) UIButton *voiceStyleButton;
 @property(nonatomic,strong) NSTimer *waveTimer;
 @property(nonatomic,copy) NSString *mode;
 @end
@@ -183,13 +185,25 @@
     [self.autoButton setTitleColor:[UIColor colorWithRed:.60 green:.79 blue:.64 alpha:1] forState:UIControlStateNormal];
     [self.autoButton addTarget:self action:@selector(toggleAuto) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.autoButton];
+    self.continuousButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.continuousButton.titleLabel.font=[UIFont systemFontOfSize:11];
+    [self.continuousButton setTitleColor:[self accent] forState:UIControlStateNormal];
+    [self.continuousButton addTarget:self action:@selector(toggleContinuous) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.continuousButton];
+    self.voiceStyleButton=[UIButton buttonWithType:UIButtonTypeCustom];
+    self.voiceStyleButton.titleLabel.font=[UIFont systemFontOfSize:11];
+    [self.voiceStyleButton setTitleColor:[self accent] forState:UIControlStateNormal];
+    [self.voiceStyleButton addTarget:self action:@selector(toggleVoiceStyle) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.voiceStyleButton];
     [self updateAutoTitle];
+    [self updateContinuousTitle];
+    [self updateVoiceStyleTitle];
     [self updateMode:@"idle" description:@"我在线。点击说话，或者戳戳屏幕。"];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self.waveTimer invalidate];
-    self.waveTimer=[NSTimer timerWithTimeInterval:1.0/15.0 target:self.scope selector:@selector(advance) userInfo:nil repeats:YES];
+    self.waveTimer=[NSTimer timerWithTimeInterval:1.0/12.0 target:self.scope selector:@selector(advance) userInfo:nil repeats:YES];
     [[NSRunLoop mainRunLoop] addTimer:self.waveTimer forMode:NSRunLoopCommonModes];
 }
 - (void)viewWillDisappear:(BOOL)animated {
@@ -210,15 +224,36 @@
     CGFloat buttonsY=MIN(h-87,below+108);
     self.primary.frame=CGRectMake(12,buttonsY,w-104,42);
     self.stopButton.frame=CGRectMake(w-85,buttonsY,73,42);
-    self.teaseButton.frame=CGRectMake(14,h-41,w*.43,32);
-    self.autoButton.frame=CGRectMake(w*.43+18,h-41,w*.57-32,32);
+    CGFloat g=4, side=9, bw=(w-side*2-g*3)/4;
+    CGFloat y=h-43;
+    self.teaseButton.frame=CGRectMake(side,y,bw,35);
+    self.continuousButton.frame=CGRectMake(side+(bw+g),y,bw,35);
+    self.voiceStyleButton.frame=CGRectMake(side+2*(bw+g),y,bw,35);
+    self.autoButton.frame=CGRectMake(side+3*(bw+g),y,bw,35);
 }
 - (void)updateAutoTitle {
-    [self.autoButton setTitle:self.autoSpeak?@"语音：开":@"语音：关" forState:UIControlStateNormal];
+    self.autoButton.titleLabel.font=[UIFont systemFontOfSize:11];
+    [self.autoButton setTitle:self.autoSpeak?@"朗读开":@"朗读关" forState:UIControlStateNormal];
+}
+- (void)updateContinuousTitle {
+    [self.continuousButton setTitle:self.continuousTalk?@"连聊开":@"连聊关" forState:UIControlStateNormal];
+    self.stopButton.enabled=![self.mode isEqualToString:@"idle"]||self.continuousTalk;
+    self.stopButton.alpha=self.stopButton.enabled?1:.45;
+}
+- (void)updateVoiceStyleTitle {
+    [self.voiceStyleButton setTitle:self.mechanicalVoice?@"机械声":@"柔和声" forState:UIControlStateNormal];
 }
 - (void)setAutoSpeak:(BOOL)autoSpeak {
     _autoSpeak=autoSpeak;
     if(self.autoButton)[self updateAutoTitle];
+}
+- (void)setContinuousTalk:(BOOL)continuousTalk {
+    _continuousTalk=continuousTalk;
+    if(self.continuousButton)[self updateContinuousTitle];
+}
+- (void)setMechanicalVoice:(BOOL)mechanicalVoice {
+    _mechanicalVoice=mechanicalVoice;
+    if(self.voiceStyleButton)[self updateVoiceStyleTitle];
 }
 - (void)updateMode:(NSString *)mode description:(NSString *)detail {
     self.mode=mode?:@"idle";
@@ -232,8 +267,7 @@
     [self.primary setTitle:listening?@"结束并提问":@"开始说话" forState:UIControlStateNormal];
     self.primary.enabled=!thinking;
     self.primary.alpha=self.primary.enabled?1:.45;
-    self.stopButton.enabled=![self.mode isEqualToString:@"idle"];
-    self.stopButton.alpha=self.stopButton.enabled?1:.45;
+    [self updateContinuousTitle];
     self.teaseButton.enabled=![self.mode isEqualToString:@"idle"];
     self.teaseButton.alpha=self.teaseButton.enabled?1:.40;
     self.timeLabel.text=listening?@"00:00":@"";
@@ -249,6 +283,10 @@
 - (void)updateSpeechPulse {
     if([self.mode isEqualToString:@"speaking"])self.scope.speechEnergy=1.0;
 }
+- (void)updateSpeechText:(NSString *)spokenText {
+    if(![self.mode isEqualToString:@"speaking"] || !spokenText.length)return;
+    self.subtitle.text=spokenText;
+}
 - (void)scopeTapped {
     if(![self.mode isEqualToString:@"idle"])return;
     self.scope.expression=(self.scope.expression+1)%4;
@@ -262,6 +300,22 @@
 - (void)teasePressed {if(self.onTease)self.onTease();}
 - (void)toggleAuto {
     self.autoSpeak=!self.autoSpeak;
+    if(!self.autoSpeak && self.continuousTalk){
+        self.continuousTalk=NO;
+        if(self.onContinuousTalk)self.onContinuousTalk(NO);
+    }
     if(self.onAutoSpeak)self.onAutoSpeak(self.autoSpeak);
+}
+- (void)toggleContinuous {
+    self.continuousTalk=!self.continuousTalk;
+    if(self.continuousTalk && !self.autoSpeak){
+        self.autoSpeak=YES;
+        if(self.onAutoSpeak)self.onAutoSpeak(YES);
+    }
+    if(self.onContinuousTalk)self.onContinuousTalk(self.continuousTalk);
+}
+- (void)toggleVoiceStyle {
+    self.mechanicalVoice=!self.mechanicalVoice;
+    if(self.onMechanicalVoice)self.onMechanicalVoice(self.mechanicalVoice);
 }
 @end
