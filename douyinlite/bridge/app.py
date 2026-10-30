@@ -12,7 +12,8 @@ import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 
 KEY = os.environ.get("BRIDGE_KEY", "")
@@ -20,6 +21,8 @@ PROFILE_DIR = os.environ.get("BROWSER_PROFILE", "/data/profile")
 HEADLESS = os.environ.get("HEADLESS", "false").lower() == "true"
 FEED_URL = "https://www.douyin.com/"
 MAX_CACHE = 300
+VIEWPORT_WIDTH = 1280
+VIEWPORT_HEIGHT = 800
 
 def _urls(address):
     if not isinstance(address, dict):
@@ -102,7 +105,7 @@ class BrowserFeed:
         self.playwright = await async_playwright().start()
         try:
             self.context = await self.playwright.chromium.launch_persistent_context(
-                PROFILE_DIR, headless=HEADLESS, viewport={"width": 1280, "height": 800},
+                PROFILE_DIR, headless=HEADLESS, viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
                 locale="zh-CN", accept_downloads=False,
             )
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
@@ -274,3 +277,72 @@ async def refresh(request: Request):
     engine.ids.clear()
     await engine.navigate()
     return {"status": engine.status, "items": len(engine.items)}
+
+class BrowserTap(BaseModel):
+    x: float = Field(ge=0, le=VIEWPORT_WIDTH)
+    y: float = Field(ge=0, le=VIEWPORT_HEIGHT)
+
+class BrowserScroll(BaseModel):
+    dy: int = Field(ge=-1200, le=1200)
+
+async def browser_page():
+    if engine.page is None:
+        raise HTTPException(status_code=503, detail="Cloud browser is not running")
+    return engine.page
+
+@app.get("/api/browser/frame")
+async def browser_frame(request: Request):
+    """A JPEG of the REAL remote Chromium viewport; iOS 8 needs no JS/WebKit."""
+    authorize(request)
+    page = await browser_page()
+    try:
+        async with engine.navigation_lock:
+            pixels = await page.screenshot(type="jpeg", quality=45, scale="css", timeout=10000)
+        return Response(
+            content=pixels, media_type="image/jpeg",
+            headers={"Cache-Control": "private, no-store, max-age=0",
+                     "X-Viewport-Width": str(VIEWPORT_WIDTH),
+                     "X-Viewport-Height": str(VIEWPORT_HEIGHT)},
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Screenshot temporarily unavailable")
+
+@app.post("/api/browser/tap")
+async def browser_tap(request: Request, point: BrowserTap):
+    authorize(request)
+    page = await browser_page()
+    async with engine.navigation_lock:
+        try:
+            await page.mouse.click(point.x, point.y, delay=80)
+        except Exception:
+            raise HTTPException(status_code=503, detail="Browser could not process the tap")
+    return {"ok": True}
+
+@app.post("/api/browser/scroll")
+async def browser_scroll(request: Request, scroll: BrowserScroll):
+    authorize(request)
+    page = await browser_page()
+    async with engine.navigation_lock:
+        try:
+            await page.mouse.wheel(0, scroll.dy)
+        except Exception:
+            raise HTTPException(status_code=503, detail="Browser could not scroll")
+    return {"ok": True}
+
+@app.post("/api/browser/home")
+async def browser_home(request: Request):
+    authorize(request)
+    await browser_page()
+    await engine.navigate()
+    return {"ok": True, "status": engine.status}
+
+@app.post("/api/browser/back")
+async def browser_back(request: Request):
+    authorize(request)
+    page = await browser_page()
+    async with engine.navigation_lock:
+        try:
+            await page.go_back(wait_until="domcontentloaded", timeout=12000)
+        except Exception:
+            raise HTTPException(status_code=503, detail="Browser could not navigate back")
+    return {"ok": True}
