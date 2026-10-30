@@ -1,0 +1,80 @@
+name: Publish DouyinLite Surf R2 ReadyKit
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-douyinlite-readykit-r2.yml'
+  workflow_dispatch:
+concurrency:
+  group: surf-readykit-r2
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact installable ARMv7 packages
+        run: |
+          set -euo pipefail
+          surf=downloads/Surf-iPhone4S-iOS8-installfix2.deb
+          douyin=downloads/DouyinLite-iOS8-v0.10.8.deb
+          test -s "$surf" && test -s "$douyin"
+          test "$(dpkg-deb -f "$surf" Package)" = space.seg6.surf
+          test "$(dpkg-deb -f "$surf" Version)" = 0.17.0-1+ios8legacy2
+          test "$(dpkg-deb -f "$surf" Architecture)" = iphoneos-arm
+          test "$(dpkg-deb -f "$douyin" Version)" = 0.10.8
+          test "$(dpkg-deb -f "$douyin" Architecture)" = iphoneos-arm
+          for item in "$surf" "$douyin"; do
+            ar t "$item" | grep -qx control.tar.gz
+            ar t "$item" | grep -qx data.tar.gz
+          done
+      - name: Fetch pinned official Windows Surf release
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -o /tmp/surf-windows.zip \
+            https://github.com/seg6/surf/releases/download/v0.17.0/surf-0.17.0-windows-amd64.zip
+          echo 'e2c48bfdff7249bc8fde8b654b675b31875425d5deea434430f2c65305427026  /tmp/surf-windows.zip' | sha256sum -c -
+          unzip -t /tmp/surf-windows.zip | tail -1
+      - name: Create complete installation package
+        run: |
+          set -euo pipefail
+          out=/tmp/DouyinLite-Surf-ReadyKit-R2
+          mkdir -p "$out/iPhone4S" "$out/Surf-Windows"
+          cp downloads/Surf-iPhone4S-iOS8-installfix2.deb "$out/iPhone4S/"
+          cp downloads/DouyinLite-iOS8-v0.10.8.deb "$out/iPhone4S/DouyinLite-v0.10.8.deb"
+          cp downloads/Surf-iPhone4S-iOS8-manual-fix2.zip "$out/iPhone4S/"
+          unzip -q /tmp/surf-windows.zip -d "$out/Surf-Windows"
+          test -n "$(find "$out/Surf-Windows" -type f -iname 'surf.exe' -print -quit)"
+          cp surf-kit/windows/*.cmd "$out/"
+          cp surf-kit/README-R2-中文.txt "$out/00-START-HERE-中文.txt"
+          cp surf-kit/SURF-ATTRIBUTION.txt "$out/"
+          test -s "$out/05-Diagnose-Connection.cmd"
+          test -s "$out/00-START-HERE-中文.txt"
+          (cd "$out" && sha256sum iPhone4S/*.deb > SHA256SUMS.txt)
+          mkdir -p downloads
+          (cd /tmp && zip -qr -9 "$GITHUB_WORKSPACE/downloads/DouyinLite-Surf-ReadyKit-R2.zip" DouyinLite-Surf-ReadyKit-R2)
+          unzip -t downloads/DouyinLite-Surf-ReadyKit-R2.zip | tail -1
+          ls -lh downloads/DouyinLite-Surf-ReadyKit-R2.zip
+      - name: Upload verified ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: DouyinLite-Surf-ReadyKit-R2
+          path: downloads/DouyinLite-Surf-ReadyKit-R2.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish direct ZIP file
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/DouyinLite-Surf-ReadyKit-R2.zip
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "release: complete DouyinLite Surf R2 iOS8 compatibility kit [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 3
+          done
+          exit 1
