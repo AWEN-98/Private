@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
+from streamer import CloudStream, playlist_with_ticket, valid_segment
+from fastapi.responses import FileResponse
 
 KEY = os.environ.get("BRIDGE_KEY", "")
 PROFILE_DIR = os.environ.get("BROWSER_PROFILE", "/data/profile")
@@ -219,6 +221,7 @@ class BrowserFeed:
 
 
 engine = BrowserFeed()
+cloud_stream = CloudStream()
 
 @asynccontextmanager
 async def lifespan(app):
@@ -226,6 +229,7 @@ async def lifespan(app):
         raise RuntimeError("Set BRIDGE_KEY to a random secret of at least 16 characters")
     await engine.start()
     yield
+    await cloud_stream.close()
     await engine.close()
 
 app = FastAPI(title="DouyinBridge", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -345,4 +349,45 @@ async def browser_back(request: Request):
             await page.go_back(wait_until="domcontentloaded", timeout=12000)
         except Exception:
             raise HTTPException(status_code=503, detail="Browser could not navigate back")
+    return {"ok": True}
+
+
+@app.post("/api/browser/stream/start")
+async def start_browser_stream(request: Request):
+    authorize(request)
+    await browser_page()
+    try:
+        ticket = await cloud_stream.start()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"url": str(request.url_for("stream_playlist")) + "?ticket=" + ticket,
+            "audio": False, "description": "云端浏览器实时画面，低码率无声预览"}
+
+@app.get("/api/browser/stream/index.m3u8", name="stream_playlist")
+async def stream_playlist(ticket: str = ""):
+    if not cloud_stream.authorized(ticket):
+        raise HTTPException(status_code=403, detail="Stream expired")
+    path = cloud_stream.root / "index.m3u8"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail="Playlist not ready")
+    cloud_stream.touch()
+    return Response(content=playlist_with_ticket(path.read_text(), ticket),
+                    media_type="application/vnd.apple.mpegurl",
+                    headers={"Cache-Control": "no-store"})
+
+@app.get("/api/browser/stream/{filename}")
+async def stream_segment(filename: str, ticket: str = ""):
+    if not cloud_stream.authorized(ticket) or not valid_segment(filename):
+        raise HTTPException(status_code=403, detail="Stream access denied")
+    path = cloud_stream.root / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Segment expired")
+    cloud_stream.touch()
+    return FileResponse(str(path), media_type="video/mp2t",
+                        headers={"Cache-Control": "no-store"})
+
+@app.post("/api/browser/stream/stop")
+async def stop_browser_stream(request: Request):
+    authorize(request)
+    await cloud_stream.stop()
     return {"ok": True}
