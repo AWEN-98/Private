@@ -722,12 +722,14 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
 
     CGFloat width=self.view.bounds.size.width;
-    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,187)];
+    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,198)];
     self.filterPanel.backgroundColor=XFUIBackground();
     self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.currentCard=[[UIView alloc] initWithFrame:CGRectMake(11,8,width-22,49)];
+    self.currentCard=[[UIView alloc] initWithFrame:CGRectMake(11,56,width-22,49)];
     self.currentCard.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.currentCard.backgroundColor=XFAccentPale();
+    self.currentCard.layer.borderWidth=0.7;
+    self.currentCard.layer.borderColor=XFLine().CGColor;
     self.currentCard.layer.cornerRadius=13;
     [self.filterPanel addSubview:self.currentCard];
     self.currentTitle=[[UILabel alloc] initWithFrame:CGRectMake(12,6,width-46,15)];
@@ -743,7 +745,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.currentModel.lineBreakMode=NSLineBreakByTruncatingMiddle;
     [self.currentCard addSubview:self.currentModel];
     self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.providerButton.frame=CGRectMake(11,146,width-120,33);
+    self.providerButton.frame=CGRectMake(11,159,width-120,33);
     self.providerButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton.backgroundColor=XFPaper();
     self.providerButton.layer.cornerRadius=10;
@@ -754,7 +756,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     [self.providerButton addTarget:self action:@selector(filtersTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.providerButton];
     self.probeButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.probeButton.frame=CGRectMake(width-102,146,91,33);
+    self.probeButton.frame=CGRectMake(width-102,159,91,33);
     self.probeButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
     self.probeButton.backgroundColor=XFUIAccent();
     [self.probeButton setTitle:@"检测" forState:UIControlStateNormal];
@@ -764,7 +766,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     [self.probeButton addTarget:self action:@selector(testTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.probeButton];
 
-    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,105,width,37)];
+    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,113,width,37)];
     self.categoryScroll.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.categoryScroll.showsHorizontalScrollIndicator=NO;
     self.categoryScroll.alwaysBounceHorizontal=YES;
@@ -789,7 +791,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     }
     self.categoryScroll.contentSize=CGSizeMake(x+5,39);
 
-    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,61,width,42)];
+    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,8,width,42)];
     self.search.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.search.placeholder=@"搜索模型名称、服务商";
     self.search.searchBarStyle=UISearchBarStyleMinimal;
