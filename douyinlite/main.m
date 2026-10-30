@@ -470,8 +470,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL historyOnly;
 @end
 @implementation DLFeedController
-- (UIInterfaceOrientationMask)supportedInterfaceOrientations{return UIInterfaceOrientationMaskPortrait;}
-- (BOOL)shouldAutorotate{return NO;}
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations{return self.fullscreenMode?UIInterfaceOrientationMaskLandscape:UIInterfaceOrientationMaskPortrait;}
+- (BOOL)shouldAutorotate{return YES;}
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation{return self.fullscreenMode?UIInterfaceOrientationLandscapeRight:UIInterfaceOrientationPortrait;}
 - (UIButton *)button:(NSString *)title action:(SEL)action font:(CGFloat)size {
     UIButton *b=[UIButton buttonWithType:UIButtonTypeCustom];
     b.titleLabel.font=[UIFont boldSystemFontOfSize:size];
@@ -627,7 +628,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self layoutScreen];}
 - (void)layoutScreen {
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    self.topBar.frame=CGRectMake(0,0,w,43);
+    CGFloat safeTop=self.fullscreenMode?0:([UIApplication sharedApplication].statusBarHidden?0:20);
+    self.topBar.frame=CGRectMake(0,safeTop,w,43);
     CGFloat actionW=38;
     self.categoryScroll.frame=CGRectMake(9,5,MAX(100,w-actionW*2-16),36);
     CGFloat x=0;
@@ -654,7 +656,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self.rightRail viewWithTag:111].frame=CGRectMake(1,43,56,18);
     [self.rightRail viewWithTag:112].frame=CGRectMake(2,75,54,41);
     [self.rightRail viewWithTag:113].frame=CGRectMake(1,116,56,19);
-    self.rightRail.hidden=self.fullscreenMode||self.liveMode||![self visibleVideos].count;
+    self.rightRail.hidden=YES;
     self.playButton.frame=CGRectMake((w-72)/2,(h-72)/2,72,72);
     self.titleText.frame=CGRectMake(12,h-120,MAX(100,w-88),47);
     self.subtitleText.frame=CGRectMake(12,h-80,MAX(100,w-88),24);
@@ -689,10 +691,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.fullscreenMode=!self.fullscreenMode;
     self.topBar.hidden=self.fullscreenMode;
     self.bottomHidden=self.fullscreenMode;
+    [UIViewController attemptRotationToDeviceOrientation];
     ((AVPlayerLayer *)self.surface.layer).videoGravity=self.fullscreenMode?
         AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;
     [self layoutScreen];
     [self setNeedsStatusBarAppearanceUpdate];
+    [UIViewController attemptRotationToDeviceOrientation];
     if(!self.fullscreenMode)[self showBottomTemporarily];
 }
 
@@ -1023,7 +1027,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)loadAnonymousHotVideos:(NSUInteger)token {
     NSURL *url=[NSURL URLWithString:@"https://www.iesdouyin.com/web/api/v2/hotsearch/aweme/"];
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6];
     [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
     [req setValue:@"https://www.iesdouyin.com/" forHTTPHeaderField:@"Referer"];
     [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
@@ -1295,7 +1299,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(self.liveLoading)return;
     self.liveLoading=YES;
     NSUInteger generation=++self.liveGeneration;
-    self.message.text=@"正在获取直播间…";
+    self.message.text=@"正在获取直播间，连接失败会自动尝试其他接口…";
     [self loadLiveListAtStage:0 generation:generation];
 }
 - (void)loadLiveListAtStage:(NSInteger)stage generation:(NSUInteger)generation {
@@ -1412,7 +1416,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         [NSString stringWithFormat:@"https://webcast.amemv.com/webcast/room/reflow/info/?room_id=%@&sec_user_id=&type_id=0",rid]:
         [NSString stringWithFormat:@"https://live.douyin.com/webcast/room/info_by_scene/?aid=6383&app_name=douyin_web&device_platform=web&room_id=%@&scene=aweme_video_feed_pc",rid];
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:route]
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6];
     [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         id decoded=(!error&&data.length>0&&data.length<4000000)?
@@ -1704,8 +1708,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.titleText.text=@"";
     self.subtitleText.text=@"";
     self.countText.text=@"";
-    self.likeButton.hidden=!visible.count;
-    self.rightRail.hidden=self.fullscreenMode||self.liveMode||!visible.count;
+    self.likeButton.hidden=YES;
+    self.rightRail.hidden=YES;
     BOOL hot=self.onlineMode && visible.count>0 &&
         [DLText(visible[0][@"source"]) isEqualToString:@"douyin-hot"];
     self.topText.text=self.liveMode?@"直播":(self.searchMode?self.searchQuery:(self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":(hot?@"热门":@"推荐"))));
