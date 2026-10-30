@@ -34,7 +34,7 @@ jobs:
           git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS10.3.sdk
           cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
       - name: Compile and package
-        # Retry V0.10.0 package with retained diagnostic output
+        # Retry V0.10.1 package with retained diagnostic output
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
@@ -45,7 +45,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: DouyinLite-v0.10.0-build-log
+          name: DouyinLite-v0.10.1-build-log
           path: douyinlite-build.log
           if-no-files-found: ignore
           retention-days: 7
@@ -54,7 +54,7 @@ jobs:
         run: |
           mkdir -p diagnostics
           {
-            echo "DouyinLite 0.10.0 build failure"
+            echo "DouyinLite 0.10.1 build failure"
             echo "Commit: $GITHUB_SHA"
             echo "Run: $GITHUB_RUN_ID"
             echo "Workflow logs: https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
@@ -64,10 +64,10 @@ jobs:
             else
               echo "No compiler log. Failure occurred during runner setup or dependency installation."
             fi
-          } > diagnostics/douyinlite-0.10.0-failure.txt
+          } > diagnostics/douyinlite-0.10.1-failure.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/douyinlite-0.10.0-failure.txt
+          git add diagnostics/douyinlite-0.10.1-failure.txt
           git commit -m "ci: save DouyinLite failed build diagnostics [skip ci]" || true
           git pull --rebase origin main || true
           git push origin HEAD:main || true
@@ -81,7 +81,7 @@ jobs:
           cp douyinlite/scripts/postinst /tmp/douyin-repack/DEBIAN/postinst
           chmod 755 /tmp/douyin-repack/DEBIAN/postinst
           dpkg-deb --root-owner-group -Zgzip -z6 --build /tmp/douyin-repack "$DEB"
-          test "$(dpkg-deb -f "$DEB" Version)" = "0.10.0"
+          test "$(dpkg-deb -f "$DEB" Version)" = "0.10.1"
           test "$(dpkg-deb -f "$DEB" Architecture)" = "iphoneos-arm"
           ar t "$DEB" | grep -Fx 'data.tar.gz'
           ar t "$DEB" | grep -Fx 'control.tar.gz'
@@ -99,24 +99,24 @@ jobs:
           with open(sys.argv[1],'rb') as f:p=plistlib.load(f)
           assert p["CFBundleIdentifier"]=="com.finn.douyinlite"
           assert p["MinimumOSVersion"]=="8.0"
-          assert p["CFBundleShortVersionString"]=="0.10.0"
+          assert p["CFBundleShortVersionString"]=="0.10.1"
           print("Verified iOS 8 app identity and version")
           PYTEST
           cp -a "$APP" /tmp/douyin-ipa/Payload/DouyinLite.app
           mkdir -p downloads
-          (cd /tmp/douyin-ipa && zip -qr -X "$GITHUB_WORKSPACE/downloads/DouyinLite-iOS8-v0.10.0.ipa" Payload)
-          cp "$DEB" downloads/DouyinLite-iOS8-v0.10.0.deb
-          (cd downloads && zip -q -9 DouyinLite-iOS8-v0.10.0.zip DouyinLite-iOS8-v0.10.0.deb)
-          unzip -t downloads/DouyinLite-iOS8-v0.10.0.zip | tail -1
-          sha256sum downloads/DouyinLite-iOS8-v0.10.0.*
+          (cd /tmp/douyin-ipa && zip -qr -X "$GITHUB_WORKSPACE/downloads/DouyinLite-iOS8-v0.10.1.ipa" Payload)
+          cp "$DEB" downloads/DouyinLite-iOS8-v0.10.1.deb
+          (cd downloads && zip -q -9 DouyinLite-iOS8-v0.10.1.zip DouyinLite-iOS8-v0.10.1.deb)
+          unzip -t downloads/DouyinLite-iOS8-v0.10.1.zip | tail -1
+          sha256sum downloads/DouyinLite-iOS8-v0.10.1.*
       - name: Upload install packages as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DouyinLite-iOS8-v0.10.0
+          name: DouyinLite-iOS8-v0.10.1
           path: |
-            downloads/DouyinLite-iOS8-v0.10.0.deb
-            downloads/DouyinLite-iOS8-v0.10.0.ipa
-            downloads/DouyinLite-iOS8-v0.10.0.zip
+            downloads/DouyinLite-iOS8-v0.10.1.deb
+            downloads/DouyinLite-iOS8-v0.10.1.ipa
+            downloads/DouyinLite-iOS8-v0.10.1.zip
           if-no-files-found: error
           retention-days: 30
       - name: Publish verified files
@@ -124,9 +124,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/DouyinLite-iOS8-v0.10.0.deb downloads/DouyinLite-iOS8-v0.10.0.zip downloads/DouyinLite-iOS8-v0.10.0.ipa
+          git add downloads/DouyinLite-iOS8-v0.10.1.deb downloads/DouyinLite-iOS8-v0.10.1.zip downloads/DouyinLite-iOS8-v0.10.1.ipa
           if ! git diff --cached --quiet; then
-            git commit -m "release: verified DouyinLite 0.10.0 armv7 install packages [skip ci]"
+            git commit -m "release: verified DouyinLite 0.10.1 armv7 install packages [skip ci]"
             for attempt in 1 2 3 4 5; do
               git pull --rebase origin main
               if git push origin HEAD:main; then exit 0; fi
