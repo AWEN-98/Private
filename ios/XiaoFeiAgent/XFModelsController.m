@@ -957,16 +957,17 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     BOOL probeCapable=[XFModelProbe canProbeCategory:item[@"category"]];
     NSString *state=[self statusLabel:status.length?status:(probeCapable?@"untested":@"notprobed")];
     NSString *name=model[@"name"]?:model[@"id"];
-    cell.textLabel.text=[NSString stringWithFormat:@"%@%@%@",active?@"✓  ":@"",favorite?@"★  ":@"",name];
+    cell.textLabel.text=name;
     cell.textLabel.textColor=failed?[UIColor colorWithWhite:0.70 alpha:1]:(active?XFUIAccent():XFUIText());
     cell.textLabel.font=active?[UIFont boldSystemFontOfSize:14.5]:[UIFont systemFontOfSize:14.5];
     NSNumber *latency=item[@"probe"][@"latency_ms"];
     NSString *speed=latency && [latency integerValue]>0 && passed?
         [NSString stringWithFormat:@" · %.1fs",[latency doubleValue]/1000.0]:@"";
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@ · %@ · %@",state,speed,account[@"name"]?:@"",
-      [self shortCategoryName:item[@"category"]]];
+    NSString *flag=active?@"使用中 · ":(favorite?@"常用 · ":@"");
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@%@ · %@",flag,state,speed,account[@"name"]?:@""];
     cell.detailTextLabel.textColor=passed?[UIColor colorWithRed:0.24 green:0.57 blue:0.40 alpha:1]:
       (failed?[UIColor colorWithWhite:0.73 alpha:1]:XFUIHint());
+    cell.backgroundColor=active?[UIColor colorWithRed:.936 green:.953 blue:1 alpha:1]:[UIColor whiteColor];
     cell.accessoryType=UITableViewCellAccessoryDetailButton;
     return cell;
 }
