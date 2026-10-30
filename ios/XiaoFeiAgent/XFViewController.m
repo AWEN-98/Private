@@ -13,6 +13,13 @@
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 
+// Qwen3-ASR-Flash uses OpenAI-compatible Chat Completions with input_audio.
+// Other STT providers continue using multipart /audio/transcriptions.
+static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
+    NSString *model=[profile[@"model"] isKindOfClass:[NSString class]]?[profile[@"model"] lowercaseString]:@"";
+    return [model hasPrefix:@"qwen3-asr-flash"] && ![model containsString:@"filetrans"];
+}
+
 @interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate,UITextViewDelegate,AVSpeechSynthesizerDelegate>
 @property(nonatomic,strong) XFChatView *chat;
 @property(nonatomic,strong) UIView *headerBar;
@@ -1277,10 +1284,20 @@
                 else [self showAlert:@"没有麦克风权限" detail:@"请到系统设置允许小斐 AI 使用麦克风。"];
                 return;
             }
-            NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"xf-recording.m4a"];
-            NSDictionary *settings=@{AVFormatIDKey:@(kAudioFormatMPEG4AAC),
-                AVSampleRateKey:@16000,AVNumberOfChannelsKey:@1,
-                AVEncoderAudioQualityKey:@(AVAudioQualityMedium)};
+            // Qwen3-ASR-Flash accepts WAV input. Keep AAC for the multipart
+            // providers that already work in the existing client.
+            BOOL isQwen=XFUsesQwen3ASR(p);
+            NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:
+                isQwen?@"xf-recording.wav":@"xf-recording.m4a"];
+            NSDictionary *settings=isQwen?
+                @{AVFormatIDKey:@(kAudioFormatLinearPCM),
+                  AVSampleRateKey:@16000,AVNumberOfChannelsKey:@1,
+                  AVLinearPCMBitDepthKey:@16,
+                  AVLinearPCMIsFloatKey:@NO,
+                  AVLinearPCMIsBigEndianKey:@NO}:
+                @{AVFormatIDKey:@(kAudioFormatMPEG4AAC),
+                  AVSampleRateKey:@16000,AVNumberOfChannelsKey:@1,
+                  AVEncoderAudioQualityKey:@(AVAudioQualityMedium)};
             NSError *error=nil;
             self.recorder=[[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:path]
                                                        settings:settings error:&error];
@@ -1323,14 +1340,41 @@
     }
     NSMutableURLRequest *req=[self requestForProfile:p];
     if(!req){if(wasVoice)[self voiceError:@"请检查语音识别 API 配置"];return;}
-    NSString *boundary=[[NSUUID UUID] UUIDString];
-    [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
-    NSMutableData *body=[NSMutableData data];
-    [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n%@\r\n",boundary,p[@"model"]] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:audio];
-    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
-    req.HTTPBody=body;
+    BOOL qwen=XFUsesQwen3ASR(p);
+    if(qwen){
+        // Chat Completions is the documented interface for Qwen3-ASR-Flash.
+        // Don't send a multipart POST to /audio/transcriptions (HTTP 404).
+        NSURL *chatURL=[NSURL URLWithString:p[@"chat_endpoint"]?:@""];
+        if(![[chatURL.scheme lowercaseString] isEqualToString:@"https"] || !chatURL.host.length){
+            if(wasVoice)[self voiceError:@"千问语音接口配置错误，请检查 API 服务的 Base URL"];
+            else self.status.text=@"千问语音接口无效，请检查 API Base URL";
+            return;
+        }
+        if(![[[self.recorder.url pathExtension] lowercaseString] isEqualToString:@"wav"]){
+            if(wasVoice)[self voiceError:@"千问需要 WAV 录音，请重新开始录音"];
+            else self.status.text=@"千问录音格式错误，请重新录音";
+            return;
+        }
+        [req setURL:chatURL];
+        req.timeoutInterval=90;
+        NSString *uri=[@"data:audio/wav;base64," stringByAppendingString:
+            [audio base64EncodedStringWithOptions:0]];
+        NSDictionary *payload=@{@"model":p[@"model"],
+            @"messages":@[@{@"role":@"user",@"content":@[
+                @{@"type":@"input_audio",@"input_audio":@{@"data":uri}}
+            ]}],@"stream":@NO};
+        req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    } else {
+        NSString *boundary=[[NSUUID UUID] UUIDString];
+        [req setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@",boundary] forHTTPHeaderField:@"Content-Type"];
+        NSMutableData *body=[NSMutableData data];
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n%@\r\n",boundary,p[@"model"]] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"recording.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:audio];
+        [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+        req.HTTPBody=body;
+    }
     self.status.text=@"正在语音识别…";
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
         if(wasVoice && (!self.voiceActive || !self.voiceCapture))return;
@@ -1341,12 +1385,35 @@
             return;
         }
         NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
-        NSDictionary *json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
-        NSString *text=[json isKindOfClass:[NSDictionary class]]?json[@"text"]:nil;
-        if(code>=300 || ![text isKindOfClass:[NSString class]]){
-            [XFDiagnostics record:@"语音识别接口失败" code:code detail:@"API 不兼容或模型权限不足"];
-            self.status.text=[NSString stringWithFormat:@"语音识别失败 HTTP %ld；查看诊断",(long)code];
-            if(wasVoice)[self voiceError:[NSString stringWithFormat:@"语音识别错误 HTTP %ld，请检查 STT 模型",(long)code]];
+        id parsed=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        NSDictionary *json=[parsed isKindOfClass:[NSDictionary class]]?parsed:nil;
+        NSString *text=[json[@"text"] isKindOfClass:[NSString class]]?json[@"text"]:nil;
+        if(qwen && !text.length){
+            NSArray *choices=[json[@"choices"] isKindOfClass:[NSArray class]]?json[@"choices"]:@[];
+            NSDictionary *first=choices.count && [choices[0] isKindOfClass:[NSDictionary class]]?choices[0]:nil;
+            NSDictionary *msg=[first[@"message"] isKindOfClass:[NSDictionary class]]?first[@"message"]:nil;
+            id content=msg[@"content"];
+            if([content isKindOfClass:[NSString class]])text=content;
+            else if([content isKindOfClass:[NSArray class]]){
+                NSMutableString *parts=[NSMutableString string];
+                for(id part in content){
+                    if([part isKindOfClass:[NSDictionary class]] &&
+                       [part[@"text"] isKindOfClass:[NSString class]])[parts appendString:part[@"text"]];
+                }
+                text=parts;
+            }
+        }
+        if(code<200 || code>=300 || ![text isKindOfClass:[NSString class]]){
+            NSDictionary *error=[json[@"error"] isKindOfClass:[NSDictionary class]]?json[@"error"]:nil;
+            NSString *reason=[error[@"message"] isKindOfClass:[NSString class]]?error[@"message"]:nil;
+            if(!reason.length && [json[@"message"] isKindOfClass:[NSString class]])reason=json[@"message"];
+            if(!reason.length)reason=qwen?@"千问语音响应缺少文字，请检查模型及地域":@"模型返回格式不兼容";
+            if(reason.length>140)reason=[reason substringToIndex:140];
+            [XFDiagnostics record:@"语音识别接口失败" code:code
+                detail:[NSString stringWithFormat:@"%@：%@",qwen?@"千问 Chat Completions":@"转写接口",reason]];
+            NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
+            self.status.text=notice;
+            if(wasVoice)[self voiceError:notice];
             return;
         }
         if(!text.length){if(wasVoice)[self voiceError:@"没有识别出文字，请再试一次"];return;}
