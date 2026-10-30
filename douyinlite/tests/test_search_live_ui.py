@@ -26,7 +26,7 @@ checks={
  "Live room official scene endpoint": "https://live.douyin.com/webcast/room/info_by_scene/" in s,
  "Live room reflow endpoint": "https://webcast.amemv.com/webcast/room/reflow/info/" in s,
  "Live stream must have HLS address": 'rangeOfString:@".m3u8"' in s,
- "Live room entered with user link": 'actionWithTitle:@"进入直播间"' in s and "DLLiveID" in s,
+ "Live room entered with user link": 'alertControllerWithTitle:@"进入直播间"' in s and "DLLiveID" in s,
  "Playback remains on device": "AVPlayerItem playerItemWithAsset" in s,
  "Favorited web video persists": '[self.videos insertObject:clip atIndex:0]' in s,
  "No fake comments control": "action:@selector(openComments)" not in s,
