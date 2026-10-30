@@ -1,0 +1,75 @@
+name: Publish DouyinLite Surf ReadyKit
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'surf-kit/**'
+      - '.github/workflows/build-surf-kit.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  assemble:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify DouyinLite package
+        run: |
+          set -euo pipefail
+          test -s downloads/DouyinLite-iOS8-v0.10.8.deb
+          test "$(dpkg-deb -f downloads/DouyinLite-iOS8-v0.10.8.deb Version)" = "0.10.8"
+          test "$(dpkg-deb -f downloads/DouyinLite-iOS8-v0.10.8.deb Architecture)" = "iphoneos-arm"
+      - name: Fetch and checksum official MIT-licensed Surf 0.17.0 packages
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/surf-upstream
+          curl --fail --location --retry 4 --retry-delay 2 --output /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb https://github.com/seg6/surf/releases/download/v0.17.0/space.seg6.surf_0.17.0-1_iphoneos-arm.deb
+          curl --fail --location --retry 4 --retry-delay 2 --output /tmp/surf-upstream/Surf-Windows-x64.zip https://github.com/seg6/surf/releases/download/v0.17.0/surf-0.17.0-windows-amd64.zip
+          echo '87c9b3988ddef855eb80f9ae9bc2e4bd00a9b620858f3c787d8ccaee4ac1a192  /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb' | sha256sum --check -
+          echo 'e2c48bfdff7249bc8fde8b654b675b31875425d5deea434430f2c65305427026  /tmp/surf-upstream/Surf-Windows-x64.zip' | sha256sum --check -
+          test "$(dpkg-deb -f /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb Package)" = "space.seg6.surf"
+          test "$(dpkg-deb -f /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb Version)" = "0.17.0"
+          unzip -t /tmp/surf-upstream/Surf-Windows-x64.zip | tail -1
+      - name: Assemble one-download ready-to-use package
+        run: |
+          set -euo pipefail
+          OUT="staging/DouyinLite-Surf-ReadyKit-v0.10.8"
+          mkdir -p "$OUT/iPhone4S" "$OUT/Surf-Windows"
+          cp downloads/DouyinLite-iOS8-v0.10.8.deb "$OUT/iPhone4S/DouyinLite-v0.10.8.deb"
+          cp /tmp/surf-upstream/Surf-iPhone4S-iOS8.deb "$OUT/iPhone4S/Surf-iPhone4S-iOS8.deb"
+          unzip -q /tmp/surf-upstream/Surf-Windows-x64.zip -d "$OUT/Surf-Windows"
+          cp surf-kit/windows/*.cmd "$OUT/"
+          cp surf-kit/README-中文.txt surf-kit/SURF-ATTRIBUTION.txt "$OUT/"
+          test -n "$(find "$OUT/Surf-Windows" -type f -iname 'surf.exe' -print -quit)"
+          test -s "$OUT/01-Start-Douyin-Host.cmd"
+          test -s "$OUT/02-Open-Login-Browser.cmd"
+          test -s "$OUT/03-Pair-Phone.cmd"
+          test -s "$OUT/iPhone4S/Surf-iPhone4S-iOS8.deb"
+          test -s "$OUT/iPhone4S/DouyinLite-v0.10.8.deb"
+          (cd "$OUT" && sha256sum iPhone4S/*.deb > SHA256SUMS.txt)
+          mkdir -p downloads
+          (cd staging && zip -qr -9 "../downloads/DouyinLite-Surf-ReadyKit-v0.10.8.zip" DouyinLite-Surf-ReadyKit-v0.10.8)
+          unzip -t downloads/DouyinLite-Surf-ReadyKit-v0.10.8.zip | tail -1
+          ls -lh downloads/DouyinLite-Surf-ReadyKit-v0.10.8.zip
+      - name: Publish installation kit as Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DouyinLite-Surf-ReadyKit-v0.10.8
+          path: downloads/DouyinLite-Surf-ReadyKit-v0.10.8.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish direct ZIP link
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/DouyinLite-Surf-ReadyKit-v0.10.8.zip
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "release: verified DouyinLite Surf ReadyKit 0.10.8 [skip ci]"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 2
+          done
+          echo "Could not publish kit to main. See uploaded Actions artifact." >&2
+          exit 1
