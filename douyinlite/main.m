@@ -1301,7 +1301,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.liveLoading=YES;
     NSUInteger generation=++self.liveGeneration;
     self.message.text=@"正在获取直播间，连接失败会自动尝试其他接口…";
+    [self performSelector:@selector(checkLiveLoadingTimeout:) withObject:@(generation) afterDelay:24];
     [self loadLiveListAtStage:0 generation:generation];
+}
+- (void)checkLiveLoadingTimeout:(NSNumber *)generation {
+    if(generation.unsignedIntegerValue!=self.liveGeneration || !self.liveMode || self.liveVideos.count)return;
+    self.liveLoading=NO;
+    self.message.text=@"直播连接超时。请重试，或输入直播间地址。";
 }
 - (void)loadLiveListAtStage:(NSInteger)stage generation:(NSUInteger)generation {
     // Try the browser live-square entry, then the older hot ranking source.
