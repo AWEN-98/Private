@@ -192,3 +192,56 @@ def test_public_share_resolution_falls_back_to_mobile_page(monkeypatch):
         FakeRequest(), bridge.PublicShareRequest(url=share)))
     assert result["url"] == "https://media.example/actual.mp4"
     assert fake.request.visited == [share, public]
+
+
+
+def test_private_media_registry_and_byte_range_validation():
+    from media import MediaRegistry, allowed_media_url, valid_byte_range
+    registry = MediaRegistry()
+    target = "https://v26-web.douyinvod.com/some-video.mp4"
+    assert allowed_media_url(target)
+    token = registry.add(target)
+    assert registry.get(token) == target
+    for bad in ("https://evil.example.com/a.mp4",
+                "http://v26-web.douyinvod.com/a.mp4",
+                "https://douyinvod.com.evil.test/a.mp4",
+                "https://localhost/a.mp4",
+                "https://v26-web.douyinvod.com:8080/a.mp4"):
+        assert not allowed_media_url(bad)
+        assert registry.add(bad) is None
+    for value in (None, "bytes=0-100", "bytes=123-", "bytes=-250"):
+        assert valid_byte_range(value)
+    for value in ("bytes=1-3,4-6", "items=0-1", "bytes=../../"):
+        assert not valid_byte_range(value)
+
+
+def test_media_proxy_preserves_range_and_referer(monkeypatch):
+    import asyncio
+    import httpx
+    import app as bridge
+    url = "https://v26-web.douyinvod.com/available.mp4"
+    token = bridge.media_registry.add(url)
+    captured = []
+    def upstream(request):
+        captured.append(request)
+        return httpx.Response(206, content=b"vide",
+                              headers={"content-type": "video/mp4",
+                                       "content-range": "bytes 0-3/100",
+                                       "accept-ranges": "bytes"})
+    real_client = httpx.AsyncClient
+    mock_transport = httpx.MockTransport(upstream)
+    monkeypatch.setattr(bridge.httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(transport=mock_transport))
+    class Request:
+        method = "GET"
+        headers = {"range": "bytes=0-3"}
+    async def run():
+        response = await bridge.media_proxy(token, Request())
+        blocks = [block async for block in response.body_iterator]
+        return response, b"".join(blocks)
+    response, body = asyncio.run(run())
+    assert response.status_code == 206
+    assert body == b"vide"
+    assert response.headers["content-range"] == "bytes 0-3/100"
+    assert captured[0].headers["range"] == "bytes=0-3"
+    assert captured[0].headers["referer"] == "https://www.douyin.com/"
