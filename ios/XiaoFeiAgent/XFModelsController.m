@@ -225,9 +225,9 @@ static void XFDropAccount(NSString *aid){
     t.text=label;t.font=[UIFont boldSystemFontOfSize:12.5];t.textColor=XFUIText();[self.scroll addSubview:t];
     UITextField *f=[[UITextField alloc] initWithFrame:CGRectMake(14,y+25,self.view.bounds.size.width-28,43)];
     f.autoresizingMask=UIViewAutoresizingFlexibleWidth;f.borderStyle=UITextBorderStyleNone;
-    f.backgroundColor=[UIColor whiteColor];f.font=[UIFont systemFontOfSize:14];f.textColor=XFUIText();f.text=value;
-    f.layer.cornerRadius=8;f.layer.borderWidth=0.5;
-    f.layer.borderColor=[UIColor colorWithRed:0.86 green:0.89 blue:0.94 alpha:1].CGColor;
+    f.backgroundColor=XFPaper();f.font=[UIFont systemFontOfSize:14];f.textColor=XFUIText();f.text=value;
+    f.layer.cornerRadius=12;f.layer.borderWidth=0.7;
+    f.layer.borderColor=XFLine().CGColor;
     UIView *pad=[[UIView alloc] initWithFrame:CGRectMake(0,0,10,10)];
     f.leftView=pad;f.leftViewMode=UITextFieldViewModeAlways;
     f.autocapitalizationType=UITextAutocapitalizationTypeNone;f.autocorrectionType=UITextAutocorrectionTypeNo;
@@ -248,6 +248,8 @@ static void XFDropAccount(NSString *aid){
     self.advancedButton=[UIButton buttonWithType:UIButtonTypeSystem];
     self.advancedButton.frame=CGRectMake(14,260,self.view.bounds.size.width-28,38);
     self.advancedButton.contentHorizontalAlignment=UIControlContentHorizontalAlignmentLeft;
+    self.advancedButton.tintColor=XFAccent();
+    self.advancedButton.titleLabel.font=[UIFont boldSystemFontOfSize:13];
     [self.advancedButton setTitle:@"高级设置  ▾" forState:UIControlStateNormal];
     [self.advancedButton addTarget:self action:@selector(toggleAdvanced) forControlEvents:UIControlEventTouchUpInside];
     [self.scroll addSubview:self.advancedButton];
@@ -360,10 +362,20 @@ static void XFDropAccount(NSString *aid){
     [super viewDidLoad];self.title=@"API 管理";
     XFStyleNav(self.navigationController);
     self.tableView.backgroundColor=XFUIBackground();
-    self.tableView.rowHeight=64;
-    self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.95 alpha:1];
+    self.tableView.rowHeight=67;
+    self.tableView.separatorColor=XFLine();
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"添加" style:UIBarButtonItemStylePlain target:self action:@selector(add)];
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
+    UIView *banner=[[UIView alloc] initWithFrame:CGRectMake(0,0,self.view.bounds.size.width,82)];
+    banner.backgroundColor=XFCanvas();
+    UILabel *note=[[UILabel alloc] initWithFrame:CGRectMake(18,10,self.view.bounds.size.width-36,60)];
+    note.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    note.numberOfLines=3;
+    note.font=[UIFont systemFontOfSize:12.5];
+    note.textColor=XFSecondary();
+    note.text=@"添加服务并保存密钥\n同步模型后，回到模型库即可切换。";
+    [banner addSubview:note];
+    self.tableView.tableHeaderView=banner;
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView{return 2;}
 - (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)s {
@@ -378,9 +390,12 @@ static void XFDropAccount(NSString *aid){
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)ip {
     UITableViewCell *c=[t dequeueReusableCellWithIdentifier:@"account"];
     if(!c)c=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"account"];
-    c.backgroundColor=[UIColor whiteColor];
+    c.backgroundColor=XFPaper();
+    c.textLabel.font=[UIFont boldSystemFontOfSize:15];
+    c.detailTextLabel.font=[UIFont systemFontOfSize:12];
+    c.detailTextLabel.textColor=XFSecondary();
     if(ip.section==1){
-        c.textLabel.text=@"+ 添加 API 服务";c.textLabel.textColor=XFUIAccent();
+        c.textLabel.text=@"添加服务";c.textLabel.textColor=XFAccent();
         c.detailTextLabel.text=@"选择服务商，填写密钥";
         c.accessoryType=UITableViewCellAccessoryDisclosureIndicator;
         return c;
@@ -391,7 +406,7 @@ static void XFDropAccount(NSString *aid){
     c.textLabel.textColor=XFUIText();
     c.detailTextLabel.text=[NSString stringWithFormat:@"%@ · %lu 个模型",keyed?@"已配置密钥":@"缺少密钥",(unsigned long)[a[@"models"] count]];
     c.detailTextLabel.font=[UIFont systemFontOfSize:12];
-    c.detailTextLabel.textColor=keyed?XFUIHint():[UIColor colorWithRed:.76 green:.32 blue:.25 alpha:1];
+    c.detailTextLabel.textColor=keyed?XFSecondary():XFDanger();
     c.accessoryType=UITableViewCellAccessoryDetailButton;return c;
 }
 - (BOOL)tableView:(UITableView *)t canEditRowAtIndexPath:(NSIndexPath *)ip {return ip.section==0;}
