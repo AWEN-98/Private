@@ -333,6 +333,38 @@ static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
     UIGraphicsEndImageContext();
     return result;
 }
+static NSString *DLLiveHLS(id node,NSInteger depth){
+    if(depth>7||!node||node==(id)[NSNull null])return nil;
+    if([node isKindOfClass:NSString.class]){
+        NSString *v=(NSString *)node;
+        if(([v hasPrefix:@"https://"]||[v hasPrefix:@"http://"]) &&
+           [v rangeOfString:@".m3u8" options:NSCaseInsensitiveSearch].location!=NSNotFound)return v;
+        if([v hasPrefix:@"{"] && v.length<200000){
+            id decoded=[NSJSONSerialization JSONObjectWithData:[v dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+            if(decoded)return DLLiveHLS(decoded,depth+1);
+        }
+        return nil;
+    }
+    if([node isKindOfClass:NSArray.class]){
+        for(id v in (NSArray *)node){NSString *h=DLLiveHLS(v,depth+1);if(h.length)return h;}return nil;
+    }
+    if(![node isKindOfClass:NSDictionary.class])return nil;
+    NSDictionary *d=node;
+    for(NSString *key in @[@"hls_pull_url",@"hls",@"hls_pull_url_map",@"stream_url",
+        @"live_core_sdk_data",@"pull_data",@"stream_data",@"data",@"room",@"room_info",
+        @"default_resolution",@"FULL_HD1",@"SD1",@"SD",@"LD",@"ORIGIN",@"HD1",@"H264"]){
+        id v=d[key];if(!v)continue;
+        NSString *h=DLLiveHLS(v,depth+1);if(h.length)return h;
+    }
+    return nil;
+}
+static NSString *DLLiveID(NSString *text){
+    if(!text.length)return nil;
+    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"[0-9]{12,22}" options:0 error:NULL];
+    NSTextCheckingResult *m=[re firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
+    return m?[text substringWithRange:m.range]:nil;
+}
+
 static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *color){
     [button setTitle:nil forState:UIControlStateNormal];
     [button setImage:DLLineIcon(kind,size,color) forState:UIControlStateNormal];
@@ -396,6 +428,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,strong) UIButton *searchButton;
 @property(nonatomic,strong) UIButton *fullscreenButton;
 @property(nonatomic,strong) NSMutableArray *liveVideos;
+@property(nonatomic,assign) BOOL liveLoading;
+@property(nonatomic,assign) NSUInteger liveGeneration;
 @property(nonatomic,copy) NSString *category;
 @property(nonatomic,assign) BOOL liveMode;
 @property(nonatomic,assign) BOOL fullscreenMode;
@@ -1251,6 +1285,116 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         UILabel *label=self.tabLabels[i];label.textColor=color;
         label.font=active?[UIFont boldSystemFontOfSize:10]:[UIFont systemFontOfSize:10];
     }
+}
+- (void)loadLiveRanking {
+    if(self.liveLoading)return;
+    self.liveLoading=YES;
+    NSUInteger generation=++self.liveGeneration;
+    self.message.text=@"正在获取直播间…";
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:
+        [NSURL URLWithString:@"https://webcast.amemv.com/webcast/ranklist/hot/?aid=6383&app_name=douyin_web"]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        id value=(!error&&data.length>0&&data.length<3500000)?
+            [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSDictionary *json=[value isKindOfClass:NSDictionary.class]?value:@{};
+        NSDictionary *payload=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
+        NSArray *ranks=[payload[@"ranks"] isKindOfClass:NSArray.class]?payload[@"ranks"]:@[];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(generation!=self.liveGeneration)return;
+            self.liveLoading=NO;
+            if(!self.liveMode)return;
+            NSMutableSet *seen=[NSMutableSet set];
+            NSUInteger started=0;
+            for(id obj in ranks){
+                if(![obj isKindOfClass:NSDictionary.class])continue;
+                NSDictionary *row=obj;
+                NSDictionary *room=[row[@"room"] isKindOfClass:NSDictionary.class]?row[@"room"]:@{};
+                NSDictionary *owner=[row[@"user"] isKindOfClass:NSDictionary.class]?row[@"user"]:@{};
+                NSString *rid=DLText(room[@"id"]);
+                if(!rid.length)rid=DLText(room[@"id_str"]);
+                if(!rid.length||[seen containsObject:rid])continue;
+                [seen addObject:rid];
+                NSString *title=DLText(room[@"title"]);
+                if(!title.length)title=@"抖音直播";
+                NSString *name=DLText(owner[@"nickname"]);
+                // Resolve each room to an actual playable HLS stream.
+                [self resolveLiveRoomID:rid title:title author:name stage:0 generation:generation];
+                if(++started>=12)break;
+            }
+            if(!started)self.message.text=@"直播榜单暂不可用，点右上角搜索图标输入直播间链接。";
+            else self.message.text=@"正在连接直播流…";
+        });
+    }] resume];
+}
+- (void)promptLiveRoom {
+    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"进入直播间"
+        message:@"输入官方直播间地址或直播间编号" preferredStyle:UIAlertControllerStyleAlert];
+    [dialog addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.placeholder=@"直播间链接或编号";field.clearButtonMode=UITextFieldViewModeWhileEditing;
+    }];
+    [dialog addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [dialog addAction:[UIAlertAction actionWithTitle:@"打开直播" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        NSString *text=[DLText(((UITextField *)dialog.textFields.firstObject).text)
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *rid=DLLiveID(text);
+        if(rid.length){
+            self.liveMode=YES;self.onlineMode=NO;self.searchMode=NO;
+            self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+            self.message.text=@"正在连接直播间…";
+            [self resolveLiveRoomID:rid title:@"抖音直播" author:@"" stage:0 generation:++self.liveGeneration];
+            [self layoutScreen];return;
+        }
+        NSURL *url=[NSURL URLWithString:text];
+        NSString *host=url.host.lowercaseString?:@"";
+        if(![url.scheme isEqualToString:@"https"] ||
+           !([host isEqualToString:@"v.douyin.com"]||[host isEqualToString:@"live.douyin.com"])){
+            [self alert:@"直播地址无效" message:@"请使用抖音官方直播间分享链接或纯数字直播间编号。"];return;
+        }
+        // Follow only a trusted official short link to discover the room ID.
+        NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+        [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+            NSString *resolved=DLLiveID(response.URL.absoluteString);
+            dispatch_async(dispatch_get_main_queue(),^{
+                if(resolved.length){
+                    self.liveMode=YES;self.onlineMode=NO;self.searchMode=NO;
+                    self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+                    [self resolveLiveRoomID:resolved title:@"抖音直播" author:@"" stage:0 generation:++self.liveGeneration];
+                    [self layoutScreen];
+                }else [self alert:@"暂时无法识别直播间" message:@"此分享链接没有返回直播间编号，可以尝试复制直播间的完整链接。"];
+            });
+        }] resume];
+    }]];
+    [self presentViewController:dialog animated:YES completion:nil];
+}
+- (void)resolveLiveRoomID:(NSString *)rid title:(NSString *)title
+                   author:(NSString *)author stage:(NSInteger)stage generation:(NSUInteger)generation {
+    if(!rid.length||stage>=2)return;
+    NSString *route=stage==0?
+        [NSString stringWithFormat:@"https://webcast.amemv.com/webcast/room/reflow/info/?room_id=%@&sec_user_id=&type_id=0",rid]:
+        [NSString stringWithFormat:@"https://live.douyin.com/webcast/room/info_by_scene/?aid=6383&app_name=douyin_web&device_platform=web&room_id=%@&scene=aweme_video_feed_pc",rid];
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:route]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        id decoded=(!error&&data.length>0&&data.length<4000000)?
+            [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSString *hls=DLLiveHLS(decoded,0);
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(generation!=self.liveGeneration||!self.liveMode)return;
+            if(hls.length){
+                for(NSDictionary *old in self.liveVideos)
+                    if([DLText(old[@"id"]) isEqualToString:rid])return;
+                [self.liveVideos addObject:@{@"url":hls,@"id":rid,@"title":title.length?title:@"抖音直播",
+                    @"author":author?:@"",@"source":@"douyin-live"}];
+                if(self.liveVideos.count==1){self.index=0;[self reloadCurrent];}
+                else [self reloadMetadata];
+                self.message.text=@"";
+            }else if(stage==0)[self resolveLiveRoomID:rid title:title author:author stage:1 generation:generation];
+            else if(!self.liveVideos.count)self.message.text=@"暂无可播放的直播源。可能已下播或需要平台验证，点右上角搜索图标输入其他直播间。";
+        });
+    }] resume];
 }
 - (void)categoryPressed:(UIButton *)button {
     NSInteger idx=button.tag-300;
