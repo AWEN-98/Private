@@ -41,7 +41,25 @@ jobs:
           mkdir -p repack_legacy
           dpkg-deb -R "$original_deb" repack_legacy
           chmod 755 repack_legacy/DEBIAN/postinst
-          dpkg-deb -Zgzip -z6 --build repack_legacy "$original_deb"
+          # iOS 8 rootful must not inherit the CI runner UID/GID.
+          dpkg-deb --root-owner-group -Zgzip -z6 --build repack_legacy "$original_deb"
+          # Package version must match the source control metadata.
+          expected="$(sed -n 's/^Version: //p' control | head -1)"
+          actual="$(dpkg-deb -f "$original_deb" Version)"
+          test -n "$expected" && test "$actual" = "$expected"
+          test "$(dpkg-deb -f "$original_deb" Architecture)" = "iphoneos-arm"
+          python3 - "$original_deb" <<'PY'
+          import plistlib, subprocess, sys
+          from pathlib import Path
+          import tempfile
+          with tempfile.TemporaryDirectory() as directory:
+              subprocess.run(["dpkg-deb", "-x", sys.argv[1], directory], check=True)
+              plist=Path(directory)/"Applications/XiaoFeiAgent.app/Info.plist"
+              with plist.open("rb") as stream: info=plistlib.load(stream)
+              assert info.get("CFBundleShortVersionString") == subprocess.check_output(
+                  ["dpkg-deb", "-f", sys.argv[1], "Version"], text=True).strip(), info
+              assert info.get("MinimumOSVersion") == "8.0", info
+          PY
           ar t "$original_deb" | grep -qx "control.tar.gz"
           ar t "$original_deb" | grep -qx "data.tar.gz"
           dpkg-deb -c "$original_deb" | grep -q 'XiaoFeiAgent.app/XiaoFeiAgent'
