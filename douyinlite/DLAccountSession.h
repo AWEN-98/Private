@@ -14,6 +14,7 @@ FOUNDATION_EXPORT BOOL DLIsOfficialLoginURL(NSURL *url);
 - (NSMutableURLRequest *)webRequest:(NSString *)url;
 - (void)prepareLogin:(void (^)(void))completion;
 - (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset error:(NSString **)error;
+- (NSMutableURLRequest *)searchRequestForKeyword:(NSString *)keyword offset:(NSInteger)offset error:(NSString **)error;
 - (void)requestJSON:(NSURLRequest *)request completion:(void (^)(NSDictionary *, NSString *))completion;
 - (void)finishLoginAtURL:(NSURL *)url completion:(void (^)(BOOL,NSString *))completion;
 - (void)verifyAccount:(void (^)(BOOL,NSString *))completion;
