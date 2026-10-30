@@ -23,6 +23,7 @@ jobs:
           python3 douyinlite/tests/test_phone_only.py
           python3 douyinlite/tests/test_playlist.py
           python3 douyinlite/tests/test_guest_feed_qr_ui.py
+          python3 douyinlite/tests/test_hot_fallback.py
       - name: Install build dependencies
         run: |
           sudo apt-get update
