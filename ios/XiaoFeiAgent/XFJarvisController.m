@@ -1,4 +1,5 @@
 #import "XFJarvisController.h"
+#import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
 #import <math.h>
 
@@ -17,7 +18,7 @@
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])) {
         self.opaque=YES;
-        self.backgroundColor=[UIColor blackColor];
+        self.backgroundColor=XFPaper();
         self.contentMode=UIViewContentModeRedraw;
         self.mode=@"idle";
     }
@@ -33,15 +34,15 @@
     CGContextRef ctx=UIGraphicsGetCurrentContext();
     if(!ctx)return;
     CGFloat w=self.bounds.size.width, h=self.bounds.size.height;
-    CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0.009 green:0.025 blue:0.015 alpha:1].CGColor);
+    CGContextSetFillColorWithColor(ctx,XFPaper().CGColor);
     CGContextFillRect(ctx,self.bounds);
     // Faint phosphor grid and scan lines drawn in one pass.
     CGContextSetLineWidth(ctx,0.5);
-    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:0.12 green:0.35 blue:0.19 alpha:0.17].CGColor);
+    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.58 green:.72 blue:1 alpha:.20].CGColor);
     for(CGFloat y=4;y<h;y+=6) {CGContextMoveToPoint(ctx,0,y);CGContextAddLineToPoint(ctx,w,y);}
     for(CGFloat x=15;x<w;x+=28) {CGContextMoveToPoint(ctx,x,0);CGContextAddLineToPoint(ctx,x,h);}
     CGContextStrokePath(ctx);
-    CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0 green:0 blue:0 alpha:0.20].CGColor);
+    CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:.40 green:.57 blue:.90 alpha:.030].CGColor);
     for(CGFloat y=1;y<h;y+=4) CGContextFillRect(ctx,CGRectMake(0,y,w,1));
     CGFloat center=h*0.54;
     NSString *m=self.mode?:@"idle";
@@ -49,7 +50,7 @@
     BOOL think=[m isEqualToString:@"thinking"] || [m isEqualToString:@"transcribing"];
     BOOL speak=[m isEqualToString:@"speaking"];
     if(self.expression==3 && !listen && !think && !speak) {
-        CGContextSetFillColorWithColor(ctx,[UIColor colorWithRed:0.95 green:0.22 blue:0.17 alpha:1].CGColor);
+        CGContextSetFillColorWithColor(ctx,XFDanger().CGColor);
         CGFloat x=w/2;
         CGContextFillRect(ctx,CGRectMake(x-3,center-29,6,37));
         CGContextFillEllipseInRect(ctx,CGRectMake(x-3,center+15,6,6));
@@ -57,7 +58,7 @@
     }
     if(self.expression==2 && !listen && !think && !speak) {
         // Minimal eye-roll expression in idle mode.
-        CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.18 green:.96 blue:.43 alpha:.88].CGColor);
+        CGContextSetStrokeColorWithColor(ctx,XFAccent().CGColor);
         CGContextSetLineWidth(ctx,2);
         for(NSInteger i=0;i<2;i++){
             CGFloat x=w*(i?0.65:0.35);
@@ -72,7 +73,7 @@
         CGFloat width=pass==0?5.0:1.8;
         CGContextSetLineWidth(ctx,width);
         CGFloat alpha=pass==0?.18:1.0;
-        CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.20 green:1 blue:.46 alpha:alpha].CGColor);
+        CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.26 green:.48 blue:1 alpha:alpha].CGColor);
         CGFloat margin=8;
         for(CGFloat x=margin;x<=w-margin;x+=2){
             CGFloat edge=sin((x-margin)/(w-2*margin)*M_PI);
@@ -98,7 +99,7 @@
     }
     // Static bezel strokes; kept translucent and inside the content bounds.
     CGContextSetLineWidth(ctx,1);
-    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.12 green:.55 blue:.29 alpha:.44].CGColor);
+    CGContextSetStrokeColorWithColor(ctx,[UIColor colorWithRed:.46 green:.63 blue:.96 alpha:.35].CGColor);
     CGContextStrokeRect(ctx,CGRectInset(self.bounds,3,3));
 }
 @end
@@ -120,26 +121,23 @@
 @end
 
 @implementation XFJarvisController
-- (UIColor *)accent {return [UIColor colorWithRed:.23 green:.95 blue:.47 alpha:1];}
+- (UIColor *)accent {return XFAccent();}
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=[UIColor colorWithRed:.015 green:.026 blue:.020 alpha:1];
+    self.view.backgroundColor=XFCanvas();
     self.title=@"小斐 · 语音终端";
-    self.navigationController.navigationBar.translucent=NO;
-    self.navigationController.navigationBar.barTintColor=[UIColor colorWithRed:.035 green:.09 blue:.055 alpha:1];
-    self.navigationController.navigationBar.tintColor=[self accent];
-    self.navigationController.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:[self accent]};
+    XFApplyNavigation(self.navigationController);
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self action:@selector(closePressed)];
     self.hintLabel=[[UILabel alloc] init];
     self.hintLabel.text=@"XIAOFEI  ·  VOICE MODE";
     self.hintLabel.font=[UIFont fontWithName:@"Courier-Bold" size:11]?:[UIFont boldSystemFontOfSize:11];
-    self.hintLabel.textColor=[UIColor colorWithRed:.36 green:.77 blue:.48 alpha:1];
+    self.hintLabel.textColor=XFSecondary();
     self.hintLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.hintLabel];
     self.scope=[[XFKarenScope alloc] initWithFrame:CGRectZero];
     self.scope.layer.borderWidth=1;
-    self.scope.layer.borderColor=[UIColor colorWithRed:.17 green:.55 blue:.30 alpha:1].CGColor;
+    self.scope.layer.borderColor=XFLine().CGColor;
     self.scope.layer.cornerRadius=12;
     self.scope.clipsToBounds=YES;
     [self.view addSubview:self.scope];
@@ -154,7 +152,7 @@
     self.subtitle.numberOfLines=3;
     self.subtitle.font=[UIFont systemFontOfSize:13];
     self.subtitle.textAlignment=NSTextAlignmentCenter;
-    self.subtitle.textColor=[UIColor colorWithRed:.60 green:.78 blue:.64 alpha:1];
+    self.subtitle.textColor=XFSecondary();
     [self.view addSubview:self.subtitle];
     self.timeLabel=[[UILabel alloc] init];
     self.timeLabel.font=[UIFont fontWithName:@"Courier" size:13]?:[UIFont systemFontOfSize:13];
@@ -162,7 +160,8 @@
     self.timeLabel.textColor=[self accent];
     [self.view addSubview:self.timeLabel];
     self.primary=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.primary.backgroundColor=[UIColor colorWithRed:.11 green:.43 blue:.23 alpha:1];
+    self.primary.backgroundColor=XFAccent();
+    self.primary.layer.shadowOpacity=0;
     self.primary.layer.cornerRadius=12;
     self.primary.titleLabel.font=[UIFont boldSystemFontOfSize:14];
     [self.primary setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
@@ -170,7 +169,9 @@
     [self.view addSubview:self.primary];
     self.stopButton=[UIButton buttonWithType:UIButtonTypeCustom];
     self.stopButton.layer.cornerRadius=12;
-    self.stopButton.backgroundColor=[UIColor colorWithRed:.16 green:.22 blue:.17 alpha:1];
+    self.stopButton.layer.borderWidth=1;
+    self.stopButton.layer.borderColor=XFLine().CGColor;
+    self.stopButton.backgroundColor=XFPaper();
     self.stopButton.titleLabel.font=[UIFont systemFontOfSize:13];
     [self.stopButton setTitle:@"停止" forState:UIControlStateNormal];
     [self.stopButton setTitleColor:[self accent] forState:UIControlStateNormal];
@@ -184,7 +185,7 @@
     [self.view addSubview:self.teaseButton];
     self.autoButton=[UIButton buttonWithType:UIButtonTypeCustom];
     self.autoButton.titleLabel.font=[UIFont systemFontOfSize:12];
-    [self.autoButton setTitleColor:[UIColor colorWithRed:.60 green:.79 blue:.64 alpha:1] forState:UIControlStateNormal];
+    [self.autoButton setTitleColor:XFSecondary() forState:UIControlStateNormal];
     [self.autoButton addTarget:self action:@selector(toggleAuto) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.autoButton];
     self.continuousButton=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -199,9 +200,9 @@
     [self.view addSubview:self.voiceStyleButton];
     for(UIButton *control in @[self.teaseButton,self.continuousButton,self.voiceStyleButton,self.autoButton]){
         control.layer.cornerRadius=9;
-        control.layer.borderColor=[UIColor colorWithRed:.13 green:.38 blue:.23 alpha:1].CGColor;
+        control.layer.borderColor=XFLine().CGColor;
         control.layer.borderWidth=0.8;
-        control.backgroundColor=[UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
+        control.backgroundColor=XFPaper();
     }
     [self updateAutoTitle];
     [self updateContinuousTitle];
@@ -242,23 +243,17 @@
 - (void)updateAutoTitle {
     self.autoButton.titleLabel.font=[UIFont systemFontOfSize:11];
     [self.autoButton setTitle:self.autoSpeak?@"朗读开":@"朗读关" forState:UIControlStateNormal];
-    self.autoButton.backgroundColor=self.autoSpeak?
-        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
-        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
+    self.autoButton.backgroundColor=self.autoSpeak?XFAccentPale():XFPaper();
 }
 - (void)updateContinuousTitle {
     [self.continuousButton setTitle:self.continuousTalk?@"连聊开":@"连聊关" forState:UIControlStateNormal];
-    self.continuousButton.backgroundColor=self.continuousTalk?
-        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
-        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
+    self.continuousButton.backgroundColor=self.continuousTalk?XFAccentPale():XFPaper();
     self.stopButton.enabled=![self.mode isEqualToString:@"idle"]||self.continuousTalk;
     self.stopButton.alpha=self.stopButton.enabled?1:.45;
 }
 - (void)updateVoiceStyleTitle {
     [self.voiceStyleButton setTitle:self.mechanicalVoice?@"机械声":@"柔和声" forState:UIControlStateNormal];
-    self.voiceStyleButton.backgroundColor=self.mechanicalVoice?
-        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
-        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
+    self.voiceStyleButton.backgroundColor=self.mechanicalVoice?XFAccentPale():XFPaper();
 }
 - (void)setAutoSpeak:(BOOL)autoSpeak {
     _autoSpeak=autoSpeak;
@@ -285,7 +280,7 @@
     self.primary.enabled=!thinking;
     self.primary.alpha=self.primary.enabled?1:.45;
     [self updateContinuousTitle];
-    self.teaseButton.enabled=![self.mode isEqualToString:@"idle"];
+    self.teaseButton.enabled=[self.mode isEqualToString:@"idle"];
     self.teaseButton.alpha=self.teaseButton.enabled?1:.40;
     self.timeLabel.text=listening?@"00:00":@"";
     if(!listening)self.scope.microphoneLevel=0;
