@@ -7,6 +7,7 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
 @property(nonatomic,copy) NSString *promptTitle;
 @property(nonatomic,copy) NSString *promptText;
 @property(nonatomic,strong) UITextView *editor;
+@property(nonatomic,assign) CGFloat keyboardOverlap;
 @property(nonatomic,copy) void (^onUse)(NSString *text);
 @property(nonatomic,copy) void (^onSave)(NSString *text);
 @end
@@ -42,21 +43,25 @@ static NSString *const XFCustomPrompts=@"xf_prompt_templates_v1";
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    self.editor.frame=CGRectMake(10,10,w-20,MAX(80,h-73));
+    CGFloat bottom=MAX(152,h-self.keyboardOverlap);
+    self.editor.frame=CGRectMake(10,10,w-20,MAX(62,bottom-73));
     for(UIView *view in self.view.subviews){
         if(![view isKindOfClass:[UIButton class]])continue;
         UIButton *b=(UIButton *)view;
         CGFloat available=w-20,space=5,bw=(available-2*space)/3;
-        b.frame=CGRectMake(10+b.tag*(bw+space),h-53,bw,43);
+        b.frame=CGRectMake(10+b.tag*(bw+space),bottom-53,bw,43);
     }
 }
 - (void)keyboardShown:(NSNotification *)n {
     CGRect k=[self.view convertRect:[n.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue] fromView:nil];
     CGFloat covered=MAX(0,CGRectGetMaxY(self.view.bounds)-CGRectGetMinY(k));
-    self.editor.contentInset=UIEdgeInsetsMake(0,0,covered+12,0);
-    self.editor.scrollIndicatorInsets=self.editor.contentInset;
+    self.keyboardOverlap=covered;
+    [self.view setNeedsLayout];
 }
-- (void)keyboardHidden:(NSNotification *)n {self.editor.contentInset=UIEdgeInsetsZero;self.editor.scrollIndicatorInsets=UIEdgeInsetsZero;}
+- (void)keyboardHidden:(NSNotification *)n {
+    self.keyboardOverlap=0;
+    [self.view setNeedsLayout];
+}
 - (void)hideKeyboard {[self.editor resignFirstResponder];}
 - (void)action:(UIButton *)button {
     NSString *text=[self.editor.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
