@@ -1,4 +1,5 @@
 #import "XFTextImportController.h"
+#import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
 @interface XFTextImportController () <UITextViewDelegate>
 @property(nonatomic,strong) UITextView *editor;
@@ -9,31 +10,33 @@
 @implementation XFTextImportController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title=@"文本分析";
-    self.view.backgroundColor=[UIColor colorWithRed:0.964 green:0.972 blue:0.986 alpha:1];
+    self.title=@"导入文本";
+    XFApplyNavigation(self.navigationController);
+    self.view.backgroundColor=XFCanvas();
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"收起键盘" style:UIBarButtonItemStylePlain target:self action:@selector(hideKeyboard)];
     self.caption=[[UILabel alloc] init];
     self.caption.text=@"粘贴 TXT / Markdown 等纯文本，最多 12000 字。";
     self.caption.font=[UIFont systemFontOfSize:12];
-    self.caption.textColor=[UIColor grayColor];
+    self.caption.textColor=XFSecondary();
     [self.view addSubview:self.caption];
     self.editor=[[UITextView alloc] init];
     self.editor.font=[UIFont systemFontOfSize:15];
     self.editor.delegate=self;
-    self.editor.backgroundColor=[UIColor whiteColor];
-    self.editor.layer.cornerRadius=8;
-    self.editor.layer.borderWidth=.5;
-    self.editor.layer.borderColor=[UIColor lightGrayColor].CGColor;
+    XFCard(self.editor,12);
+    self.editor.textColor=XFInk();
     self.editor.text=@"";
     [self.view addSubview:self.editor];
     self.pasteButton=[UIButton buttonWithType:UIButtonTypeSystem];
     [self.pasteButton setTitle:@"粘贴剪贴板" forState:UIControlStateNormal];
+    self.pasteButton.backgroundColor=XFAccentPale();
+    [self.pasteButton setTitleColor:XFAccent() forState:UIControlStateNormal];
+    self.pasteButton.layer.cornerRadius=12;
     [self.pasteButton addTarget:self action:@selector(pasteText) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.pasteButton];
     self.useButton=[UIButton buttonWithType:UIButtonTypeSystem];
-    self.useButton.backgroundColor=[UIColor colorWithRed:.32 green:.38 blue:.79 alpha:1];
-    self.useButton.layer.cornerRadius=9;
+    self.useButton.backgroundColor=XFAccent();
+    self.useButton.layer.cornerRadius=12;
     [self.useButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     [self.useButton setTitle:@"添加到当前对话" forState:UIControlStateNormal];
     [self.useButton addTarget:self action:@selector(useText) forControlEvents:UIControlEventTouchUpInside];
