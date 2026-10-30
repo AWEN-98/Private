@@ -45,7 +45,12 @@ static NSString *XFBaseFromEndpoint(NSString *urlString) {
 static NSString *XFEndpoint(NSDictionary *account,NSString *capability) {
     NSString *base=account[@"base"]?:@"";
     NSString *suffix=@"chat/completions";
-    if([capability isEqualToString:@"image"])suffix=@"images/generations";
+    if([capability isEqualToString:@"image"]) {
+        // OpenRouter's native Images API is POST /api/v1/images, not /images/generations.
+        NSURL *baseURL=[NSURL URLWithString:base];
+        BOOL openRouter=[[baseURL.host lowercaseString] hasSuffix:@"openrouter.ai"];
+        suffix=openRouter?@"images":@"images/generations";
+    }
     if([capability isEqualToString:@"stt"])suffix=@"audio/transcriptions";
     if([capability isEqualToString:@"tts"])suffix=@"audio/speech";
     if([base hasSuffix:@"/"])return [base stringByAppendingString:suffix];
@@ -65,7 +70,12 @@ static NSString *XFKind(NSDictionary *m) {
     NSArray *input=m[@"input_modalities"]?:arch[@"input_modalities"];
     NSArray *output=m[@"output_modalities"]?:arch[@"output_modalities"];
     if(XFHas(output,@"image") || [s containsString:@"image-gen"] || [s containsString:@"gpt-image"] ||
-       [s containsString:@"dall-e"] || [s containsString:@"flux"] || [s containsString:@"qwen-image"])return @"图片生成";
+       [s containsString:@"dall-e"] || [s containsString:@"flux"] || [s containsString:@"qwen-image"] ||
+       [s containsString:@"seedream"] || [s containsString:@"nano-banana"] ||
+       [s containsString:@"imagen-"] || [s containsString:@"ideogram"] ||
+       [s containsString:@"recraft"] || [s containsString:@"hidream"] ||
+       [s containsString:@"kolors"] || [s containsString:@"gemini-image"] ||
+       [s containsString:@"gemini-3.1-flash-image"])return @"图片生成";
     if([s containsString:@"embedding"] || [s containsString:@"embed"] || [s containsString:@"rerank"] ||
        [s containsString:@"moderation"])return @"其他模型";
     if([s containsString:@"transcri"] || [s containsString:@"whisper"] || [s containsString:@"asr"] ||
@@ -557,7 +567,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *legacy=account[@"legacy_endpoint"];
     if(legacy.length && [account[@"models"] count]==1)endpoint=legacy;
     return @{@"id":modelId,@"name":model[@"name"]?:modelId,@"model":modelId,
-      @"provider":account[@"name"],@"endpoint":endpoint,@"capability":capability,
+      @"provider":account[@"name"]?:@"API",@"endpoint":endpoint,
+      @"chat_endpoint":XFEndpoint(account,@"chat"),@"capability":capability,
       @"account_id":account[@"id"]};
 }
 + (NSString *)secretForProfile:(NSDictionary *)profile {
