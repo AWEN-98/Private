@@ -45,7 +45,11 @@ static NSString *XFEndpoint(NSDictionary *account,NSString *capability) {
         BOOL openRouter=[[baseURL.host lowercaseString] hasSuffix:@"openrouter.ai"];
         suffix=openRouter?@"images":@"images/generations";
     }
-    if([capability isEqualToString:@"stt"])suffix=@"audio/transcriptions";
+    if([capability isEqualToString:@"stt"]){
+        NSString *specific=[account[@"stt_endpoint"] isKindOfClass:[NSString class]]?account[@"stt_endpoint"]:@"";
+        if(specific.length)return specific;
+        suffix=@"audio/transcriptions";
+    }
     if([capability isEqualToString:@"tts"])suffix=@"audio/speech";
     if([base hasSuffix:@"/"])return [base stringByAppendingString:suffix];
     return [base stringByAppendingFormat:@"/%@",suffix];
@@ -213,6 +217,7 @@ static void XFDropAccount(NSString *aid){
 @property(nonatomic,strong) UITextField *titleField;
 @property(nonatomic,strong) UITextField *baseField;
 @property(nonatomic,strong) UITextField *listField;
+@property(nonatomic,strong) UITextField *sttField;
 @property(nonatomic,strong) UITextField *keyField;
 @property(nonatomic,strong) UIButton *advancedButton;
 @property(nonatomic,strong) UILabel *advancedNote;
@@ -255,11 +260,13 @@ static void XFDropAccount(NSString *aid){
     [self.scroll addSubview:self.advancedButton];
     self.listField=[self fieldAt:305 label:@"模型列表地址（可留空）" value:self.account[@"models_url"]];
     self.listField.keyboardType=UIKeyboardTypeURL;
-    self.advancedNote=[[UILabel alloc] initWithFrame:CGRectMake(14,383,self.view.bounds.size.width-28,72)];
+    self.sttField=[self fieldAt:384 label:@"STT 转写接口地址（选填）" value:self.account[@"stt_endpoint"]];
+    self.sttField.keyboardType=UIKeyboardTypeURL;
+    self.advancedNote=[[UILabel alloc] initWithFrame:CGRectMake(14,468,self.view.bounds.size.width-28,90)];
     self.advancedNote.font=[UIFont systemFontOfSize:12];
     self.advancedNote.textColor=XFUIHint();
     self.advancedNote.numberOfLines=0;
-    self.advancedNote.text=@"默认自动获取模型列表。无法同步时，可填写服务商提供的 /models 地址，或保存后手动添加模型。";
+    self.advancedNote.text=@"模型列表地址可留空。语音转写 HTTP 404 时，填写官方提供的完整 HTTPS STT 接口地址。留空则使用 Base URL 下的 /audio/transcriptions。千问 ASR 默认走聊天接口。";
     [self.scroll addSubview:self.advancedNote];
     UILabel *hint=[[UILabel alloc] initWithFrame:CGRectMake(14,234,self.view.bounds.size.width-28,25)];
     hint.font=[UIFont systemFontOfSize:11.5];hint.textColor=XFUIHint();
@@ -277,12 +284,15 @@ static void XFDropAccount(NSString *aid){
 }
 - (void)updateAdvancedLayout {
     self.listField.hidden=!self.showAdvanced;
+    self.sttField.hidden=!self.showAdvanced;
     self.advancedNote.hidden=!self.showAdvanced;
     for(UIView *v in self.scroll.subviews){
-        if([v isKindOfClass:[UILabel class]] && [((UILabel *)v).text hasPrefix:@"模型列表地址"])v.hidden=!self.showAdvanced;
+        if([v isKindOfClass:[UILabel class]] &&
+            ([((UILabel *)v).text hasPrefix:@"模型列表地址"] ||
+             [((UILabel *)v).text hasPrefix:@"STT 转写接口"]))v.hidden=!self.showAdvanced;
     }
     [self.advancedButton setTitle:self.showAdvanced?@"高级设置  ▴":@"高级设置  ▾" forState:UIControlStateNormal];
-    self.scroll.contentSize=CGSizeMake(self.view.bounds.size.width,self.showAdvanced?480:315);
+    self.scroll.contentSize=CGSizeMake(self.view.bounds.size.width,self.showAdvanced?575:315);
 }
 - (void)dealloc {[[NSNotificationCenter defaultCenter] removeObserver:self];}
 - (void)keyboard:(NSNotification *)n {
@@ -295,16 +305,20 @@ static void XFDropAccount(NSString *aid){
     [self.view endEditing:YES];
     NSString *name=XFTrim(self.titleField.text),*base=XFTrim(self.baseField.text);
     NSString *list=XFTrim(self.listField.text),*secret=XFTrim(self.keyField.text);
+    NSString *stt=XFTrim(self.sttField.text);
     NSURL *u=[NSURL URLWithString:base],*l=list.length?[NSURL URLWithString:list]:nil;
+    NSURL *sttURL=stt.length?[NSURL URLWithString:stt]:nil;
     if(!name.length || ![[u scheme] isEqualToString:@"https"] || ![u host].length ||
-       (list.length && (![[l scheme] isEqualToString:@"https"] || ![l host].length))) {
-        UIAlertController *e=[UIAlertController alertControllerWithTitle:@"请检查信息" message:@"需要服务名称和完整 HTTPS Base URL。模型列表地址可留空。" preferredStyle:UIAlertControllerStyleAlert];
+       (list.length && (![[l scheme] isEqualToString:@"https"] || ![l host].length)) ||
+       (stt.length && (![[sttURL scheme] isEqualToString:@"https"] || ![sttURL host].length))) {
+        UIAlertController *e=[UIAlertController alertControllerWithTitle:@"请检查信息" message:@"需要服务名称和完整 HTTPS Base URL。STT 转写地址可留空。" preferredStyle:UIAlertControllerStyleAlert];
         [e addAction:[UIAlertAction actionWithTitle:@"继续编辑" style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:e animated:YES completion:nil];return;
     }
     NSString *aid=self.account[@"id"]?:[[NSUUID UUID] UUIDString];
     NSMutableDictionary *a=[self.account mutableCopy]?:[NSMutableDictionary dictionary];
     a[@"id"]=aid;a[@"name"]=name;a[@"base"]=XFBaseFromEndpoint(base);a[@"models_url"]=list;
+    a[@"stt_endpoint"]=stt;
     if(!a[@"models"])a[@"models"]=@[];
     if(self.onSaved)self.onSaved(a,secret);
 }
@@ -656,7 +670,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     if(!model)return nil;
     NSString *endpoint=XFEndpoint(account,capability);
     NSString *legacy=account[@"legacy_endpoint"];
-    if(legacy.length && [account[@"models"] count]==1)endpoint=legacy;
+    if(legacy.length && [account[@"models"] count]==1 &&
+        !([capability isEqualToString:@"stt"] && [account[@"stt_endpoint"] length]))endpoint=legacy;
     NSString *midLower=[modelId lowercaseString];
     BOOL imageInput=XFHas(model[@"input_modalities"],@"image") ||
         [model[@"supports_image_in"] boolValue] ||
@@ -668,7 +683,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         [midLower containsString:@"qwen-vl"];
     return @{@"id":modelId,@"name":model[@"name"]?:modelId,@"model":modelId,
       @"provider":account[@"name"]?:@"API",@"endpoint":endpoint,
-      @"chat_endpoint":XFEndpoint(account,@"chat"),@"capability":capability,
+      @"chat_endpoint":XFEndpoint(account,@"chat"),@"stt_override":account[@"stt_endpoint"]?:@"",
+       @"capability":capability,
       @"supports_image":@(imageInput),@"account_id":account[@"id"]};
 }
 + (NSString *)secretForProfile:(NSDictionary *)profile {
