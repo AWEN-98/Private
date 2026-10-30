@@ -124,7 +124,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor=[UIColor colorWithRed:.015 green:.026 blue:.020 alpha:1];
-    self.title=@"小斐 · KAREN";
+    self.title=@"小斐 · 语音终端";
     self.navigationController.navigationBar.translucent=NO;
     self.navigationController.navigationBar.barTintColor=[UIColor colorWithRed:.035 green:.09 blue:.055 alpha:1];
     self.navigationController.navigationBar.tintColor=[self accent];
@@ -132,14 +132,16 @@
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self action:@selector(closePressed)];
     self.hintLabel=[[UILabel alloc] init];
-    self.hintLabel.text=@"XIAOFEI  /  RETRO TERMINAL";
+    self.hintLabel.text=@"XIAOFEI  ·  VOICE MODE";
     self.hintLabel.font=[UIFont fontWithName:@"Courier-Bold" size:11]?:[UIFont boldSystemFontOfSize:11];
     self.hintLabel.textColor=[UIColor colorWithRed:.36 green:.77 blue:.48 alpha:1];
     self.hintLabel.textAlignment=NSTextAlignmentCenter;
     [self.view addSubview:self.hintLabel];
     self.scope=[[XFKarenScope alloc] initWithFrame:CGRectZero];
     self.scope.layer.borderWidth=1;
-    self.scope.layer.borderColor=[UIColor colorWithRed:.11 green:.38 blue:.20 alpha:1].CGColor;
+    self.scope.layer.borderColor=[UIColor colorWithRed:.17 green:.55 blue:.30 alpha:1].CGColor;
+    self.scope.layer.cornerRadius=12;
+    self.scope.clipsToBounds=YES;
     [self.view addSubview:self.scope];
     UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(scopeTapped)];
     [self.scope addGestureRecognizer:tap];
@@ -161,13 +163,13 @@
     [self.view addSubview:self.timeLabel];
     self.primary=[UIButton buttonWithType:UIButtonTypeCustom];
     self.primary.backgroundColor=[UIColor colorWithRed:.11 green:.43 blue:.23 alpha:1];
-    self.primary.layer.cornerRadius=7;
+    self.primary.layer.cornerRadius=12;
     self.primary.titleLabel.font=[UIFont boldSystemFontOfSize:14];
     [self.primary setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     [self.primary addTarget:self action:@selector(primaryPressed) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.primary];
     self.stopButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.stopButton.layer.cornerRadius=7;
+    self.stopButton.layer.cornerRadius=12;
     self.stopButton.backgroundColor=[UIColor colorWithRed:.16 green:.22 blue:.17 alpha:1];
     self.stopButton.titleLabel.font=[UIFont systemFontOfSize:13];
     [self.stopButton setTitle:@"停止" forState:UIControlStateNormal];
@@ -195,6 +197,12 @@
     [self.voiceStyleButton setTitleColor:[self accent] forState:UIControlStateNormal];
     [self.voiceStyleButton addTarget:self action:@selector(toggleVoiceStyle) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.voiceStyleButton];
+    for(UIButton *control in @[self.teaseButton,self.continuousButton,self.voiceStyleButton,self.autoButton]){
+        control.layer.cornerRadius=9;
+        control.layer.borderColor=[UIColor colorWithRed:.13 green:.38 blue:.23 alpha:1].CGColor;
+        control.layer.borderWidth=0.8;
+        control.backgroundColor=[UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
+    }
     [self updateAutoTitle];
     [self updateContinuousTitle];
     [self updateVoiceStyleTitle];
@@ -234,14 +242,23 @@
 - (void)updateAutoTitle {
     self.autoButton.titleLabel.font=[UIFont systemFontOfSize:11];
     [self.autoButton setTitle:self.autoSpeak?@"朗读开":@"朗读关" forState:UIControlStateNormal];
+    self.autoButton.backgroundColor=self.autoSpeak?
+        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
+        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
 }
 - (void)updateContinuousTitle {
     [self.continuousButton setTitle:self.continuousTalk?@"连聊开":@"连聊关" forState:UIControlStateNormal];
+    self.continuousButton.backgroundColor=self.continuousTalk?
+        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
+        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
     self.stopButton.enabled=![self.mode isEqualToString:@"idle"]||self.continuousTalk;
     self.stopButton.alpha=self.stopButton.enabled?1:.45;
 }
 - (void)updateVoiceStyleTitle {
     [self.voiceStyleButton setTitle:self.mechanicalVoice?@"机械声":@"柔和声" forState:UIControlStateNormal];
+    self.voiceStyleButton.backgroundColor=self.mechanicalVoice?
+        [UIColor colorWithRed:.10 green:.28 blue:.16 alpha:1]:
+        [UIColor colorWithRed:.055 green:.12 blue:.075 alpha:1];
 }
 - (void)setAutoSpeak:(BOOL)autoSpeak {
     _autoSpeak=autoSpeak;
