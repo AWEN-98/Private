@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Apply iOS8 streaming fixes
-        run: python3 douyinlite/scripts/repair_streams_0142.py
+        run: echo 'Streaming fixes integrated into main.m'
       - name: Verify local request signer
         run: |
           node douyinlite/tests/test_signer.js
