@@ -130,34 +130,52 @@ static NSDictionary *DLPublicInfoFromHTML(NSString *html) {
     }
     return nil;
 }
+// Returns a playable URL from public video-address variants. Some web
+// responses omit bit_rate but retain play_addr_h264 or play_addr_lowbr.
+static NSString *DLFirstPlayableAddress(id node){
+    if(![node isKindOfClass:[NSDictionary class]])return nil;
+    NSDictionary *d=node;
+    NSArray *links=[d[@"url_list"] isKindOfClass:[NSArray class]]?d[@"url_list"]:([d[@"urlList"] isKindOfClass:[NSArray class]]?d[@"urlList"]:@[]);
+    for(id value in links){
+        NSString *link=[value isKindOfClass:NSString.class]?value:
+          ([value isKindOfClass:NSDictionary.class]?DLText(value[@"src"]):@"");
+        NSURL *url=[NSURL URLWithString:link];
+        if(([url.scheme.lowercaseString isEqualToString:@"https"]||[url.scheme.lowercaseString isEqualToString:@"http"])&&url.host.length)return link;
+    }
+    return nil;
+}
 static NSString *DLPublicPlaybackURL(NSDictionary *item) {
-    NSDictionary *video=[item[@"video"] isKindOfClass:[NSDictionary class]]?item[@"video"]:@{};
-    NSArray *rates=[video[@"bit_rate"] isKindOfClass:[NSArray class]]?video[@"bit_rate"]:@[];
-    // Prefer modest bitrate H.264 renditions for the 512 MB iPhone 4S.
-    rates=[rates sortedArrayUsingComparator:^NSComparisonResult(id a,id b){
+    NSDictionary *video=[item[@"video"] isKindOfClass:NSDictionary.class]?item[@"video"]:@{};
+    NSMutableArray *rates=[NSMutableArray array];
+    for(NSString *key in @[@"bit_rate",@"dynamic_video_list"]){
+        id value=video[key];
+        if([value isKindOfClass:NSArray.class])[rates addObjectsFromArray:value];
+    }
+    [rates sortUsingComparator:^NSComparisonResult(id a,id b){
         double x=[a isKindOfClass:NSDictionary.class]&&[a[@"bit_rate"] respondsToSelector:@selector(doubleValue)]?[a[@"bit_rate"] doubleValue]:1e12;
         double y=[b isKindOfClass:NSDictionary.class]&&[b[@"bit_rate"] respondsToSelector:@selector(doubleValue)]?[b[@"bit_rate"] doubleValue]:1e12;
         return x<y?NSOrderedAscending:(x>y?NSOrderedDescending:NSOrderedSame);
     }];
+    // Low-bitrate AVC is gentler on the 512 MB iPhone 4S.
     for(id entry in rates){
-        if(![entry isKindOfClass:[NSDictionary class]])continue;
+        if(![entry isKindOfClass:NSDictionary.class])continue;
         NSDictionary *rate=entry;
         NSString *codec=[DLText(rate[@"codec_type"]) lowercaseString];
-        if(codec.length && ![codec containsString:@"264"] && ![codec isEqualToString:@"avc"])continue;
+        if(codec.length && ![codec containsString:@"264"] && ![codec containsString:@"avc"])continue;
         if([rate[@"is_h265"] respondsToSelector:@selector(boolValue)]&&[rate[@"is_h265"] boolValue])continue;
-        NSDictionary *rplay=[rate[@"play_addr"] isKindOfClass:[NSDictionary class]]?rate[@"play_addr"]:@{};
-        NSArray *rurls=[rplay[@"url_list"] isKindOfClass:[NSArray class]]?rplay[@"url_list"]:@[];
-        for(id candidate in rurls){
-            NSString *link=DLText(candidate);
-            if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
-        }
+        NSString *link=DLFirstPlayableAddress(rate[@"play_addr"]);
+        if(!link.length)link=DLFirstPlayableAddress(rate[@"playAddr"]);
+        if(link.length)return link;
+    }
+    for(NSString *key in @[@"play_addr_h264",@"playAddrH264",@"play_addr_lowbr"]){
+        NSString *link=DLFirstPlayableAddress(video[key]);
+        if(link.length)return link;
     }
     BOOL hevc=[video[@"is_h265"] respondsToSelector:@selector(boolValue)]&&[video[@"is_h265"] boolValue];
-    NSDictionary *play=[video[@"play_addr_h264"] isKindOfClass:NSDictionary.class]?video[@"play_addr_h264"]:(!hevc&&[video[@"play_addr"] isKindOfClass:NSDictionary.class]?video[@"play_addr"]:@{});
-    NSArray *urls=[play[@"url_list"] isKindOfClass:[NSArray class]]?play[@"url_list"]:@[];
-    for(id candidate in urls){
-        NSString *link=DLText(candidate);
-        if([[link lowercaseString] hasPrefix:@"https://"]||[[link lowercaseString] hasPrefix:@"http://"])return link;
+    if(!hevc){
+        NSString *link=DLFirstPlayableAddress(video[@"play_addr"]);
+        if(!link.length)link=DLFirstPlayableAddress(video[@"playAddr"]);
+        if(link.length)return link;
     }
     return nil;
 }
