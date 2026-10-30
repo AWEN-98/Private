@@ -85,3 +85,10 @@ python -m pytest -q test_app.py
 ```
 
 The unit tests cover parsing, duplicate removal, HTTPS URL validation and codec preference; actual site access needs a deployed instance and a real browser session.
+
+
+## Low-bandwidth video preview (experimental)
+
+The remote viewer offers an **播放云端画面** button. DouyinBridge uses ffmpeg to capture the browser desktop and serve 640×400 12fps H.264 Baseline HLS to iOS 8 AVPlayer, keeping legacy WebKit out of the playback path. This preview currently **has no audio**, needs the separately deployed Docker bridge, and must never be interpreted as native Douyin media extraction. It may show verification screens and remote browser navigation. Video streaming consumes CPU/bandwidth and requires ffmpeg. Close the player to stop its encoder.
+
+Stream playback uses a short-lived secret URL, so treat the HLS address as private. Only HTTPS endpoints should be configured on the phone. Test on a physical iPhone 4S before treating performance as verified.
