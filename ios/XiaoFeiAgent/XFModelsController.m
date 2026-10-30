@@ -708,7 +708,9 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *endpoint=XFEndpoint(account,capability);
     NSString *legacy=account[@"legacy_endpoint"];
     if(legacy.length && [account[@"models"] count]==1 &&
-        !([capability isEqualToString:@"stt"] && [account[@"stt_endpoint"] length]))endpoint=legacy;
+        ![capability isEqualToString:@"stt"])endpoint=legacy;
+    // The legacy chat URL is never safe as an STT URL unless explicitly
+    // provided as the dedicated transcription override by the user.
     NSString *midLower=[modelId lowercaseString];
     BOOL imageInput=XFHas(model[@"input_modalities"],@"image") ||
         [model[@"supports_image_in"] boolValue] ||
