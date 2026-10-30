@@ -65,6 +65,9 @@
 @property(nonatomic,assign) BOOL voiceContinuous;
 @property(nonatomic,assign) BOOL voiceMechanical;
 @property(nonatomic,assign) BOOL previousIdleTimerDisabled;
+@property(nonatomic,assign) BOOL voiceSpeechDetected;
+@property(nonatomic,assign) NSInteger voiceLoudSamples;
+@property(nonatomic,assign) NSTimeInterval voiceLastSpeechAt;
 @property(nonatomic,assign) BOOL voiceStarting;
 @property(nonatomic,assign) BOOL imageGenerating;
 @property(nonatomic,assign) NSUInteger imageRequestToken;
@@ -1143,6 +1146,24 @@
         float db=[self.recorder averagePowerForChannel:0];
         float level=MAX(0,MIN(1,(db+53.0f)/48.0f));
         [self.jarvis updateMeter:level seconds:seconds];
+        if(self.voiceContinuous){
+            // Energy-based end-of-utterance detection. The old phone does not
+            // need any local ASR model. Manual tap still works in noisy rooms.
+            if(level>0.35f){
+                self.voiceLoudSamples++;
+                if(self.voiceLoudSamples>=2)self.voiceSpeechDetected=YES;
+                if(self.voiceSpeechDetected)self.voiceLastSpeechAt=elapsed;
+            }else self.voiceLoudSamples=0;
+            if(self.voiceSpeechDetected && elapsed-self.voiceLastSpeechAt>=1.7){
+                [self finishRecording];
+                return;
+            }
+            if(!self.voiceSpeechDetected && elapsed>=12){
+                [self voiceStopTapped];
+                [self voiceUpdate:@"idle" message:@"暂时没有听到说话，连聊已暂停。"];
+                return;
+            }
+        }
     }
     if(seconds>=60)[self finishRecording];
 }
@@ -1194,13 +1215,16 @@
             self.isRecording=YES;
             self.voiceStarting=NO;
             self.recordStarted=[NSDate date];
-            if(self.voiceCapture)[self voiceUpdate:@"listening" message:@"请说话，结束后点击「结束并提问」"];
+            self.voiceSpeechDetected=NO;
+            self.voiceLoudSamples=0;
+            self.voiceLastSpeechAt=0;
+            if(self.voiceCapture)[self voiceUpdate:@"listening" message:self.voiceContinuous?@"请直接说话，停顿约两秒后自动发送":@"请说话，结束后点击「结束并提问」"];
             self.recorder.meteringEnabled=YES;
             [self setRecordingDisplay:YES];
             [self.recordTimer invalidate];
-            self.recordTimer=[NSTimer scheduledTimerWithTimeInterval:1.0 target:self
+            self.recordTimer=[NSTimer scheduledTimerWithTimeInterval:(self.voiceContinuous?0.35:1.0) target:self
                   selector:@selector(updateRecordingClock:) userInfo:nil repeats:YES];
-            self.status.text=@"正在录音，点击红色停止按钮结束";
+            self.status.text=self.voiceContinuous?@"连聊录音中，说完停顿即可自动发送":@"正在录音，点击红色停止按钮结束";
         }];
     }];
 }
