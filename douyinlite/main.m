@@ -7,8 +7,8 @@
 - (instancetype)initWithURL:(NSURL *)url;
 @end
 
-static UIColor *DLBG(void){return [UIColor colorWithRed:.055 green:.064 blue:.082 alpha:1];}
-static UIColor *DLAccent(void){return [UIColor colorWithRed:.14 green:.88 blue:.85 alpha:1];}
+static UIColor *DLBG(void){return [UIColor blackColor];}
+static UIColor *DLAccent(void){return [UIColor colorWithRed:1 green:.20 blue:.34 alpha:1];}
 static NSString *DLText(id value){return [value isKindOfClass:[NSString class]]?value:(value?[value description]:@"");}
 static BOOL DLPlayableFile(NSString *file){
     NSString *ext=[[file pathExtension] lowercaseString];
@@ -249,7 +249,11 @@ static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
     CGContextSetLineJoin(c,kCGLineJoinRound);
     CGContextSetStrokeColorWithColor(c,color.CGColor);
     CGContextSetFillColorWithColor(c,color.CGColor);
-    if([kind isEqualToString:@"heart"]||[kind isEqualToString:@"heart-on"]){
+    if([kind isEqualToString:@"bookmark"]){
+        CGContextMoveToPoint(c,6,3.5);CGContextAddLineToPoint(c,18,3.5);
+        CGContextAddLineToPoint(c,18,21);CGContextAddLineToPoint(c,12,16.5);
+        CGContextAddLineToPoint(c,6,21);CGContextClosePath(c);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"heart"]||[kind isEqualToString:@"heart-on"]){
         CGContextMoveToPoint(c,12,20.5);
         CGContextAddCurveToPoint(c,3.2,12.7,2.0,8.5,4,5.7);
         CGContextAddCurveToPoint(c,6.0,2.6,10.0,3.3,12,6.1);
@@ -469,54 +473,39 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     UILongPressGestureRecognizer *hold=[[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(holdVideo:)];
     hold.minimumPressDuration=.43;hold.cancelsTouchesInView=NO;
     [self.surface addGestureRecognizer:hold];
-    UITapGestureRecognizer *doubleTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(doubleTapVideo:)];
-    doubleTap.numberOfTapsRequired=2;
-    [self.surface addGestureRecognizer:doubleTap];
-    [tap requireGestureRecognizerToFail:doubleTap];
+    // A double tap is deliberately not mapped to a platform like.
 
     UIView *top=[[UIView alloc] initWithFrame:CGRectZero];
-    top.tag=100;top.backgroundColor=[UIColor colorWithWhite:0 alpha:.18];
-    top.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    top.tag=100;top.backgroundColor=[UIColor clearColor];top.userInteractionEnabled=NO;
     [self.view addSubview:top];
-    self.topText=[self label:17];self.topText.font=[UIFont boldSystemFontOfSize:17];
-    self.topText.textAlignment=NSTextAlignmentCenter;
-    [top addSubview:self.topText];
-    UIButton *add=[self button:@"" action:@selector(addVideo) font:18];
-    DLStyleIcon(add,@"plus",24,[UIColor whiteColor]);
-    add.tag=101;[top addSubview:add];
-    UIButton *menu=[self button:@"" action:@selector(openMenu) font:18];
-    DLStyleIcon(menu,@"menu",22,[UIColor whiteColor]);
-    menu.tag=102;[top addSubview:menu];
+    self.topText=[self label:16];self.topText.font=[UIFont boldSystemFontOfSize:16];
+    self.topText.textAlignment=NSTextAlignmentCenter;[top addSubview:self.topText];
 
     self.rightRail=[[UIView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.rightRail];
-    self.likeButton=[self button:@"" action:@selector(toggleFavorite) font:20];
-    DLStyleIcon(self.likeButton,@"heart",29,[UIColor whiteColor]);
+    self.likeButton=[self button:@"收藏" action:@selector(toggleFavorite) font:18];
+    DLStyleIcon(self.likeButton,@"bookmark",27,[UIColor whiteColor]);
     [self.rightRail addSubview:self.likeButton];
-    UILabel *likeLabel=[self label:10];likeLabel.text=@"收藏";
-    likeLabel.textAlignment=NSTextAlignmentCenter;likeLabel.tag=111;[self.rightRail addSubview:likeLabel];
-    UIButton *share=[self button:@"" action:@selector(shareCurrent) font:20];
+    UILabel *favoriteLabel=[self label:10];favoriteLabel.text=@"收藏";
+    favoriteLabel.textAlignment=NSTextAlignmentCenter;favoriteLabel.tag=111;
+    [self.rightRail addSubview:favoriteLabel];
+    UIButton *share=[self button:@"分享" action:@selector(shareCurrent) font:18];
     DLStyleIcon(share,@"share",27,[UIColor whiteColor]);
     [self.rightRail addSubview:share];share.tag=112;
     UILabel *shareLabel=[self label:10];shareLabel.text=@"分享";
-    shareLabel.textAlignment=NSTextAlignmentCenter;shareLabel.tag=113;[self.rightRail addSubview:shareLabel];
-    self.muteButton=[self button:@"" action:@selector(toggleMute) font:20];
-    DLStyleIcon(self.muteButton,@"sound",26,[UIColor whiteColor]);
-    [self.rightRail addSubview:self.muteButton];
-    UILabel *muteLabel=[self label:10];muteLabel.text=@"声音";
-    muteLabel.textAlignment=NSTextAlignmentCenter;muteLabel.tag=114;[self.rightRail addSubview:muteLabel];
+    shareLabel.textAlignment=NSTextAlignmentCenter;shareLabel.tag=113;
+    [self.rightRail addSubview:shareLabel];
 
     self.playButton=[self button:@"" action:@selector(togglePlay) font:28];
     DLStyleIcon(self.playButton,@"play",42,[UIColor whiteColor]);
-    self.playButton.backgroundColor=[UIColor colorWithWhite:0 alpha:.28];
-    self.playButton.layer.cornerRadius=41;
+    self.playButton.backgroundColor=[UIColor clearColor];
     [self.view addSubview:self.playButton];
 
     self.titleText=[self label:16];self.titleText.font=[UIFont boldSystemFontOfSize:16];
     self.titleText.numberOfLines=2;[self.view addSubview:self.titleText];
     self.subtitleText=[self label:12];self.subtitleText.numberOfLines=2;
     [self.view addSubview:self.subtitleText];
-    self.countText=[self label:11];self.countText.textAlignment=NSTextAlignmentRight;
+    self.countText=[self label:11];self.countText.hidden=YES;
     [self.view addSubview:self.countText];
 
     self.message=[self label:14];self.message.numberOfLines=0;
@@ -531,22 +520,18 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self.view addSubview:self.progress];
 
     self.tabBar=[[UIView alloc] initWithFrame:CGRectZero];
-    self.tabBar.backgroundColor=[UIColor colorWithRed:.045 green:.052 blue:.064 alpha:.98];
+    self.tabBar.backgroundColor=[UIColor colorWithWhite:0 alpha:.94];
     [self.view addSubview:self.tabBar];
-    NSArray *kinds=@[@"home",@"search",@"heart",@"user"];
-    NSArray *names=@[@"首页",@"搜索",@"收藏",@"我的"];
+    NSArray *kinds=@[@"home",@"bookmark",@"user"];
+    NSArray *names=@[@"首页",@"收藏",@"我的"];
     NSMutableArray *buttons=[NSMutableArray array];
     NSMutableArray *labels=[NSMutableArray array];
-    for(NSInteger i=0;i<4;i++){
-        UIButton *button=[self button:@"" action:@selector(tabPressed:) font:12];
-        button.tag=200+i;
-        button.contentVerticalAlignment=UIControlContentVerticalAlignmentTop;
-        DLStyleIcon(button,kinds[i],23,[UIColor whiteColor]);
-        UILabel *label=[self label:10];
-        label.text=names[i];
-        label.textAlignment=NSTextAlignmentCenter;
-        label.userInteractionEnabled=NO;
-        [button addSubview:label];
+    for(NSInteger i=0;i<3;i++){
+        UIButton *button=[self button:names[i] action:@selector(tabPressed:) font:12];
+        button.tag=200+i;button.contentVerticalAlignment=UIControlContentVerticalAlignmentTop;
+        DLStyleIcon(button,kinds[i],22,[UIColor whiteColor]);
+        UILabel *label=[self label:10];label.text=names[i];label.textAlignment=NSTextAlignmentCenter;
+        label.userInteractionEnabled=NO;[button addSubview:label];
         [buttons addObject:button];[labels addObject:label];
         [self.tabBar addSubview:button];
     }
@@ -563,32 +548,26 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self layoutScreen];}
 - (void)layoutScreen {
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    UIView *top=[self.view viewWithTag:100];top.frame=CGRectMake(0,0,w,60);
-    self.topText.frame=CGRectMake(54,13,MAX(100,w-108),38);
-    [top viewWithTag:101].frame=CGRectMake(w-49,10,43,43);
-    [top viewWithTag:102].frame=CGRectMake(6,10,43,43);
-    self.rightRail.frame=CGRectMake(w-64,MAX(92,h-352),59,205);
-    self.likeButton.frame=CGRectMake(2,0,55,45);
-    [self.rightRail viewWithTag:111].frame=CGRectMake(2,42,55,22);
-    [self.rightRail viewWithTag:112].frame=CGRectMake(2,68,55,45);
-    [self.rightRail viewWithTag:113].frame=CGRectMake(2,111,55,22);
-    self.muteButton.frame=CGRectMake(2,142,55,39);
-    [self.rightRail viewWithTag:114].frame=CGRectMake(2,181,55,20);
-    self.playButton.frame=CGRectMake((w-82)/2,(h-82)/2,82,82);
-    self.titleText.frame=CGRectMake(14,h-179,MAX(100,w-93),42);
-    self.subtitleText.frame=CGRectMake(14,h-137,MAX(100,w-93),43);
-    self.countText.frame=CGRectMake(MAX(140,w-94),h-91,78,22);
-    self.message.frame=CGRectMake(20,MAX(85,(h-100)/2),w-40,110);
-    self.loadingIndicator.center=CGPointMake(w/2,MAX(78,h/2-49));
-    self.tabBar.frame=CGRectMake(0,h-52,w,52);
-    CGFloat tabWidth=w/4.0;
+    UIView *top=[self.view viewWithTag:100];top.frame=CGRectMake(0,0,w,46);
+    self.topText.frame=CGRectMake(34,8,w-68,32);
+    self.rightRail.frame=CGRectMake(w-62,MAX(88,h-280),58,140);
+    self.likeButton.frame=CGRectMake(2,0,54,43);
+    [self.rightRail viewWithTag:111].frame=CGRectMake(1,43,56,18);
+    [self.rightRail viewWithTag:112].frame=CGRectMake(2,75,54,41);
+    [self.rightRail viewWithTag:113].frame=CGRectMake(1,116,56,19);
+    self.playButton.frame=CGRectMake((w-72)/2,(h-72)/2,72,72);
+    self.titleText.frame=CGRectMake(12,h-144,MAX(100,w-88),44);
+    self.subtitleText.frame=CGRectMake(12,h-102,MAX(100,w-88),24);
+    self.countText.frame=CGRectZero;
+    self.message.frame=CGRectMake(20,MAX(84,(h-100)/2),w-40,110);
+    self.loadingIndicator.center=CGPointMake(w/2,MAX(76,h/2-44));
+    self.tabBar.frame=CGRectMake(0,h-50,w,50);
+    CGFloat step=w/3.0;
     for(NSInteger i=0;i<self.tabButtons.count;i++){
-        UIButton *btn=self.tabButtons[i];
-        btn.frame=CGRectMake(i*tabWidth,0,tabWidth,52);
-        UILabel *label=self.tabLabels[i];
-        label.frame=CGRectMake(0,32,tabWidth,16);
+        UIButton *button=self.tabButtons[i];button.frame=CGRectMake(i*step,0,step,50);
+        UILabel *label=self.tabLabels[i];label.frame=CGRectMake(0,32,step,16);
     }
-    self.progress.frame=CGRectMake(0,h-55,w,3);
+    self.progress.frame=CGRectMake(0,h-52,w,2);
 }
 
 // Independent PeerTube public feed. It is deliberately NOT a Douyin recommender.
@@ -1046,21 +1025,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         target.transform=CGAffineTransformIdentity;
     } completion:nil];
 }
-- (void)showHeartAnimationAt:(CGPoint)point {
-    if(!self.animationsEnabled||UIAccessibilityIsReduceMotionEnabled())return;
-    UIImageView *heart=[[UIImageView alloc] initWithImage:DLLineIcon(@"heart",82,[UIColor colorWithRed:1 green:.28 blue:.43 alpha:1])];
-    heart.frame=CGRectMake(point.x-41,point.y-41,82,82);
-    heart.alpha=0;heart.transform=CGAffineTransformMakeScale(.48,.48);
-    heart.userInteractionEnabled=NO;
-    [self.view addSubview:heart];
-    [UIView animateWithDuration:.18 delay:0 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-        heart.alpha=1;heart.transform=CGAffineTransformMakeScale(1.12,1.12);
-    } completion:^(BOOL done){
-        [UIView animateWithDuration:.24 delay:.06 options:UIViewAnimationOptionBeginFromCurrentState animations:^{
-            heart.alpha=0;heart.transform=CGAffineTransformMakeTranslation(0,-23);
-        } completion:^(BOOL finished){[heart removeFromSuperview];}];
-    }];
-}
 - (void)transitionToIndex:(NSInteger)index direction:(NSInteger)direction {
     if(self.transitioning)return;
     self.transitioning=YES;
@@ -1117,17 +1081,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 
 - (void)refreshTabBar {
-    NSInteger selected=self.searchMode?1:(self.favoritesOnly?2:((self.onlineMode||self.demoMode)&&!self.historyOnly?0:3));
+    NSInteger selected=self.favoritesOnly?1:(self.historyOnly?2:0);
     if(selected==self.paintedTab)return;
     self.paintedTab=selected;
-    NSArray *symbols=@[@"home",@"search",@"heart",@"user"];
+    NSArray *kinds=@[@"home",@"bookmark",@"user"];
     for(NSInteger i=0;i<self.tabButtons.count;i++){
-        UIButton *button=self.tabButtons[i];
-        BOOL active=i==selected;
-        UIColor *color=active?[UIColor whiteColor]:[UIColor colorWithWhite:.61 alpha:1];
-        DLStyleIcon(button,symbols[i],23,color);
-        UILabel *label=self.tabLabels[i];
-        label.textColor=color;
+        UIButton *button=self.tabButtons[i];BOOL active=i==selected;
+        UIColor *color=active?[UIColor whiteColor]:[UIColor colorWithWhite:.62 alpha:1];
+        DLStyleIcon(button,kinds[i],22,color);
+        UILabel *label=self.tabLabels[i];label.textColor=color;
         label.font=active?[UIFont boldSystemFontOfSize:10]:[UIFont systemFontOfSize:10];
     }
 }
@@ -1171,13 +1133,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         [self reloadCurrent];
         if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
     }else if(tab==1){
-        [self openSearch];
-    }else if(tab==2){
-        self.searchMode=NO;self.onlineMode=NO;self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
+        self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;
+        self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
-    }else if(tab==3){
-        [self openMenu];
-    }
+    }else if(tab==2)[self openMenu];
     [self refreshTabBar];
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
@@ -1302,17 +1261,17 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?@"抖音 · 纯手机":(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
+    self.topText.text=self.favoritesOnly?@"收藏":(self.historyOnly?@"历史":@"推荐");
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
             self.message.text=self.onlineLoading?@"正在连接视频来源…":
-                (self.onlineError.length?self.onlineError:@"暂无联网视频，可打开左上角菜单刷新");
+                (self.onlineError.length?self.onlineError:@"暂时没有可播放的推荐视频");
             if(self.onlineLoading)[self.loadingIndicator startAnimating];else[self.loadingIndicator stopAnimating];
         }else{
             self.message.text=self.searchMode?@"没有符合条件的视频\n点底部搜索可以修改关键词":
-                (self.favoritesOnly?@"还没有收藏视频\n双击视频即可添加收藏":
-                (self.historyOnly?@"暂无观看历史":@"暂无视频\n右上角＋导入视频"));
+                (self.favoritesOnly?@"还没有收藏的视频":
+                (self.historyOnly?@"暂无观看历史":@"暂无视频"));
         }
         return;
     }
@@ -1320,11 +1279,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
-    NSString *kind=[clip[@"source"] isEqualToString:@"douyin-account"]?@"抖音内容 · 本机连接":([clip[@"source"] isEqualToString:@"douyin-bridge"]?@"DouyinBridge · 云端公开视频":([clip[@"source"] isEqualToString:@"peertube"]?@"PeerTube 公开网络视频 · 非抖音":([clip[@"source"] isEqualToString:@"demo"]?@"公开视频样片 · 非抖音":([clip[@"source"] isEqualToString:@"public-share"]?@"抖音公开分享":([clip[@"source"] isEqualToString:@"local"]?@"本机视频":@"手动添加")))));
-    self.subtitleText.text=[NSString stringWithFormat:@"%@ · 向上滑动播放下一条",kind];
-    self.countText.text=[NSString stringWithFormat:@"%ld / %ld",(long)(self.index+1),(long)visible.count];
+    self.subtitleText.text=@"";
+    self.countText.text=@"";
     BOOL liked=[self.favorites containsObject:address];
-    DLStyleIcon(self.likeButton,@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
+    DLStyleIcon(self.likeButton,@"bookmark",27,liked?[UIColor colorWithRed:1 green:.84 blue:.42 alpha:1]:[UIColor whiteColor]);
     NSURL *url=[NSURL URLWithString:address];
     if(!url){
         self.message.text=@"视频链接无效";
@@ -1441,13 +1399,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self tick];
 }
 - (void)tapVideo:(UITapGestureRecognizer *)tap {if(tap.state==UIGestureRecognizerStateEnded)[self togglePlay];}
-- (void)doubleTapVideo:(UITapGestureRecognizer *)tap {
-    if(tap.state!=UIGestureRecognizerStateEnded)return;
-    NSArray *clips=[self visibleVideos];if(!clips.count)return;
-    NSString *key=DLText(clips[self.index][@"url"]);
-    if(![self.favorites containsObject:key])[self toggleFavorite];
-    [self showHeartAnimationAt:[tap locationInView:self.view]];
-}
 - (void)holdVideo:(UILongPressGestureRecognizer *)hold {
     if(hold.state==UIGestureRecognizerStateBegan){
         self.wasPlaying=self.player.rate>.01f;self.holdingSpeed=YES;
@@ -1495,7 +1446,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *clips=[self visibleVideos];if(!clips.count){[self reloadCurrent];return;}
     NSString *key=DLText(clips[self.index][@"url"]);
     BOOL liked=[self.favorites containsObject:key];
-    DLStyleIcon(self.likeButton,@"heart",30,liked?[UIColor colorWithRed:1 green:.34 blue:.48 alpha:1]:[UIColor whiteColor]);
+    DLStyleIcon(self.likeButton,@"bookmark",27,liked?[UIColor colorWithRed:1 green:.84 blue:.42 alpha:1]:[UIColor whiteColor]);
 }
 - (void)toggleMute {
     self.muted=!self.muted;self.player.muted=self.muted;
