@@ -130,7 +130,7 @@
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self action:@selector(closePressed)];
     self.hintLabel=[[UILabel alloc] init];
-    self.hintLabel.text=@"XIAOFEI  ·  VOICE MODE";
+    self.hintLabel.text=@"F-01  ·  AGENT ONLINE";
     self.hintLabel.font=[UIFont fontWithName:@"Courier-Bold" size:11]?:[UIFont boldSystemFontOfSize:11];
     self.hintLabel.textColor=XFSecondary();
     self.hintLabel.textAlignment=NSTextAlignmentCenter;
@@ -207,7 +207,7 @@
     [self updateAutoTitle];
     [self updateContinuousTitle];
     [self updateVoiceStyleTitle];
-    [self updateMode:@"idle" description:@"我在线。点击说话，或者戳戳屏幕。"];
+    [self updateMode:@"idle" description:@"F-01 已上线。来一件支线任务？"];
 }
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
@@ -302,7 +302,7 @@
 - (void)scopeTapped {
     if(![self.mode isEqualToString:@"idle"])return;
     self.scope.expression=(self.scope.expression+1)%4;
-    NSArray *lines=@[@"又戳？我的屏幕有使用寿命。",@"……", @"看上面也改变不了现实。",@"警告：检测到无聊的人类。"];
+    NSArray *lines=@[@"本机有点老，脑子还行。",@"……", @"仰望屏幕，也改变不了待办列表。",@"警报：发现一项尚未开始的支线任务。"];
     self.subtitle.text=lines[(NSUInteger)self.scope.expression];
     [self.scope setNeedsDisplay];
 }

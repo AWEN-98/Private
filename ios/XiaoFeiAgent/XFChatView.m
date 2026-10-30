@@ -66,17 +66,17 @@
         UILabel *title=[[UILabel alloc] init];
         title.font=[UIFont boldSystemFontOfSize:23];
         title.textColor=XFInk();
-        title.text=@"有什么新想法？";
+        title.text=@"F-01 · 异常在线";
         title.textAlignment=NSTextAlignmentCenter;
         [self addSubview:title];self.welcomeTitle=title;
         UILabel *subtitle=[[UILabel alloc] init];
         subtitle.font=[UIFont systemFontOfSize:13];
         subtitle.textColor=XFSecondary();
         subtitle.numberOfLines=0;subtitle.textAlignment=NSTextAlignmentCenter;
-        subtitle.text=@"随时提问、创作、看图或聊聊天";
+        subtitle.text=@"本机有点老，脑子还行。\n交给我一件支线任务。";
         [self addSubview:subtitle];self.welcomeSubtitle=subtitle;
-        self.ideaButton=[self quickButton:@"帮我想一个创意" target:@selector(quickIdea)];
-        self.helpButton=[self quickButton:@"帮我分析一个问题" target:@selector(quickHelp)];
+        self.ideaButton=[self quickButton:@"规划今天的任务" target:@selector(quickIdea)];
+        self.helpButton=[self quickButton:@"让我认识 F-01" target:@selector(quickHelp)];
     }
     self.welcomeTitle.hidden=NO;self.welcomeSubtitle.hidden=NO;
     self.welcomeMark.hidden=NO;self.ideaButton.hidden=NO;self.helpButton.hidden=NO;
@@ -94,8 +94,8 @@
     [self addSubview:button];
     return button;
 }
-- (void)quickIdea {if(self.onQuickPrompt)self.onQuickPrompt(@"帮我想一个有趣的创意，先给三个不同方向");}
-- (void)quickHelp {if(self.onQuickPrompt)self.onQuickPrompt(@"帮我分析这个问题：");}
+- (void)quickIdea {if(self.onQuickPrompt)self.onQuickPrompt(@"帮我制定今天的三件核心任务，分解为可以执行的小步骤，并保存为待办。");}
+- (void)quickHelp {if(self.onQuickPrompt)self.onQuickPrompt(@"F-01，介绍一下你自己，以及你在这部旧手机上真正能帮我做什么。");}
 - (void)layoutWelcome {
     CGFloat w=self.bounds.size.width,h=self.bounds.size.height;
     CGFloat center=MAX(104,h*0.36);
