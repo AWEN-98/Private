@@ -62,6 +62,9 @@
 @property(nonatomic,assign) BOOL voiceCapture;
 @property(nonatomic,assign) BOOL voiceAwaitingChat;
 @property(nonatomic,assign) BOOL voiceAutoSpeak;
+@property(nonatomic,assign) BOOL voiceContinuous;
+@property(nonatomic,assign) BOOL voiceMechanical;
+@property(nonatomic,assign) BOOL previousIdleTimerDisabled;
 @property(nonatomic,assign) BOOL voiceStarting;
 @property(nonatomic,assign) BOOL imageGenerating;
 @property(nonatomic,assign) NSUInteger imageRequestToken;
@@ -87,6 +90,12 @@
     self.history=[NSMutableArray array];
     self.voiceAutoSpeak=[[NSUserDefaults standardUserDefaults] objectForKey:@"xf_jarvis_auto_speak"]?
         [[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_auto_speak"]:YES;
+    self.voiceContinuous=[[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_continuous"];
+    self.voiceMechanical=[[NSUserDefaults standardUserDefaults] objectForKey:@"xf_jarvis_mechanical"]?
+      [[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_mechanical"]:YES;
+    if(self.voiceContinuous)self.voiceAutoSpeak=YES;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(voiceAppWillResignActive:)
+        name:UIApplicationWillResignActiveNotification object:nil];
     self.speechSynth=[[AVSpeechSynthesizer alloc] init];
     self.speechSynth.delegate=self;
     CGFloat w=self.view.bounds.size.width;
@@ -267,6 +276,7 @@
 }
 - (void)dealloc {
     [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    [UIApplication sharedApplication].idleTimerDisabled=self.voiceActive?self.previousIdleTimerDisabled:[UIApplication sharedApplication].idleTimerDisabled;
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.connection cancel];
     [self.recordTimer invalidate];
@@ -464,6 +474,12 @@
     [self.jarvis updateMode:mode description:message];
 }
 - (void)voiceError:(NSString *)detail {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
+    if(self.voiceContinuous){
+        self.voiceContinuous=NO;
+        self.jarvis.continuousTalk=NO;
+        [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"xf_jarvis_continuous"];
+    }
     self.voiceCapture=NO;
     self.voiceAwaitingChat=NO;
     self.voiceStarting=NO;
@@ -473,20 +489,46 @@
     if(self.voiceActive)return;
     [self.message resignFirstResponder];
     self.voiceActive=YES;
+    self.previousIdleTimerDisabled=[UIApplication sharedApplication].idleTimerDisabled;
+    [UIApplication sharedApplication].idleTimerDisabled=YES;
     self.voiceCapture=NO;
     self.voiceAwaitingChat=NO;
     self.voiceStarting=NO;
     XFJarvisController *controller=[[XFJarvisController alloc] init];
     self.jarvis=controller;
     controller.autoSpeak=self.voiceAutoSpeak;
+    controller.continuousTalk=self.voiceContinuous;
+    controller.mechanicalVoice=self.voiceMechanical;
     __weak XFViewController *weakSelf=self;
     controller.onPrimary=^{[weakSelf voicePrimaryTapped];};
     controller.onStop=^{[weakSelf voiceStopTapped];};
     controller.onTease=^{[weakSelf voiceTeaseTapped];};
+    controller.onContinuousTalk=^(BOOL on){
+        weakSelf.voiceContinuous=on;
+        [NSObject cancelPreviousPerformRequestsWithTarget:weakSelf selector:@selector(voiceResumeListening) object:nil];
+        [[NSUserDefaults standardUserDefaults] setBool:on forKey:@"xf_jarvis_continuous"];
+        if(on && !weakSelf.voiceAutoSpeak){
+            weakSelf.voiceAutoSpeak=YES;
+            weakSelf.jarvis.autoSpeak=YES;
+            [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"xf_jarvis_auto_speak"];
+        }
+        if(on && !weakSelf.isRecording && !weakSelf.isWorking && ![weakSelf.speechSynth isSpeaking])
+            [weakSelf voiceUpdate:@"idle" message:@"连聊已开启。点击开始说话，之后会自动接着听。"];
+    };
+    controller.onMechanicalVoice=^(BOOL on){
+        weakSelf.voiceMechanical=on;
+        [[NSUserDefaults standardUserDefaults] setBool:on forKey:@"xf_jarvis_mechanical"];
+    };
     controller.onClose=^{[weakSelf closeJarvis];};
     controller.onAutoSpeak=^(BOOL on){
         weakSelf.voiceAutoSpeak=on;
         [[NSUserDefaults standardUserDefaults] setBool:on forKey:@"xf_jarvis_auto_speak"];
+        if(!on){
+            weakSelf.voiceContinuous=NO;
+            weakSelf.jarvis.continuousTalk=NO;
+            [NSObject cancelPreviousPerformRequestsWithTarget:weakSelf selector:@selector(voiceResumeListening) object:nil];
+            [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"xf_jarvis_continuous"];
+        }
         if(!on && [weakSelf.speechSynth isSpeaking]){
             [weakSelf.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
             [weakSelf voiceUpdate:@"idle" message:@"已停止朗读，可以再次提问"];
@@ -497,6 +539,8 @@
 }
 - (void)closeJarvis {
     if(!self.voiceActive)return;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
+    [UIApplication sharedApplication].idleTimerDisabled=self.previousIdleTimerDisabled;
     self.voiceActive=NO;
     self.voiceCapture=NO;
     self.voiceAwaitingChat=NO;
@@ -514,6 +558,7 @@
 }
 - (void)voiceTeaseTapped {
     if(!self.voiceActive || self.isWorking || self.isRecording || self.voiceAwaitingChat)return;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
     [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
     self.message.text=@"我有点无聊。请以小斐的冷幽默风格，吐槽我一句，或者讲一个简短的奇怪笑话，30到70字。";
     [self textViewDidChange:self.message];
@@ -523,6 +568,7 @@
     if(!self.isWorking)self.voiceAwaitingChat=NO;
 }
 - (void)voicePrimaryTapped {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
     if(!self.voiceActive || self.voiceStarting)return;
     if(self.isRecording){[self finishRecording];return;}
     if(self.voiceAwaitingChat || self.isWorking)return;
@@ -541,6 +587,10 @@
     [self toggleRecord];
 }
 - (void)voiceStopTapped {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
+    self.voiceContinuous=NO;
+    self.jarvis.continuousTalk=NO;
+    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"xf_jarvis_continuous"];
     self.voiceCapture=NO;
     self.voiceAwaitingChat=NO;
     self.voiceStarting=NO;
@@ -568,18 +618,46 @@
     [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
     AVSpeechUtterance *utterance=[AVSpeechUtterance speechUtteranceWithString:plain];
     utterance.voice=[AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
-    utterance.rate=0.47;
+    utterance.rate=self.voiceMechanical?0.44f:0.49f;
+    utterance.pitchMultiplier=self.voiceMechanical?0.87f:1.08f;
+    utterance.volume=0.95f;
     [self voiceUpdate:@"speaking" message:@"正在朗读回答；点击停止可以中断"];
     [self.speechSynth speakUtterance:utterance];
 }
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer utterance:(AVSpeechUtterance *)utterance willSpeakRangeOfSpeechString:(NSRange)characterRange {
-    if(self.voiceActive)[self.jarvis updateSpeechPulse];
+    if(!self.voiceActive || !self.jarvis)return;
+    [self.jarvis updateSpeechPulse];
+    NSString *text=utterance.speechString;
+    if(characterRange.location==NSNotFound || characterRange.location>=text.length)return;
+    NSUInteger start=characterRange.location>9?characterRange.location-9:0;
+    NSUInteger end=MIN(text.length,NSMaxRange(characterRange)+18);
+    if(end>start){
+        NSRange safe=[text rangeOfComposedCharacterSequencesForRange:NSMakeRange(start,end-start)];
+        [self.jarvis updateSpeechText:[text substringWithRange:safe]];
+    }
+}
+- (void)voiceResumeListening {
+    if(!self.voiceActive || !self.voiceContinuous || !self.voiceAutoSpeak ||
+       [UIApplication sharedApplication].applicationState!=UIApplicationStateActive ||
+       !self.jarvis.isViewLoaded || !self.jarvis.view.window ||
+       self.voiceStarting || self.voiceAwaitingChat || self.isWorking || self.isRecording ||
+       [self.speechSynth isSpeaking])return;
+    [self voicePrimaryTapped];
+}
+- (void)voiceAppWillResignActive:(NSNotification *)note {
+    if(self.voiceActive)[self voiceStopTapped];
 }
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
-    if(self.voiceActive)[self voiceUpdate:@"idle" message:@"回答结束，点击开始继续提问"];
+    if(!self.voiceActive)return;
+    if(self.voiceContinuous && self.voiceAutoSpeak) {
+        [self voiceUpdate:@"idle" message:@"连聊中… 正在重新打开麦克风"];
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
+        [self performSelector:@selector(voiceResumeListening) withObject:nil afterDelay:0.85];
+    } else [self voiceUpdate:@"idle" message:@"回答结束，点击开始继续提问"];
 }
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didCancelSpeechUtterance:(AVSpeechUtterance *)utterance {
-    if(self.voiceActive && !self.voiceCapture && !self.voiceAwaitingChat)
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(voiceResumeListening) object:nil];
+    if(self.voiceActive && !self.voiceCapture && !self.voiceAwaitingChat && ![synthesizer isSpeaking])
         [self voiceUpdate:@"idle" message:@"已停止朗读"];
 }
 - (void)showDiagnostics {
@@ -952,8 +1030,17 @@
     NSMutableArray *messages=body[@"messages"];
     if([messages isKindOfClass:[NSMutableArray class]] && messages.count){
         NSDictionary *first=messages[0];
-        if([first isKindOfClass:[NSDictionary class]] && [first[@"role"] isEqualToString:@"system"])
+        if([first isKindOfClass:[NSDictionary class]] && [first[@"role"] isEqualToString:@"system"]){
+            NSString *instructions=[first[@"content"] isKindOfClass:[NSString class]]?first[@"content"]:nil;
             [messages removeObjectAtIndex:0];
+            if(self.voiceActive && instructions.length && messages.count) {
+                NSUInteger last=messages.count-1;
+                NSDictionary *tail=messages[last];
+                if([tail[@"role"] isEqualToString:@"user"] && [tail[@"content"] isKindOfClass:[NSString class]]){
+                    messages[last]=@{@"role":@"user",@"content":[NSString stringWithFormat:@"%@\n\n%@",instructions,tail[@"content"]]};
+                }
+            }
+        }
     }
     NSData *bytes=[NSJSONSerialization dataWithJSONObject:body options:0 error:NULL];
     if(!bytes){self.status.text=@"兼容请求编码失败";return;}
