@@ -1,0 +1,121 @@
+name: Build Surf iOS8 InstallFix v2
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-surf-ios8-installfix2.yml'
+  workflow_dispatch:
+concurrency:
+  group: surf-ios8-installfix2
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pristine official Surf with pinned hash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/surf-fix2
+          curl -fL --retry 3 -o /tmp/surf-fix2/original.deb \
+            https://github.com/seg6/surf/releases/download/v0.17.0/space.seg6.surf_0.17.0-1_iphoneos-arm.deb
+          echo '87c9b3988ddef855eb80f9ae9bc2e4bd00a9b620858f3c787d8ccaee4ac1a192  /tmp/surf-fix2/original.deb' | sha256sum -c -
+          test "$(dpkg-deb -f /tmp/surf-fix2/original.deb Package)" = space.seg6.surf
+          test "$(dpkg-deb -f /tmp/surf-fix2/original.deb Architecture)" = iphoneos-arm
+          test "$(dpkg-deb -f /tmp/surf-fix2/original.deb Version)" = 0.17.0-1
+      - name: Repack for old iFile and tolerate failing icon cache hooks
+        run: |
+          set -euo pipefail
+          d=/tmp/surf-fix2
+          dpkg-deb -R "$d/original.deb" "$d/payload"
+          sed -i 's/^Version: 0.17.0-1$/Version: 0.17.0-1+ios8legacy2/' "$d/payload/DEBIAN/control"
+          cat > "$d/payload/DEBIAN/postinst" <<'POSTINST'
+          #!/bin/sh
+          # iOS 8 rootful: installation must not fail when icon services lag.
+          if [ "${1:-}" = configure ]; then
+            if [ -x /usr/libexec/surf-select-icons ]; then
+              /usr/libexec/surf-select-icons >/dev/null 2>&1 || true
+            fi
+            for cache in /var/mobile/Library/Caches/com.apple.IconsCache/space.seg6.surf*; do
+              if [ -f "$cache" ]; then rm -f "$cache" || true; fi
+            done
+            if [ -x /usr/bin/uicache ]; then
+              if [ -x /bin/su ]; then
+                /bin/su mobile -c /usr/bin/uicache >/dev/null 2>&1 ||
+                  /usr/bin/uicache >/dev/null 2>&1 || true
+              else
+                /usr/bin/uicache >/dev/null 2>&1 || true
+              fi
+            fi
+          fi
+          exit 0
+          POSTINST
+          chmod 755 "$d/payload/DEBIAN/postinst"
+          test -x "$d/payload/Applications/Surf.app/Surf"
+          test "$(stat -c '%a' "$d/payload/usr/libexec/surf-update-v2")" = 4755
+          mkdir -p downloads
+          dpkg-deb --root-owner-group -Zgzip -z6 --build "$d/payload" \
+            downloads/Surf-iPhone4S-iOS8-installfix2.deb
+      - name: Verify unchanged app, archive format, privileges, and script
+        run: |
+          set -euo pipefail
+          d=/tmp/surf-fix2
+          deb=downloads/Surf-iPhone4S-iOS8-installfix2.deb
+          test "$(dpkg-deb -f "$deb" Version)" = 0.17.0-1+ios8legacy2
+          test "$(dpkg-deb -f "$deb" Architecture)" = iphoneos-arm
+          test "$(dpkg-deb -f "$deb" Package)" = space.seg6.surf
+          ar t "$deb" | grep -qx control.tar.gz
+          ar t "$deb" | grep -qx data.tar.gz
+          mkdir -p "$d/check"
+          dpkg-deb -x "$deb" "$d/check"
+          cmp "$d/payload/Applications/Surf.app/Surf" "$d/check/Applications/Surf.app/Surf"
+          sha256sum "$d/payload/Applications/Surf.app/Surf" "$d/check/Applications/Surf.app/Surf"
+          test "$(stat -c '%a' "$d/check/usr/libexec/surf-update-v2")" = 4755
+          test "$(stat -c '%a' "$d/check/Applications/Surf.app/Surf")" = 755
+          dpkg-deb -c "$deb" | grep -F 'root/root' | grep -F '/Applications/Surf.app/Surf'
+          dpkg-deb -c "$deb" | grep -F 'root/root' | grep -F '/usr/libexec/surf-update-v2'
+          dpkg-deb -e "$deb" "$d/control"
+          sh -n "$d/control/postinst"
+          # Configuration script has to succeed even if optional iOS tools are absent.
+          sh "$d/control/postinst" configure
+          test -s "$d/check/Applications/Surf.app/Info.plist"
+          python3 - <<'PY'
+          import plistlib
+          p=plistlib.load(open('/tmp/surf-fix2/check/Applications/Surf.app/Info.plist','rb'))
+          assert p['CFBundleIdentifier']=='space.seg6.surf',p
+          assert p['MinimumOSVersion']=='6.0',p
+          assert p['CFBundleShortVersionString']=='0.17.0',p
+          print('Passed: iPhone 4S eligible iOS version and app identifier')
+          PY
+          mkdir -p /tmp/surf-fix2/manual/Payload
+          cp -a "$d/check/Applications/Surf.app" /tmp/surf-fix2/manual/Payload/
+          (cd /tmp/surf-fix2/manual && zip -qr -X "$GITHUB_WORKSPACE/downloads/Surf-iPhone4S-iOS8-manual-fix2.zip" Payload)
+          (cd downloads && zip -q -9 Surf-iPhone4S-iOS8-installfix2.zip Surf-iPhone4S-iOS8-installfix2.deb)
+          unzip -t downloads/Surf-iPhone4S-iOS8-installfix2.zip
+          sha256sum downloads/Surf-iPhone4S-iOS8-*fix2.*
+      - name: Upload final files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Surf-iPhone4S-InstallFix2
+          path: |
+            downloads/Surf-iPhone4S-iOS8-installfix2.deb
+            downloads/Surf-iPhone4S-iOS8-installfix2.zip
+            downloads/Surf-iPhone4S-iOS8-manual-fix2.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish independent verified downloads
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/Surf-iPhone4S-iOS8-*fix2.*
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'release: verified Surf installfix2 for iOS8 [skip ci]'
+          for n in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 3
+          done
+          exit 1
