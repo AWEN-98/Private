@@ -701,19 +701,19 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     XFStyleNav(self.navigationController);
     self.tableView.backgroundColor=XFUIBackground();
     self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
-    self.tableView.rowHeight=62;
+    self.tableView.rowHeight=58;
     self.tableView.sectionHeaderHeight=27;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
       target:self action:@selector(closeTapped)];
-    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"API 管理"
+    self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"服务"
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
 
     CGFloat width=self.view.bounds.size.width;
-    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,162)];
+    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,130)];
     self.filterPanel.backgroundColor=XFUIBackground();
     self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.providerButton.frame=CGRectMake(11,5,width-125,32);
+    self.providerButton.frame=CGRectMake(11,93,width-120,31);
     self.providerButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.providerButton.backgroundColor=[UIColor whiteColor];
     self.providerButton.layer.cornerRadius=8;
@@ -721,20 +721,20 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.providerButton.layer.borderColor=[UIColor colorWithWhite:0.86 alpha:1].CGColor;
     [self.providerButton setTitleColor:XFUIText() forState:UIControlStateNormal];
     self.providerButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
-    [self.providerButton addTarget:self action:@selector(chooseProvider) forControlEvents:UIControlEventTouchUpInside];
+    [self.providerButton addTarget:self action:@selector(filtersTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.providerButton];
     self.probeButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.probeButton.frame=CGRectMake(width-105,5,94,32);
+    self.probeButton.frame=CGRectMake(width-102,93,91,31);
     self.probeButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
     self.probeButton.backgroundColor=XFUIAccent();
-    [self.probeButton setTitle:@"一键检测" forState:UIControlStateNormal];
+    [self.probeButton setTitle:@"检测" forState:UIControlStateNormal];
     [self.probeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.probeButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
     self.probeButton.layer.cornerRadius=8;
     [self.probeButton addTarget:self action:@selector(testTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.probeButton];
 
-    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,42,width,39)];
+    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,50,width,39)];
     self.categoryScroll.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.categoryScroll.showsHorizontalScrollIndicator=NO;
     self.categoryScroll.alwaysBounceHorizontal=YES;
@@ -759,28 +759,19 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     }
     self.categoryScroll.contentSize=CGSizeMake(x+5,39);
 
-    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,118,width,44)];
+    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,3,width,44)];
     self.search.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.search.placeholder=@"搜索模型名称、ID 或服务";
+    self.search.placeholder=@"搜索模型";
     self.search.tintColor=XFUIAccent();
     self.search.delegate=self;
     [self.filterPanel addSubview:self.search];
-    self.statusFilterButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.statusFilterButton.frame=CGRectMake(11,83,width-22,31);
-    self.statusFilterButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.statusFilterButton.backgroundColor=[UIColor whiteColor];
-    self.statusFilterButton.layer.cornerRadius=8;
-    self.statusFilterButton.layer.borderWidth=0.5;
-    self.statusFilterButton.layer.borderColor=[UIColor colorWithWhite:0.86 alpha:1].CGColor;
-    self.statusFilterButton.titleLabel.font=[UIFont boldSystemFontOfSize:12];
-    [self.statusFilterButton setTitleColor:XFUIText() forState:UIControlStateNormal];
-    [self.statusFilterButton addTarget:self action:@selector(filterStatusTapped) forControlEvents:UIControlEventTouchUpInside];
-    [self.filterPanel addSubview:self.statusFilterButton];
+
     self.tableView.tableHeaderView=self.filterPanel;
     self.tableView.tableFooterView=[[UIView alloc] initWithFrame:CGRectZero];
 
     NSString *saved=[[NSUserDefaults standardUserDefaults] stringForKey:@"xf_model_last_filter"];
-    self.selectedCategory=[[self filterCategories] containsObject:saved]?saved:@"全部";
+    self.selectedCategory=[[self filterCategories] containsObject:saved]?saved:
+        (XFFavorites().count?@"常用":@"全部");
     self.selectedStatus=@"all";
     [self refresh];
 }
@@ -813,14 +804,39 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         [button setTitleColor:on?[UIColor whiteColor]:XFUIHint() forState:UIControlStateNormal];
         button.titleLabel.font=on?[UIFont boldSystemFontOfSize:12.5]:[UIFont systemFontOfSize:12.5];
     }
-    NSString *name=@"全部 API 服务";
+    NSString *name=@"全部服务";
     if(self.selectedProviderID.length){
         NSDictionary *a=XFAccountForID(self.selectedProviderID);
-        name=a[@"name"]?:@"全部 API 服务";
+        name=a[@"name"]?:@"全部服务";
         if(!a)self.selectedProviderID=nil;
     }
-    [self.providerButton setTitle:[NSString stringWithFormat:@"服务：%@  ▾",name] forState:UIControlStateNormal];
-    [self.statusFilterButton setTitle:[NSString stringWithFormat:@"检测：%@  ▾",[self statusLabel:self.selectedStatus?:@"all"]] forState:UIControlStateNormal];
+    NSString *status=[self.selectedStatus isEqualToString:@"all"]?@"":@" · 已筛状态";
+    NSString *label=[NSString stringWithFormat:@"筛选：%@%@  ▾",name,status];
+    [self.providerButton setTitle:label forState:UIControlStateNormal];
+    self.providerButton.titleLabel.adjustsFontSizeToFitWidth=YES;
+    self.providerButton.titleLabel.minimumScaleFactor=.70;
+}
+- (void)filtersTapped {
+    [self.search resignFirstResponder];
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"筛选模型"
+      message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"按 API 服务" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [self chooseProvider];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"按检测状态" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [self filterStatusTapped];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"清除筛选" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        self.selectedProviderID=nil;
+        self.selectedStatus=@"all";
+        self.selectedCategory=@"全部";
+        self.term=nil;
+        self.search.text=@"";
+        [[NSUserDefaults standardUserDefaults] setObject:@"全部" forKey:@"xf_model_last_filter"];
+        [self refresh];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)chooseProvider {
     [self.search resignFirstResponder];
@@ -902,15 +918,15 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         }
     }
     [matching sortUsingComparator:^NSComparisonResult(NSDictionary *lhs,NSDictionary *rhs) {
-        // Keep verified working models near the top, followed by untested and finally failed.
+        // Main list prioritizes user choices over probe results.
+        BOOL la=[lhs[@"active"] boolValue],ra=[rhs[@"active"] boolValue];
+        if(la!=ra)return la?NSOrderedAscending:NSOrderedDescending;
+        BOOL l=[lhs[@"favorite"] boolValue],r=[rhs[@"favorite"] boolValue];
+        if(l!=r)return l?NSOrderedAscending:NSOrderedDescending;
         NSString *ls=lhs[@"probe"][@"status"],*rs=rhs[@"probe"][@"status"];
         NSInteger lx=[ls isEqualToString:@"ok"]?0:([ls isEqualToString:@"bad"]?3:([ls isEqualToString:@"unactivated"]||[ls isEqualToString:@"balance"]?2:1));
         NSInteger rx=[rs isEqualToString:@"ok"]?0:([rs isEqualToString:@"bad"]?3:([rs isEqualToString:@"unactivated"]||[rs isEqualToString:@"balance"]?2:1));
         if(lx!=rx)return lx<rx?NSOrderedAscending:NSOrderedDescending;
-        BOOL l=[lhs[@"favorite"] boolValue],r=[rhs[@"favorite"] boolValue];
-        if(l!=r)return l?NSOrderedAscending:NSOrderedDescending;
-        BOOL la=[lhs[@"active"] boolValue],ra=[rhs[@"active"] boolValue];
-        if(la!=ra)return la?NSOrderedAscending:NSOrderedDescending;
         NSString *ln=lhs[@"model"][@"name"]?:lhs[@"model"][@"id"];
         NSString *rn=rhs[@"model"][@"name"]?:rhs[@"model"][@"id"];
         return [ln localizedCaseInsensitiveCompare:rn];
@@ -932,8 +948,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         else if([status isEqualToString:@"bad"])bad++;
         else if(status.length)unknown++;
     }
-    return [NSString stringWithFormat:@"%lu 个模型 · 可用 %lu · 不可用 %lu · 待确认 %lu",
-      (unsigned long)self.visibleModels.count,(unsigned long)good,(unsigned long)bad,(unsigned long)unknown];
+    return [NSString stringWithFormat:@"%lu 个模型 · %lu 已验证 · 点击切换",
+      (unsigned long)self.visibleModels.count,(unsigned long)good];
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"model"];
@@ -964,7 +980,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *speed=latency && [latency integerValue]>0 && passed?
         [NSString stringWithFormat:@" · %.1fs",[latency doubleValue]/1000.0]:@"";
     NSString *flag=active?@"使用中 · ":(favorite?@"常用 · ":@"");
-    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@%@ · %@",flag,state,speed,account[@"name"]?:@""];
+    cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@ · %@ · %@%@",flag,
+        [self shortCategoryName:item[@"category"]],account[@"name"]?:@"",state,speed];
     cell.detailTextLabel.textColor=passed?[UIColor colorWithRed:0.24 green:0.57 blue:0.40 alpha:1]:
       (failed?[UIColor colorWithWhite:0.73 alpha:1]:XFUIHint());
     cell.backgroundColor=active?[UIColor colorWithRed:.936 green:.953 blue:1 alpha:1]:[UIColor whiteColor];
@@ -999,9 +1016,8 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     // Keep the main chat selector in sync when the user selects a vision model.
     if([capability isEqualToString:@"vision"]) XFSelect(@"chat",account[@"id"],model[@"id"]);
     [self refresh];
-    self.title=@"已切换";
-    // No success popup; return directly to chat after choosing a verified model.
-    if([probe[@"status"] isEqualToString:@"ok"]) [self dismissViewControllerAnimated:YES completion:nil];
+    // The selection is immediate even for unprobed or non-chat capabilities.
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 - (void)tableView:(UITableView *)tableView accessoryButtonTappedForRowWithIndexPath:(NSIndexPath *)index {
     if(self.visibleModels.count && (NSUInteger)index.row<self.visibleModels.count)
@@ -1077,7 +1093,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 
 - (void)updateProbeButton {
     if(!self.probeButton)return;
-    NSString *label=@"一键检测";
+    NSString *label=@"检测";
     if(self.probeRunning){
         label=[NSString stringWithFormat:@"停止 %lu/%lu",(unsigned long)self.probeIndex,(unsigned long)self.probeBatchTotal];
     } else if(self.probeQueue.count) {
