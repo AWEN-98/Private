@@ -875,7 +875,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(!title.length)title=DLText(author[@"nickname"]);
                 if(!title.length)title=@"抖音视频";
                 if(title.length>90)title=[title substringToIndex:90];
-                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,@"source":@"douyin-feed"}];
+                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,@"author":DLText(author[@"nickname"]),@"source":@"douyin-feed"}];
                 if(++inserted>=12)break;
             }
             if(inserted>0){
@@ -930,7 +930,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    NSString *vid=DLText(entry[@"aweme_id"]);NSString *identity=vid.length?vid:address;if([known containsObject:identity])continue;[known addObject:identity];
    NSDictionary *author=[entry[@"author"] isKindOfClass:NSDictionary.class]?entry[@"author"]:@{};
    NSString *title=DLText(entry[@"desc"]);if(!title.length)title=DLText(author[@"nickname"]);if(!title.length)title=@"抖音视频";
-   [items addObject:@{@"id":vid,@"url":address,@"title":title,@"source":@"douyin-account"}];if(items.count>=20)break;
+   [items addObject:@{@"id":vid,@"url":address,@"title":title,@"author":DLText(author[@"nickname"]),@"source":@"douyin-account"}];if(items.count>=20)break;
   }
   self.onlineLoading=NO;self.onlinePaging=NO;
   if(rows.count)self.onlineOffset++;
@@ -1269,7 +1269,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.playButton.hidden=YES;
     self.message.text=@"";
     self.titleText.text=@"";
-    self.subtitleText.text=@"";
+    NSString *author=DLText(clip[@"author"]);
+    self.subtitleText.text=author.length?[@"@" stringByAppendingString:author]:@"";
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
@@ -1469,6 +1470,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *clips=[self visibleVideos];if(!clips.count||self.index>=clips.count)return;
     NSDictionary *clip=clips[self.index];
     NSString *link=DLText(clip[@"originURL"]);
+    NSString *videoID=DLText(clip[@"id"]);
+    if(!link.length && videoID.length){
+        NSCharacterSet *nonDigits=[[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+        if([videoID rangeOfCharacterFromSet:nonDigits].location==NSNotFound)
+            link=[@"https://www.douyin.com/video/" stringByAppendingString:videoID];
+    }
     if(!link.length)link=DLText(clip[@"url"]);
     NSURL *url=[NSURL URLWithString:link];
     if(!url){[self alert:@"无法分享" message:@"当前视频链接无效。"];return;}
@@ -1478,6 +1485,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)copyLink {
     NSArray *clips=[self visibleVideos];if(!clips.count)return;
     NSString *link=DLText(clips[self.index][@"originURL"]);
+    NSString *videoID=DLText(clips[self.index][@"id"]);
+    if(!link.length && videoID.length &&
+       [videoID rangeOfCharacterFromSet:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location==NSNotFound)
+        link=[@"https://www.douyin.com/video/" stringByAppendingString:videoID];
     if(!link.length)link=DLText(clips[self.index][@"url"]);
     [UIPasteboard generalPasteboard].string=link;
     [self alert:@"已复制" message:@"视频地址已复制到剪贴板。"];
