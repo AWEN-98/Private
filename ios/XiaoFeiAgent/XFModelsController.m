@@ -1,20 +1,14 @@
 #import "XFModelsController.h"
 #import <Security/Security.h>
 #import "XFModelProbe.h"
+#import "XFTheme.h"
 
 
-static UIColor *XFUIBackground(void) {return [UIColor colorWithRed:0.964 green:0.972 blue:0.986 alpha:1];}
-static UIColor *XFUIAccent(void) {return [UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];}
-static UIColor *XFUIText(void) {return [UIColor colorWithRed:0.15 green:0.20 blue:0.31 alpha:1];}
-static UIColor *XFUIHint(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:0.58 alpha:1];}
-static void XFStyleNav(UINavigationController *nav) {
-    if(!nav)return;
-    nav.navigationBar.translucent=NO;
-    nav.navigationBar.barTintColor=[UIColor whiteColor];
-    nav.navigationBar.tintColor=XFUIAccent();
-    nav.navigationBar.titleTextAttributes=@{NSForegroundColorAttributeName:XFUIText(),
-        NSFontAttributeName:[UIFont boldSystemFontOfSize:17]};
-}
+static UIColor *XFUIBackground(void) {return XFCanvas();}
+static UIColor *XFUIAccent(void) {return XFAccent();}
+static UIColor *XFUIText(void) {return XFInk();}
+static UIColor *XFUIHint(void) {return XFSecondary();}
+static void XFStyleNav(UINavigationController *nav) {XFApplyNavigation(nav);}
 
 static NSString *const XFAccountsKey=@"xf_api_accounts_v1";
 static NSString *const XFSelectionKey=@"xf_active_models_v1";
@@ -612,6 +606,9 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 @interface XFModelsController () <UISearchBarDelegate>
 @property(nonatomic,strong) UISearchBar *search;
 @property(nonatomic,strong) UIView *filterPanel;
+@property(nonatomic,strong) UIView *currentCard;
+@property(nonatomic,strong) UILabel *currentTitle;
+@property(nonatomic,strong) UILabel *currentModel;
 @property(nonatomic,strong) UIButton *providerButton;
 @property(nonatomic,strong) UIButton *statusFilterButton;
 @property(nonatomic,copy) NSString *selectedStatus;
@@ -701,7 +698,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     self.title=@"模型库";
     XFStyleNav(self.navigationController);
     self.tableView.backgroundColor=XFUIBackground();
-    self.tableView.separatorColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
+    self.tableView.separatorColor=XFLine();
     self.tableView.rowHeight=58;
     self.tableView.sectionHeaderHeight=27;
     self.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
@@ -710,32 +707,49 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
       style:UIBarButtonItemStylePlain target:self action:@selector(accountsTapped)];
 
     CGFloat width=self.view.bounds.size.width;
-    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,130)];
+    self.filterPanel=[[UIView alloc] initWithFrame:CGRectMake(0,0,width,187)];
     self.filterPanel.backgroundColor=XFUIBackground();
     self.filterPanel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.currentCard=[[UIView alloc] initWithFrame:CGRectMake(11,8,width-22,49)];
+    self.currentCard.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.currentCard.backgroundColor=XFAccentPale();
+    self.currentCard.layer.cornerRadius=13;
+    [self.filterPanel addSubview:self.currentCard];
+    self.currentTitle=[[UILabel alloc] initWithFrame:CGRectMake(12,6,width-46,15)];
+    self.currentTitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.currentTitle.text=@"当前聊天模型";
+    self.currentTitle.textColor=XFAccent();
+    self.currentTitle.font=[UIFont boldSystemFontOfSize:10];
+    [self.currentCard addSubview:self.currentTitle];
+    self.currentModel=[[UILabel alloc] initWithFrame:CGRectMake(12,22,width-46,20)];
+    self.currentModel.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+    self.currentModel.font=[UIFont boldSystemFontOfSize:14];
+    self.currentModel.textColor=XFInk();
+    self.currentModel.lineBreakMode=NSLineBreakByTruncatingMiddle;
+    [self.currentCard addSubview:self.currentModel];
     self.providerButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.providerButton.frame=CGRectMake(11,93,width-120,31);
+    self.providerButton.frame=CGRectMake(11,146,width-120,33);
     self.providerButton.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.providerButton.backgroundColor=[UIColor whiteColor];
-    self.providerButton.layer.cornerRadius=8;
-    self.providerButton.layer.borderWidth=0.5;
-    self.providerButton.layer.borderColor=[UIColor colorWithWhite:0.86 alpha:1].CGColor;
+    self.providerButton.backgroundColor=XFPaper();
+    self.providerButton.layer.cornerRadius=10;
+    self.providerButton.layer.borderWidth=0.65;
+    self.providerButton.layer.borderColor=XFLine().CGColor;
     [self.providerButton setTitleColor:XFUIText() forState:UIControlStateNormal];
     self.providerButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
     [self.providerButton addTarget:self action:@selector(filtersTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.providerButton];
     self.probeButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.probeButton.frame=CGRectMake(width-102,93,91,31);
+    self.probeButton.frame=CGRectMake(width-102,146,91,33);
     self.probeButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
     self.probeButton.backgroundColor=XFUIAccent();
     [self.probeButton setTitle:@"检测" forState:UIControlStateNormal];
     [self.probeButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     self.probeButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
-    self.probeButton.layer.cornerRadius=8;
+    self.probeButton.layer.cornerRadius=10;
     [self.probeButton addTarget:self action:@selector(testTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.filterPanel addSubview:self.probeButton];
 
-    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,50,width,39)];
+    self.categoryScroll=[[UIScrollView alloc] initWithFrame:CGRectMake(0,105,width,37)];
     self.categoryScroll.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.categoryScroll.showsHorizontalScrollIndicator=NO;
     self.categoryScroll.alwaysBounceHorizontal=YES;
@@ -748,10 +762,10 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
         NSString *label=[self shortCategoryName:category];
         CGFloat bw=MAX(52,MIN(85,label.length*14+21));
         UIButton *btn=[UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame=CGRectMake(x,2,bw,33);
+        btn.frame=CGRectMake(x,2,bw,32);
         btn.tag=(NSInteger)index;
         btn.titleLabel.font=[UIFont systemFontOfSize:12.5];
-        btn.layer.cornerRadius=8;
+        btn.layer.cornerRadius=11;
         [btn setTitle:label forState:UIControlStateNormal];
         [btn addTarget:self action:@selector(categoryTapped:) forControlEvents:UIControlEventTouchUpInside];
         [self.categoryScroll addSubview:btn];
@@ -760,9 +774,10 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     }
     self.categoryScroll.contentSize=CGSizeMake(x+5,39);
 
-    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,3,width,44)];
+    self.search=[[UISearchBar alloc] initWithFrame:CGRectMake(0,61,width,42)];
     self.search.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.search.placeholder=@"搜索模型";
+    self.search.placeholder=@"搜索模型名称、服务商";
+    self.search.searchBarStyle=UISearchBarStyleMinimal;
     self.search.tintColor=XFUIAccent();
     self.search.delegate=self;
     [self.filterPanel addSubview:self.search];
@@ -801,10 +816,12 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     for(UIButton *button in self.categoryButtons){
         NSString *category=[self filterCategories][(NSUInteger)button.tag];
         BOOL on=[category isEqualToString:self.selectedCategory];
-        button.backgroundColor=on?XFUIAccent():[UIColor whiteColor];
+        button.backgroundColor=on?XFAccent():XFPaper();
         [button setTitleColor:on?[UIColor whiteColor]:XFUIHint() forState:UIControlStateNormal];
         button.titleLabel.font=on?[UIFont boldSystemFontOfSize:12.5]:[UIFont systemFontOfSize:12.5];
     }
+    NSDictionary *active=[XFModelsController activeProfileForCapability:@"chat"];
+    self.currentModel.text=active[@"name"]?:@"尚未配置聊天模型";
     NSString *name=@"全部服务";
     if(self.selectedProviderID.length){
         NSDictionary *a=XFAccountForID(self.selectedProviderID);
@@ -955,7 +972,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)index {
     UITableViewCell *cell=[tableView dequeueReusableCellWithIdentifier:@"model"];
     if(!cell)cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"model"];
-    cell.backgroundColor=[UIColor whiteColor];
+    cell.backgroundColor=XFPaper();
     cell.tintColor=XFUIAccent();
     cell.textLabel.font=[UIFont systemFontOfSize:14.5];
     cell.detailTextLabel.font=[UIFont systemFontOfSize:11.5];
@@ -975,7 +992,7 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *state=[self statusLabel:status.length?status:(probeCapable?@"untested":@"notprobed")];
     NSString *name=model[@"name"]?:model[@"id"];
     cell.textLabel.text=name;
-    cell.textLabel.textColor=failed?[UIColor colorWithWhite:0.70 alpha:1]:(active?XFUIAccent():XFUIText());
+    cell.textLabel.textColor=failed?XFSecondary():(active?XFAccent():XFInk());
     cell.textLabel.font=active?[UIFont boldSystemFontOfSize:14.5]:[UIFont systemFontOfSize:14.5];
     NSNumber *latency=item[@"probe"][@"latency_ms"];
     NSString *speed=latency && [latency integerValue]>0 && passed?
@@ -983,10 +1000,10 @@ static void XFSetFavorite(NSDictionary *account,NSDictionary *model,BOOL favorit
     NSString *flag=active?@"使用中 · ":(favorite?@"常用 · ":@"");
     cell.detailTextLabel.text=[NSString stringWithFormat:@"%@%@ · %@ · %@%@",flag,
         [self shortCategoryName:item[@"category"]],account[@"name"]?:@"",state,speed];
-    cell.detailTextLabel.textColor=passed?[UIColor colorWithRed:0.24 green:0.57 blue:0.40 alpha:1]:
-      (failed?[UIColor colorWithWhite:0.73 alpha:1]:XFUIHint());
-    cell.backgroundColor=active?[UIColor colorWithRed:.936 green:.953 blue:1 alpha:1]:[UIColor whiteColor];
+    cell.detailTextLabel.textColor=passed?XFAccent():XFSecondary();
+    cell.backgroundColor=active?XFAccentPale():XFPaper();
     cell.accessoryType=UITableViewCellAccessoryDetailButton;
+    cell.accessibilityHint=@"点击切换模型，详情按钮可管理收藏和分类";
     return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)index {
