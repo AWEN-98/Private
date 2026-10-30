@@ -19,7 +19,7 @@ checks={
  "Anonymous attempt does not require QR login": "[DLAccountSession.shared prepareLogin:" in s and "if(!self.guestPrimed" in s,
  "My tab opens QR login directly": "else if(tab==3)[self openAccount];" in tabs,
  "Official QR endpoint": "passport/web/get_qrcode/" in qr,
- "QR first host is the JSON login API": 'self.provider==0?@"https://login.douyin.com/passport/web/get_qrcode/' in qr,
+ "QR first host is the JSON login API": 'NSString *base=@"https://login.douyin.com/passport/web/get_qrcode/?";' in qr,
  "No HTML SSO fallback": 'sso.douyin.com/get_qrcode' not in qr,
  "QR status uses POST": 'r.HTTPMethod=@"POST";' in qr and 'is_frontier=true' in qr,
  "Only two QR hosts": 'if(self.provider==0){self.provider=1;' in qr,
