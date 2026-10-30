@@ -21,14 +21,15 @@
 }
 + (NSString *)saveImage:(UIImage *)image {
     if(!image || image.size.width<1 || image.size.height<1)return nil;
-    CGFloat factor=MIN(1.0,640.0/MAX(image.size.width,image.size.height));
+    // Preserve useful gallery quality for generated images while bounding iPhone 4S memory.
+    CGFloat factor=MIN(1.0,1280.0/MAX(image.size.width,image.size.height));
     CGSize size=CGSizeMake(MAX(1,round(image.size.width*factor)),
        MAX(1,round(image.size.height*factor)));
     UIGraphicsBeginImageContextWithOptions(size,YES,1.0);
     [image drawInRect:CGRectMake(0,0,size.width,size.height)];
     UIImage *small=UIGraphicsGetImageFromCurrentImageContext();
     UIGraphicsEndImageContext();
-    NSData *data=UIImageJPEGRepresentation(small,0.68);
+    NSData *data=UIImageJPEGRepresentation(small,0.78);
     if(!data.length)return nil;
     NSString *name=[[[NSUUID UUID] UUIDString] stringByAppendingString:@".jpg"];
     NSString *path=[self safeImagePath:name];
