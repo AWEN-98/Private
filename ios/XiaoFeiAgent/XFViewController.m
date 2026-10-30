@@ -31,6 +31,10 @@ static BOOL XFIsAlibabaASRHost(NSString *host) {
         [h hasSuffix:@".maas.aliyuncs.com"];
 }
 static NSURL *XFQwenASRURL(NSDictionary *profile) {
+    // A custom STT endpoint is explicitly configured for the selected provider.
+    NSString *overridden=profile[@"stt_override"];
+    if([overridden isKindOfClass:[NSString class]] && overridden.length)
+        return [NSURL URLWithString:overridden];
     NSURL *configured=[NSURL URLWithString:profile[@"chat_endpoint"]?:@""];
     if(![[configured.scheme lowercaseString] isEqualToString:@"https"] || !configured.host.length)return nil;
     if(XFIsAlibabaASRHost(configured.host)){
@@ -1483,12 +1487,19 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
         id parsed=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         NSDictionary *json=[parsed isKindOfClass:[NSDictionary class]]?parsed:nil;
         NSString *text=XFASRExtractText(json);
+        NSString *mime=[resp.MIMEType isKindOfClass:[NSString class]]?resp.MIMEType:nil;
+        // Some OpenAI-compatible endpoints return a plain-text transcript.
+        if(!text.length && code>=200 && code<300 &&
+           [mime.lowercaseString hasPrefix:@"text/plain"] && data.length<24000){
+            NSString *plain=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if(plain.length && ![plain.lowercaseString containsString:@"<html"])
+                text=[plain stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
         if(code<200 || code>=300 || !text.length){
             NSDictionary *error=[json[@"error"] isKindOfClass:[NSDictionary class]]?json[@"error"]:nil;
             NSString *reason=[error[@"message"] isKindOfClass:[NSString class]]?error[@"message"]:nil;
             if(!reason.length && [json[@"message"] isKindOfClass:[NSString class]])reason=json[@"message"];
             if(!reason.length && [json[@"code"] isKindOfClass:[NSString class]])reason=json[@"code"];
-            NSString *mime=[resp.MIMEType isKindOfClass:[NSString class]]?resp.MIMEType:nil;
             NSString *shape=XFASRShapeSummary(json,mime);
             BOOL wrongPath=(code==404);
             if(wrongPath) {
@@ -1497,19 +1508,23 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
                 }else if(qwen){
                     reason=@"当前服务商可能未提供千问 ASR 聊天接口，请检查 API Base URL";
                 }else{
-                    reason=@"该服务没有找到音频转写接口，请检查服务商的 STT 路径";
+                    NSString *overridden=p[@"stt_override"];
+                    if([overridden isKindOfClass:[NSString class]] && overridden.length)
+                        reason=@"自定义 STT 地址返回404。请核对该服务的完整转写接口 URL 和所选模型";
+                    else
+                        reason=@"该服务返回404。请到模型库 > 服务 > 编辑 API > 高级设置，填写官方 STT 转写接口；也可换用支持语音转写的服务商";
                 }
             }
             if(!reason.length && code>=200 && code<300)
                 reason=[NSString stringWithFormat:@"无法提取识别文字。%@",shape];
             if(!reason.length)reason=[NSString stringWithFormat:@"STT 请求失败。%@",shape];
             if(reason.length>170)reason=[reason substringToIndex:170];
-            NSString *detail=[NSString stringWithFormat:@"模型：%@；HTTP %ld；路径：%@；协议：%@",
-                modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":@"通用转写"];
+            NSString *detail=[NSString stringWithFormat:@"服务：%@；模型：%@；HTTP %ld；路径：%@；协议：%@",
+                p[@"provider"]?:@"API",modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":@"multipart STT"];
             [XFDiagnostics record:@"STT 请求检查" code:code detail:detail];
             NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
             self.status.text=notice;
-            NSString *instructions=wrongPath?@"请检查模型是否归属该服务、Base URL 和密钥地域。":shape;
+            NSString *instructions=wrongPath?@"请核对模型是否提供录音转写能力、API 服务 Base URL、转写接口完整路径和地域。":shape;
             NSString *explain=[NSString stringWithFormat:@"%@\n请求：%@\n模型：%@\n%@",
                 notice,safeEndpoint,modelName,instructions];
             if(wasVoice)[self voiceError:[NSString stringWithFormat:@"%@；请求：%@",notice,safeEndpoint]];
