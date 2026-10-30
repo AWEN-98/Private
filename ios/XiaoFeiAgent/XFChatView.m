@@ -175,6 +175,12 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     [self makeBubble:text user:YES notice:NO imageName:filename];
     [self layoutBubbles:YES];
 }
+- (void)addGeneratedImageMessage:(NSString *)text imageName:(NSString *)filename {
+    [self hideWelcome];
+    self.streamBubble=nil;
+    [self makeBubble:text user:NO notice:NO imageName:filename];
+    [self layoutBubbles:YES];
+}
 - (void)updateStreaming:(NSString *)text {
     [self hideWelcome];
     if(!self.streamBubble){
