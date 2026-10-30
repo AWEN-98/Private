@@ -5,6 +5,7 @@
 - (void)showConversation:(NSArray *)messages;
 - (void)addMessage:(NSString *)text fromUser:(BOOL)user;
 - (void)addImageMessage:(NSString *)text imageName:(NSString *)filename;
+- (void)addGeneratedImageMessage:(NSString *)text imageName:(NSString *)filename;
 - (void)updateStreaming:(NSString *)text;
 - (void)finishStreaming:(NSString *)text;
 - (void)showNotice:(NSString *)text;
