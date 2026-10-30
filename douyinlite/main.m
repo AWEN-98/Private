@@ -1427,44 +1427,98 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)inspectPublicShare:(NSURL *)url {
     if(!DLDouyinHost(url.host)){
-        [self alert:@"仅支持抖音链接" message:@"请使用抖音官方视频分享链接。"];
+        [self alert:@"仅支持抖音链接" message:@"请粘贴抖音官方分享的公开视频链接。"];
         return;
     }
-    self.message.text=@"正在读取抖音公开视频信息…";
-    [self requestPublicShare:url original:url retried:NO];
+    self.message.text=@"手机正在读取公开视频…";
+    NSString *known=DLShareVideoID(url);
+    if(known.length){
+        [self requestMobileVideoID:known original:url endpointIndex:0];
+    }else{
+        // Resolve official v.douyin.com short URLs first. Never guess a video ID.
+        [self requestPublicShare:url original:url stage:0 videoID:nil];
+    }
 }
-- (void)requestPublicShare:(NSURL *)url original:(NSURL *)original retried:(BOOL)retried {
+- (void)requestMobileVideoID:(NSString *)videoID original:(NSURL *)original endpointIndex:(NSInteger)index {
+    NSArray *servers=@[@"https://api5-normal-c-hl.amemv.com/aweme/v1/feed/",
+                       @"https://aweme.snssdk.com/aweme/v1/feed/"];
+    if(index>=servers.count){
+        [self requestPublicShare:original original:original stage:0 videoID:videoID];
+        return;
+    }
+    NSString *link=[NSString stringWithFormat:@"%@?aweme_id=%@&aid=1128",servers[index],videoID];
+    NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:link]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:9];
+    // This is an official mobile API read of the supplied public video ID.
+    [req setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001)" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
+        id decoded=(!error && data.length>0 && data.length<3000000)?
+            [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
+        NSDictionary *json=[decoded isKindOfClass:NSDictionary.class]?decoded:@{};
+        NSArray *items=[json[@"aweme_list"] isKindOfClass:NSArray.class]?json[@"aweme_list"]:@[];
+        NSDictionary *matched=nil;
+        for(id value in items){
+            if(![value isKindOfClass:NSDictionary.class])continue;
+            NSString *identifier=DLText(value[@"aweme_id"]);
+            if(!identifier.length)identifier=DLText(value[@"id"]);
+            if([identifier isEqualToString:videoID]){matched=value;break;}
+        }
+        NSString *video=DLPublicPlaybackURL(matched);
+        NSString *caption=DLText(matched[@"desc"]);
+        if(caption.length>70)caption=[[caption substringToIndex:70] stringByAppendingString:@"…"];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(video.length){
+                self.message.text=@"";
+                [self addPlayableURL:video name:caption.length?caption:@"抖音公开视频" source:@"public-share"];
+                return;
+            }
+            if(index+1<servers.count)self.message.text=@"手机正在切换备用视频接口…";
+            else self.message.text=@"手机正在读取官方分享页…";
+            [self requestMobileVideoID:videoID original:original endpointIndex:index+1];
+        });
+    }] resume];
+}
+- (void)requestPublicShare:(NSURL *)url original:(NSURL *)original
+                     stage:(NSInteger)stage videoID:(NSString *)knownID {
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:18];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
     [req setValue:@"text/html,application/xhtml+xml" forHTTPHeaderField:@"Accept"];
     [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
     [req setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         NSString *html=nil;
-        if(data.length>0&&data.length<2500000)
+        if(!error && data.length>0 && data.length<2500000)
             html=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
         NSDictionary *clip=DLVideoDetails(html);
         NSString *video=DLText(clip[@"url"]);
-        NSString *idFromPage=DLShareVideoID(response.URL);
-        NSString *videoID=idFromPage.length?idFromPage:DLShareVideoID(original);
-        NSHTTPURLResponse *http=[response isKindOfClass:[NSHTTPURLResponse class]]?(NSHTTPURLResponse *)response:nil;
+        NSString *discovered=DLShareVideoID(response.URL);
+        NSString *identifier=knownID.length?knownID:(discovered.length?discovered:DLShareVideoID(original));
+        NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(NSHTTPURLResponse *)response:nil;
         dispatch_async(dispatch_get_main_queue(),^{
             if(video.length){
                 self.message.text=@"";
                 [self addPlayableURL:video name:DLText(clip[@"title"]) source:@"public-share"];
                 return;
             }
-            // The modern desktop page often returns a JS shell. Follow the public
-            // mobile share route with the extracted video ID before giving up.
-            if(!retried&&videoID.length){
-                NSString *link=[NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@/",videoID];
-                self.message.text=@"正在尝试抖音移动分享页…";
-                [self requestPublicShare:[NSURL URLWithString:link] original:original retried:YES];
+            if(stage==0 && !knownID.length && identifier.length){
+                [self requestMobileVideoID:identifier original:original endpointIndex:0];
                 return;
             }
-            NSString *problem=error.localizedDescription;
-            if(!problem.length)problem=[NSString stringWithFormat:@"公开页面没有返回可播放的视频（HTTP %ld）。",(long)http.statusCode];
-            [self resolveShareWithBridge:original reason:problem];
+            if(identifier.length && stage<2){
+                NSString *shareURL=stage==0?
+                    [NSString stringWithFormat:@"https://www.douyin.com/share/video/%@/",identifier]:
+                    [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@/",identifier];
+                self.message.text=stage==0?@"正在读取备用分享页…":@"正在尝试另一条分享页路径…";
+                [self requestPublicShare:[NSURL URLWithString:shareURL]
+                    original:original stage:stage+1 videoID:identifier];
+                return;
+            }
+            self.message.text=@"";
+            NSString *reason=error.localizedDescription?:@"";
+            if(!reason.length)reason=[NSString stringWithFormat:@"官方页面未提供可播放视频（网页状态 %ld）。",(long)http.statusCode];
+            [self alert:@"手机直接获取失败"
+                message:[NSString stringWithFormat:@"%@\n\n可能是该视频需要验证、当前网络受限，或系统证书无法访问视频源。可以稍后再试其他公开链接。本模式不需要电脑或服务器。",reason]];
         });
     }] resume];
 }
@@ -1585,7 +1639,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)openMenu {
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
-        message:@"登录会话保存在本机。推荐内容通过本机请求获取，旧系统的网络和网页兼容性仍需实际验证。" preferredStyle:UIAlertControllerStyleActionSheet];
+        message:@"本机直接连接抖音。可以粘贴公开视频分享链接；账号推荐是否可用取决于登录与平台接口。" preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"纯手机 · 粘贴抖音视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
     [menu addAction:[UIAlertAction actionWithTitle:(DLAccountSession.shared.hasSession?@"抖音账号 · 检查 / 重新登录":@"抖音账号 · 扫码登录") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"抖音内容 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
       [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
@@ -1593,10 +1648,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
       [self loadOnlineFeed:YES];
     }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"Surf 模式 · 刷抖音（推荐）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openSurfDouyin];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"连接 DouyinBridge（云端浏览器）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"云端 Chrome · 登录 / 浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openCloudChrome];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"检查 DouyinBridge 登录状态" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self checkBridgeLoginStatus];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
