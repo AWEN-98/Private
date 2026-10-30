@@ -269,7 +269,7 @@ static void XFDropAccount(NSString *aid){
     hint.font=[UIFont systemFontOfSize:11.5];hint.textColor=XFUIHint();
     hint.text=@"密钥只保存在设备里。保存后可同步模型。";
     [self.scroll addSubview:hint];
-    self.showAdvanced=XFTrim(self.account[@"models_url"]).length>0;
+    self.showAdvanced=NO;
     [self updateAdvancedLayout];
     self.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStyleDone target:self action:@selector(save)];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(keyboard:) name:UIKeyboardWillShowNotification object:nil];
