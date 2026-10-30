@@ -231,6 +231,7 @@
     [self styleNavigationButton:self.composerAttachButton filled:NO];
     [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
         forControlEvents:UIControlEventTouchUpInside];
+    self.composerAttachButton.accessibilityLabel=@"添加图片或文字";
     [self.footerBar addSubview:self.composerAttachButton];
 
     self.composerGenerateButton=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -239,6 +240,7 @@
     [self styleNavigationButton:self.composerGenerateButton filled:NO];
     [self.composerGenerateButton addTarget:self action:@selector(generateImage)
         forControlEvents:UIControlEventTouchUpInside];
+    self.composerGenerateButton.accessibilityLabel=@"按当前生图模型生成图片";
     [self.footerBar addSubview:self.composerGenerateButton];
 
     self.pasteButton=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -1524,15 +1526,27 @@
     viewer.title=@"生成图片";
     viewer.navigationItem.leftBarButtonItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
         target:self action:@selector(closeImageViewer)];
-    viewer.navigationItem.rightBarButtonItem=[[UIBarButtonItem alloc] initWithTitle:@"保存相册" style:UIBarButtonItemStylePlain
+    UIBarButtonItem *save=[[UIBarButtonItem alloc] initWithTitle:@"保存" style:UIBarButtonItemStylePlain
         target:self action:@selector(saveGeneratedImage)];
+    UIBarButtonItem *share=[[UIBarButtonItem alloc] initWithTitle:@"分享" style:UIBarButtonItemStylePlain
+        target:self action:@selector(shareGeneratedImage)];
+    viewer.navigationItem.rightBarButtonItems=@[save,share];
     objc_setAssociatedObject(viewer,@"XFGeneratedImage",image,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)closeImageViewer {[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)saveGeneratedImage {
-    UIViewController *vc=((UINavigationController *)self.presentedViewController).topViewController;
+    UINavigationController *nav=(UINavigationController *)self.presentedViewController;
+    UIViewController *vc=nav.topViewController;
     UIImage *image=objc_getAssociatedObject(vc,@"XFGeneratedImage");
     if(image){UIImageWriteToSavedPhotosAlbum(image,nil,NULL,NULL);vc.title=@"已请求保存到相册";}
+}
+- (void)shareGeneratedImage {
+    UINavigationController *nav=(UINavigationController *)self.presentedViewController;
+    UIViewController *vc=nav.topViewController;
+    UIImage *image=objc_getAssociatedObject(vc,@"XFGeneratedImage");
+    if(!image)return;
+    UIActivityViewController *activity=[[UIActivityViewController alloc] initWithActivityItems:@[image] applicationActivities:nil];
+    [vc presentViewController:activity animated:YES completion:nil];
 }
 @end
