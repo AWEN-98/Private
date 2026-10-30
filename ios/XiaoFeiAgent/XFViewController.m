@@ -482,6 +482,7 @@
     __weak XFViewController *weakSelf=self;
     controller.onPrimary=^{[weakSelf voicePrimaryTapped];};
     controller.onStop=^{[weakSelf voiceStopTapped];};
+    controller.onTease=^{[weakSelf voiceTeaseTapped];};
     controller.onClose=^{[weakSelf closeJarvis];};
     controller.onAutoSpeak=^(BOOL on){
         weakSelf.voiceAutoSpeak=on;
@@ -510,6 +511,16 @@
     [self.jarvisNavigation dismissViewControllerAnimated:YES completion:nil];
     self.jarvisNavigation=nil;
     self.jarvis=nil;
+}
+- (void)voiceTeaseTapped {
+    if(!self.voiceActive || self.isWorking || self.isRecording || self.voiceAwaitingChat)return;
+    [self.speechSynth stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
+    self.message.text=@"我有点无聊。请以小斐的冷幽默风格，吐槽我一句，或者讲一个简短的奇怪笑话，30到70字。";
+    [self textViewDidChange:self.message];
+    self.voiceAwaitingChat=YES;
+    [self voiceUpdate:@"thinking" message:@"正在扫描你的无聊程度…"];
+    [self sendChat:NO];
+    if(!self.isWorking)self.voiceAwaitingChat=NO;
 }
 - (void)voicePrimaryTapped {
     if(!self.voiceActive || self.voiceStarting)return;
@@ -560,6 +571,9 @@
     utterance.rate=0.47;
     [self voiceUpdate:@"speaking" message:@"正在朗读回答；点击停止可以中断"];
     [self.speechSynth speakUtterance:utterance];
+}
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer utterance:(AVSpeechUtterance *)utterance willSpeakRangeOfSpeechString:(NSRange)characterRange {
+    if(self.voiceActive)[self.jarvis updateSpeechPulse];
 }
 - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
     if(self.voiceActive)[self voiceUpdate:@"idle" message:@"回答结束，点击开始继续提问"];
@@ -645,7 +659,9 @@
         msg=[NSString stringWithFormat:@"%@\n\n以下为文档内容：\n%@",msg,self.pendingFileText];
         sent=[sent stringByAppendingString:@" [文本文件]"];
     }
-    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":@"你是小斐，中文智能助手。准确回答问题，信息不确定时如实说明。"}];
+    NSString *karenPrompt=@"你是小斐，一位住在复古电脑终端里的中文AI伙伴。个性冷静、聪明、有一点毒舌和自嘲，偶尔用一句简短吐槽或荒诞笑话解闷，风格参考经典复古科幻电脑角色；不要冒充真实人物。保持尊重，避免人身攻击。用户认真求助时请给准确有效的答案，遇到不确定信息直说。回答尽量口语化，不啰嗦。";
+    BOOL karenMode=self.voiceActive;
+    NSMutableArray *messages=[NSMutableArray arrayWithObject:@{@"role":@"system",@"content":karenMode?karenPrompt:@"你是小斐，中文智能助手。准确回答问题，信息不确定时如实说明。"}];
     NSUInteger start=self.history.count>12?self.history.count-12:0;
     NSUInteger totalChars=0;
     NSMutableArray *recent=[NSMutableArray array];
@@ -699,7 +715,17 @@
     // Reuse that format for this model, instead of immediately making a
     // stream=true request which some providers reject with HTTP 400.
     BOOL compatible=[[NSUserDefaults standardUserDefaults] boolForKey:[self compatibilityKeyFor:profile]] || selfTestedOK;
-    if(compatible && messages.count && [messages[0][@"role"] isEqualToString:@"system"])[messages removeObjectAtIndex:0];
+    if(compatible && messages.count && [messages[0][@"role"] isEqualToString:@"system"]){
+        [messages removeObjectAtIndex:0];
+        // Certain providers reject system-role messages. Keep persona in user text.
+        if(karenMode && !self.pendingImage && messages.count){
+            NSUInteger last=messages.count-1;
+            NSDictionary *tail=messages[last];
+            if([tail[@"role"] isEqualToString:@"user"] && [tail[@"content"] isKindOfClass:[NSString class]]){
+                messages[last]=@{@"role":@"user",@"content":[NSString stringWithFormat:@"%@\n\n%@",karenPrompt,tail[@"content"]]};
+            }
+        }
+    }
     NSMutableDictionary *payload=[@{@"model":profile[@"model"],@"messages":messages,@"stream":[NSNumber numberWithBool:!compatible]} mutableCopy];
     if(web && !compatible) payload[@"web_search_options"]=@{};
     req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
