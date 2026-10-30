@@ -361,7 +361,8 @@ async def start_browser_stream(request: Request):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return {"url": str(request.url_for("stream_playlist")) + "?ticket=" + ticket,
-            "audio": False, "description": "云端浏览器实时画面，低码率无声预览"}
+            "audio": cloud_stream.audio_enabled,
+            "description": "云端浏览器实时 H264 视频，音频取决于服务端采集状态"}
 
 @app.get("/api/browser/stream/index.m3u8", name="stream_playlist")
 async def stream_playlist(ticket: str = ""):

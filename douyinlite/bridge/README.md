@@ -92,3 +92,15 @@ The unit tests cover parsing, duplicate removal, HTTPS URL validation and codec 
 The remote viewer offers an **播放云端画面** button. DouyinBridge uses ffmpeg to capture the browser desktop and serve 640×400 12fps H.264 Baseline HLS to iOS 8 AVPlayer, keeping legacy WebKit out of the playback path. This preview currently **has no audio**, needs the separately deployed Docker bridge, and must never be interpreted as native Douyin media extraction. It may show verification screens and remote browser navigation. Video streaming consumes CPU/bandwidth and requires ffmpeg. Close the player to stop its encoder.
 
 Stream playback uses a short-lived secret URL, so treat the HLS address as private. Only HTTPS endpoints should be configured on the phone. Test on a physical iPhone 4S before treating performance as verified.
+
+
+## Remote HLS sound experiment
+
+The server now offers an optional PulseAudio virtual sink named
+douyin_capture. The browser's audio can be multiplexed into HLS as AAC,
+alongside H.264 Baseline browser-screen video. If the sink is not available,
+the server returns a video-only stream and reports audio=false. Actual browser
+media access, audible playback, and iPhone 4S performance need real-world tests.
+
+The 90-second idle limit stops an abandoned encoder. The remote browser's
+login and access challenges still require normal human completion.

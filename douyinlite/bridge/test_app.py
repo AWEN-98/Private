@@ -96,7 +96,29 @@ def test_hls_segment_safety_and_ticket():
     assert not valid_segment("../secret.txt")
     assert not valid_segment("chunk000042.ts/../secret")
     assert not valid_segment("evil.ts")
-    manifest = "#EXTM3U\\n#EXTINF:2.0,\\nchunk000001.ts\\n#EXTINF:2.0,\\nchunk000002.ts\\n"
+    manifest = "#EXTM3U\n#EXTINF:2.0,\nchunk000001.ts\n#EXTINF:2.0,\nchunk000002.ts\n"
     translated = playlist_with_ticket(manifest, "testtoken")
     assert "chunk000001.ts?ticket=testtoken" in translated
     assert "chunk000002.ts?ticket=testtoken" in translated
+
+
+def test_encoder_audio_is_explicit_and_baseline():
+    from streamer import encoder_args
+    with_audio = encoder_args("index.m3u8", "chunk%06d.ts", "douyin_capture.monitor")
+    assert with_audio[with_audio.index("-profile:v") + 1] == "baseline"
+    assert with_audio[with_audio.index("-c:a") + 1] == "aac"
+    assert "douyin_capture.monitor" in with_audio
+    without_audio = encoder_args("index.m3u8", "chunk%06d.ts")
+    assert "-an" in without_audio and "-c:a" not in without_audio
+
+def test_audio_only_selects_named_virtual_sink(monkeypatch):
+    from streamer import available_audio_source
+    class Result:
+        stdout = "1\tdouyin_capture.monitor\tmodule-null-sink\n"
+    monkeypatch.setenv("DOUYIN_AUDIO_SOURCE", "douyin_capture.monitor")
+    monkeypatch.setenv("DOUYIN_AUDIO_ENABLED", "1")
+    monkeypatch.setattr("streamer.shutil.which", lambda _: "/usr/bin/pactl")
+    monkeypatch.setattr("streamer.subprocess.run", lambda *args, **kwargs: Result())
+    assert available_audio_source() == "douyin_capture.monitor"
+    monkeypatch.setenv("DOUYIN_AUDIO_SOURCE", "not-installed.monitor")
+    assert available_audio_source() is None
