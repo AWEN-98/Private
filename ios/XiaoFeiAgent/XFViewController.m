@@ -17,7 +17,66 @@
 // Other STT providers continue using multipart /audio/transcriptions.
 static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     NSString *model=[profile[@"model"] isKindOfClass:[NSString class]]?[profile[@"model"] lowercaseString]:@"";
-    return [model hasPrefix:@"qwen3-asr-flash"] && ![model containsString:@"filetrans"];
+    // Providers sometimes prefix the model ID with a namespace.
+    return [model containsString:@"qwen3-asr-flash"] && ![model containsString:@"filetrans"];
+}
+static NSString *XFASRReadableText(id value) {
+    if([value isKindOfClass:[NSString class]])return (NSString *)value;
+    if(![value isKindOfClass:[NSArray class]])return nil;
+    NSMutableString *joined=[NSMutableString string];
+    for(id part in (NSArray *)value){
+        if(![part isKindOfClass:[NSDictionary class]])continue;
+        NSString *piece=[part[@"text"] isKindOfClass:[NSString class]]?part[@"text"]:nil;
+        if(!piece && [part[@"content"] isKindOfClass:[NSString class]])piece=part[@"content"];
+        if(piece.length)[joined appendString:piece];
+    }
+    return joined.length?joined:nil;
+}
+static NSString *XFASRExtractText(NSDictionary *root) {
+    if(!root)return nil;
+    NSString *direct=XFASRReadableText(root[@"text"]);
+    if(direct.length)return direct;
+    for(NSString *envelope in @[@"", @"output", @"data", @"result"]){
+        NSDictionary *container=envelope.length?
+            ([root[envelope] isKindOfClass:[NSDictionary class]]?root[envelope]:nil):root;
+        if(!container)continue;
+        for(NSString *field in @[@"text", @"transcription", @"transcript"]){
+            NSString *candidate=XFASRReadableText(container[field]);
+            if(candidate.length)return candidate;
+        }
+        NSArray *choices=[container[@"choices"] isKindOfClass:[NSArray class]]?container[@"choices"]:nil;
+        if(choices.count && [choices[0] isKindOfClass:[NSDictionary class]]){
+            NSDictionary *choice=choices[0];
+            NSDictionary *message=[choice[@"message"] isKindOfClass:[NSDictionary class]]?choice[@"message"]:nil;
+            NSString *candidate=XFASRReadableText(message[@"content"]);
+            if(candidate.length)return candidate;
+            candidate=XFASRReadableText(choice[@"text"]);
+            if(candidate.length)return candidate;
+        }
+        NSArray *segments=[container[@"segments"] isKindOfClass:[NSArray class]]?container[@"segments"]:nil;
+        if(segments.count){
+            NSMutableString *joined=[NSMutableString string];
+            for(id seg in segments){
+                if([seg isKindOfClass:[NSDictionary class]]){
+                    NSString *v=XFASRReadableText(seg[@"text"]);
+                    if(v.length)[joined appendString:v];
+                }
+            }
+            if(joined.length)return joined;
+        }
+    }
+    return nil;
+}
+static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
+    if(!root)return [NSString stringWithFormat:@"响应不是 JSON；类型：%@",mime?:@"未知"];
+    NSArray *keys=[[root allKeys] sortedArrayUsingSelector:@selector(compare:)];
+    NSString *shown=[[keys subarrayWithRange:NSMakeRange(0,MIN((NSUInteger)8,keys.count))] componentsJoinedByString:@","];
+    NSDictionary *output=[root[@"output"] isKindOfClass:[NSDictionary class]]?root[@"output"]:nil;
+    if(output){
+        NSArray *nested=[[output allKeys] sortedArrayUsingSelector:@selector(compare:)];
+        shown=[shown stringByAppendingFormat:@"；output字段：%@",[nested componentsJoinedByString:@","]];
+    }
+    return [NSString stringWithFormat:@"响应字段：%@；类型：%@",shown.length?shown:@"(空)",mime?:@"未知"];
 }
 
 @interface XFViewController () <UIImagePickerControllerDelegate,UINavigationControllerDelegate,AVAudioRecorderDelegate,NSURLConnectionDataDelegate,UITextViewDelegate,AVSpeechSynthesizerDelegate>
@@ -1331,6 +1390,14 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     BOOL wasVoice=self.voiceCapture;
     NSDictionary *p=[self profileFor:@"stt"];
     if(!p){if(wasVoice)[self voiceError:@"没有语音识别模型"];return;}
+    NSString *modelName=p[@"model"]?:@"未知";
+    if([[modelName lowercaseString] containsString:@"qwen3-asr-flash-filetrans"]){
+        NSString *reason=@"千问 Filetrans 需要异步任务接口；请改选 qwen3-asr-flash。";
+        [XFDiagnostics record:@"STT 模型协议" code:0 detail:reason];
+        self.status.text=reason;
+        if(wasVoice)[self voiceError:reason];
+        return;
+    }
     NSData *audio=[NSData dataWithContentsOfURL:self.recorder.url];
     if(!audio.length) {
         self.status.text=@"录音文件为空";[XFDiagnostics record:@"录音文件为空" code:0 detail:@"无音频数据"];
@@ -1366,7 +1433,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
         NSDictionary *payload=@{@"model":p[@"model"],
             @"messages":@[@{@"role":@"user",@"content":@[
                 @{@"type":@"input_audio",@"input_audio":@{@"data":uri}}
-            ]}],@"stream":@NO};
+            ]}],@"stream":@NO,@"asr_options":@{@"enable_itn":@NO}};
         req.HTTPBody=[NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     } else {
@@ -1391,33 +1458,26 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
         NSInteger code=[(NSHTTPURLResponse *)resp statusCode];
         id parsed=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
         NSDictionary *json=[parsed isKindOfClass:[NSDictionary class]]?parsed:nil;
-        NSString *text=[json[@"text"] isKindOfClass:[NSString class]]?json[@"text"]:nil;
-        if(qwen && !text.length){
-            NSArray *choices=[json[@"choices"] isKindOfClass:[NSArray class]]?json[@"choices"]:@[];
-            NSDictionary *first=choices.count && [choices[0] isKindOfClass:[NSDictionary class]]?choices[0]:nil;
-            NSDictionary *msg=[first[@"message"] isKindOfClass:[NSDictionary class]]?first[@"message"]:nil;
-            id content=msg[@"content"];
-            if([content isKindOfClass:[NSString class]])text=content;
-            else if([content isKindOfClass:[NSArray class]]){
-                NSMutableString *parts=[NSMutableString string];
-                for(id part in content){
-                    if([part isKindOfClass:[NSDictionary class]] &&
-                       [part[@"text"] isKindOfClass:[NSString class]])[parts appendString:part[@"text"]];
-                }
-                text=parts;
-            }
-        }
-        if(code<200 || code>=300 || ![text isKindOfClass:[NSString class]]){
+        NSString *text=XFASRExtractText(json);
+        if(code<200 || code>=300 || !text.length){
             NSDictionary *error=[json[@"error"] isKindOfClass:[NSDictionary class]]?json[@"error"]:nil;
             NSString *reason=[error[@"message"] isKindOfClass:[NSString class]]?error[@"message"]:nil;
             if(!reason.length && [json[@"message"] isKindOfClass:[NSString class]])reason=json[@"message"];
-            if(!reason.length)reason=qwen?@"千问语音响应缺少文字，请检查模型及地域":@"模型返回格式不兼容";
-            if(reason.length>140)reason=[reason substringToIndex:140];
-            [XFDiagnostics record:@"语音识别接口失败" code:code
-                detail:[NSString stringWithFormat:@"%@：%@",qwen?@"千问 Chat Completions":@"转写接口",reason]];
+            if(!reason.length && [json[@"code"] isKindOfClass:[NSString class]])reason=json[@"code"];
+            NSString *mime=[resp.MIMEType isKindOfClass:[NSString class]]?resp.MIMEType:nil;
+            NSString *shape=XFASRShapeSummary(json,mime);
+            if(!reason.length && code>=200 && code<300)
+                reason=[NSString stringWithFormat:@"无法提取识别文字。%@",shape];
+            if(!reason.length)reason=[NSString stringWithFormat:@"STT 请求失败。%@",shape];
+            if(reason.length>170)reason=[reason substringToIndex:170];
+            NSString *detail=[NSString stringWithFormat:@"模型：%@；协议：%@；HTTP %ld；%@",
+                modelName,qwen?@"千问 JSON":@"通用转写",(long)code,shape];
+            [XFDiagnostics record:@"STT 结果解析失败" code:code detail:detail];
             NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
             self.status.text=notice;
             if(wasVoice)[self voiceError:notice];
+            else [self showAlert:@"语音识别失败" detail:
+                [NSString stringWithFormat:@"%@\n模型：%@\n%@",notice,modelName,shape]];
             return;
         }
         if(!text.length){if(wasVoice)[self voiceError:@"没有识别出文字，请再试一次"];return;}
