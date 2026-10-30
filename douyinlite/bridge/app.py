@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from playwright.async_api import async_playwright
 from streamer import CloudStream, playlist_with_ticket, valid_segment
 from fastapi.responses import FileResponse
+from share import MOBILE_UA, MAX_HTML_SIZE, official_link, video_id, mobile_share_url, parse_public_html
 
 KEY = os.environ.get("BRIDGE_KEY", "")
 PROFILE_DIR = os.environ.get("BROWSER_PROFILE", "/data/profile")
@@ -273,6 +274,49 @@ async def feed(request: Request, cursor: int = 0):
             else "暂无可访问的视频，请检查浏览器页面" if not items else ""
         ),
     }
+
+
+class PublicShareRequest(BaseModel):
+    url: str = Field(min_length=12, max_length=2048)
+
+
+@app.post("/api/resolve")
+async def resolve_public_share(request: Request, value: PublicShareRequest):
+    """Use publicly returned metadata for user-submitted official share pages."""
+    authorize(request)
+    if not official_link(value.url):
+        raise HTTPException(status_code=400, detail="仅支持抖音官方 HTTPS 分享链接")
+    if engine.context is None:
+        raise HTTPException(status_code=503, detail="云端浏览器尚未启动")
+    item_id = video_id(value.url)
+    queue = [value.url]
+    seen = set()
+    while queue and len(seen) < 3:
+        link = queue.pop(0)
+        if link in seen:
+            continue
+        seen.add(link)
+        try:
+            response = await engine.context.request.get(
+                link,
+                headers={"User-Agent": MOBILE_UA, "Referer": "https://www.douyin.com/"},
+                timeout=15000, max_redirects=7)
+        except Exception:
+            continue
+        if not item_id and official_link(response.url):
+            item_id = video_id(response.url)
+        if response.status == 200:
+            content = await response.body()
+            if len(content) <= MAX_HTML_SIZE:
+                clip = parse_public_html(content.decode("utf-8", errors="replace"))
+                if clip:
+                    return clip
+        if item_id:
+            mobile = mobile_share_url(item_id)
+            if mobile not in seen and mobile not in queue:
+                queue.append(mobile)
+    raise HTTPException(status_code=422, detail=(
+        "公开分享页未提供可播放的视频数据。可能需要登录验证，或该视频已失效、当前地区无法访问。"))
 
 @app.post("/api/refresh")
 async def refresh(request: Request):
