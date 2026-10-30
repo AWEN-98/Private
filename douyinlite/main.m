@@ -1566,6 +1566,18 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;[self loadOnlineFeed:YES];
  }
 }
+- (void)openSurfDouyin {
+    // Surf 0.17.0 registers surf-https and opens the URL with modern
+    // Chromium on the paired Windows/desktop host, even on iOS 8.
+    NSURL *surf=[NSURL URLWithString:@"surf-https://www.douyin.com/"];
+    if([[UIApplication sharedApplication] canOpenURL:surf]){
+        [self.player pause];
+        [[UIApplication sharedApplication] openURL:surf];
+        return;
+    }
+    [self alert:@"需要安装 Surf"
+        message:@"请先安装整合包中的 Surf iPhone 4S 版，在 Windows 电脑运行 Surf 并完成一次配对。配对后返回 DouyinLite，点击「Surf 模式 · 刷抖音」。"];
+}
 - (void)openDouyinBrowser {
     [self.player pause];
     DLBrowserController *browser=[[DLBrowserController alloc] initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
@@ -1581,6 +1593,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
       [self loadOnlineFeed:YES];
     }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Surf 模式 · 刷抖音（推荐）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openSurfDouyin];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"连接 DouyinBridge（云端浏览器）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self configureJSONFeed];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"云端 Chrome · 登录 / 浏览" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openCloudChrome];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"检查 DouyinBridge 登录状态" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self checkBridgeLoginStatus];}]];
