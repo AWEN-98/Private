@@ -1,0 +1,120 @@
+name: Build Surf iOS8 Compatible DEB
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-surf-ios8-compat.yml'
+  workflow_dispatch:
+concurrency:
+  group: surf-ios8-compatible-package
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  repack:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install package utilities
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y dpkg-dev binutils file unzip zip curl python3
+      - name: Fetch and verify exact official Surf package
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/surf-ios8-compat
+          cd /tmp/surf-ios8-compat
+          curl -fL --retry 4 --retry-delay 2 -o original.deb \
+            https://github.com/seg6/surf/releases/download/v0.17.0/space.seg6.surf_0.17.0-1_iphoneos-arm.deb
+          echo '87c9b3988ddef855eb80f9ae9bc2e4bd00a9b620858f3c787d8ccaee4ac1a192  original.deb' | sha256sum -c -
+          test "$(dpkg-deb -f original.deb Package)" = 'space.seg6.surf'
+          test "$(dpkg-deb -f original.deb Architecture)" = 'iphoneos-arm'
+          test "$(dpkg-deb -f original.deb Version)" = '0.17.0-1'
+          echo '== Original Debian archive entries =='
+          ar t original.deb
+          echo '== Original control metadata =='
+          dpkg-deb -I original.deb
+      - name: Rebuild legacy installer compatible archive
+        run: |
+          set -euo pipefail
+          root=/tmp/surf-ios8-compat
+          dpkg-deb -R "$root/original.deb" "$root/repacked"
+          # Preserve the original signed app and rooted updater. Only repackage
+          # the archive and increment the Debian revision.
+          sed -i 's/^Version: 0.17.0-1$/Version: 0.17.0-1+ios8legacy1/' "$root/repacked/DEBIAN/control"
+          test "$(grep -c '^Version: 0.17.0-1+ios8legacy1$' "$root/repacked/DEBIAN/control")" -eq 1
+          test -x "$root/repacked/Applications/Surf.app/Surf"
+          test -s "$root/repacked/Applications/Surf.app/Info.plist"
+          test -s "$root/repacked/usr/libexec/surf-update-v2"
+          # Keep official setuid update helper permissions intact.
+          test "$(stat -c '%a' "$root/repacked/usr/libexec/surf-update-v2")" = 4755
+          if test ! -f "$root/repacked/DEBIAN/postinst"; then
+            cat > "$root/repacked/DEBIAN/postinst" <<'POSTINSTALL'
+          #!/bin/sh
+          # Legacy iOS 8 homescreen cache refresh. Failure must never abort dpkg.
+          if [ "$1" = configure ] && command -v uicache >/dev/null 2>&1; then
+            su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true
+          fi
+          exit 0
+          POSTINSTALL
+            chmod 755 "$root/repacked/DEBIAN/postinst"
+          fi
+          mkdir -p downloads
+          dpkg-deb --root-owner-group -Zgzip -z6 --build "$root/repacked" \
+            downloads/Surf-iPhone4S-iOS8-v0.17.0-legacy.deb
+      - name: Verify gzip archive, ownership, app and helper
+        run: |
+          set -euo pipefail
+          deb=downloads/Surf-iPhone4S-iOS8-v0.17.0-legacy.deb
+          test "$(dpkg-deb -f "$deb" Version)" = '0.17.0-1+ios8legacy1'
+          test "$(dpkg-deb -f "$deb" Package)" = 'space.seg6.surf'
+          test "$(dpkg-deb -f "$deb" Architecture)" = 'iphoneos-arm'
+          ar t "$deb" | tee /tmp/surf-ar.txt
+          grep -Fx 'control.tar.gz' /tmp/surf-ar.txt
+          grep -Fx 'data.tar.gz' /tmp/surf-ar.txt
+          mkdir -p /tmp/surf-verify
+          dpkg-deb -x "$deb" /tmp/surf-verify
+          test -x /tmp/surf-verify/Applications/Surf.app/Surf
+          test -s /tmp/surf-verify/Applications/Surf.app/Info.plist
+          test "$(stat -c '%a' /tmp/surf-verify/usr/libexec/surf-update-v2)" = 4755
+          test "$(stat -c '%u:%g' /tmp/surf-verify/Applications/Surf.app/Surf)" = '0:0'
+          test "$(stat -c '%u:%g' /tmp/surf-verify/usr/libexec/surf-update-v2)" = '0:0'
+          python3 - <<'PY'
+          import plistlib
+          p=plistlib.load(open('/tmp/surf-verify/Applications/Surf.app/Info.plist','rb'))
+          assert p['CFBundleIdentifier']=='space.seg6.surf',p
+          assert p['MinimumOSVersion']=='6.0',p
+          assert p['CFBundleShortVersionString']=='0.17.0',p
+          print('Verified Surf 0.17.0 original app identity and iOS6+ requirement')
+          PY
+          mkdir -p /tmp/surf-app-fallback/Payload
+          cp -a /tmp/surf-verify/Applications/Surf.app /tmp/surf-app-fallback/Payload/
+          (cd /tmp/surf-app-fallback && zip -qr -X "$GITHUB_WORKSPACE/downloads/Surf-iPhone4S-iOS8-manual-app.zip" Payload)
+          (cd downloads && zip -q -9 Surf-iPhone4S-iOS8-v0.17.0-legacy.zip Surf-iPhone4S-iOS8-v0.17.0-legacy.deb)
+          unzip -t downloads/Surf-iPhone4S-iOS8-v0.17.0-legacy.zip | tail -1
+          sha256sum downloads/Surf-iPhone4S-iOS8-*.deb downloads/Surf-iPhone4S-iOS8-*.zip
+      - name: Upload installation files to Actions artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Surf-iPhone4S-iOS8-legacy
+          path: |
+            downloads/Surf-iPhone4S-iOS8-v0.17.0-legacy.deb
+            downloads/Surf-iPhone4S-iOS8-v0.17.0-legacy.zip
+            downloads/Surf-iPhone4S-iOS8-manual-app.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish direct links to user's repository
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/Surf-iPhone4S-iOS8-*.deb downloads/Surf-iPhone4S-iOS8-*.zip
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'release: Surf 0.17.0 legacy iOS8 gzip and manual fallback [skip ci]'
+          for n in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then exit 0; fi
+            sleep 2
+          done
+          exit 1
