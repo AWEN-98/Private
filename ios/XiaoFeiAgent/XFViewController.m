@@ -9,6 +9,7 @@
 #import "XFDiagnostics.h"
 #import "XFJarvisController.h"
 #import "XFImageGeneration.h"
+#import "XFTheme.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
@@ -165,21 +166,19 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 
 @implementation XFViewController
 
-- (UIColor *)accent {
-    return [UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];
-}
-- (UIColor *)ink {
-    return [UIColor colorWithRed:0.14 green:0.19 blue:0.30 alpha:1];
-}
+- (UIColor *)accent {return XFAccent();}
+- (UIColor *)ink {return XFInk();}
 - (void)styleNavigationButton:(UIButton *)button filled:(BOOL)filled {
-    button.backgroundColor=filled?[self accent]:[UIColor colorWithRed:0.94 green:0.95 blue:0.99 alpha:1];
-    [button setTitleColor:filled?[UIColor whiteColor]:[self accent] forState:UIControlStateNormal];
+    button.backgroundColor=filled?XFAccent():XFAccentPale();
+    [button setTitleColor:filled?XFPaper():XFAccent() forState:UIControlStateNormal];
     button.titleLabel.font=[UIFont boldSystemFontOfSize:13];
-    button.layer.cornerRadius=9;
+    button.layer.cornerRadius=12;
+    button.layer.borderWidth=0;
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.view.backgroundColor=[UIColor colorWithRed:0.966 green:0.973 blue:0.987 alpha:1];
+    self.view.backgroundColor=XFCanvas();
+    [UIApplication sharedApplication].statusBarStyle=UIStatusBarStyleDefault;
     self.history=[NSMutableArray array];
     self.voiceAutoSpeak=[[NSUserDefaults standardUserDefaults] objectForKey:@"xf_jarvis_auto_speak"]?
         [[NSUserDefaults standardUserDefaults] boolForKey:@"xf_jarvis_auto_speak"]:YES;
@@ -198,37 +197,46 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.view addSubview:self.headerBar];
     UIView *rule=[[UIView alloc] initWithFrame:CGRectMake(0,65,w,0.5)];
     rule.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    rule.backgroundColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
+    rule.backgroundColor=XFLine();
     [self.headerBar addSubview:rule];
 
-    self.sessionsButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.sessionsButton.frame=CGRectMake(10,6,55,32);
-    [self.sessionsButton setTitle:@"会话" forState:UIControlStateNormal];
-    [self styleNavigationButton:self.sessionsButton filled:NO];
+    XFLineButton *historyIcon=[[XFLineButton alloc] initWithSymbol:@"history"];
+    self.sessionsButton=historyIcon;
+    self.sessionsButton.frame=CGRectMake(12,5,44,38);
+    historyIcon.symbolColor=XFInk();
+    self.sessionsButton.backgroundColor=XFCanvas();
+    self.sessionsButton.layer.cornerRadius=12;
+    self.sessionsButton.accessibilityLabel=@"历史对话";
     [self.sessionsButton addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.headerBar addSubview:self.sessionsButton];
 
-    self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(71,5,w-142,34)];
+    self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(65,5,w-130,34)];
     self.brandTitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.brandTitle.text=@"小斐";
-    self.brandTitle.font=[UIFont boldSystemFontOfSize:18];
+    self.brandTitle.font=[UIFont boldSystemFontOfSize:19];
     self.brandTitle.textColor=[self ink];
     self.brandTitle.textAlignment=NSTextAlignmentCenter;
     [self.headerBar addSubview:self.brandTitle];
     self.brandTitle.userInteractionEnabled=NO;
 
-    self.modelsButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.modelsButton.frame=CGRectMake(w-66,6,56,32);
+    XFLineButton *modelIcon=[[XFLineButton alloc] initWithSymbol:@"models"];
+    self.modelsButton=modelIcon;
+    self.modelsButton.frame=CGRectMake(w-56,5,44,38);
     self.modelsButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
-    [self.modelsButton setTitle:@"模型" forState:UIControlStateNormal];
-    [self styleNavigationButton:self.modelsButton filled:YES];
-    self.modelsButton.titleLabel.font=[UIFont boldSystemFontOfSize:11.5];
+    modelIcon.symbolColor=XFAccent();
+    self.modelsButton.backgroundColor=XFAccentPale();
+    self.modelsButton.layer.cornerRadius=12;
+    self.modelsButton.accessibilityLabel=@"模型库与 API 管理";
     [self.modelsButton addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.headerBar addSubview:self.modelsButton];
 
-    self.status=[[UILabel alloc] initWithFrame:CGRectMake(12,40,w-24,17)];
+    UIView *online=[[UIView alloc] initWithFrame:CGRectMake(12,46,7,7)];
+    online.backgroundColor=XFAccent();
+    online.layer.cornerRadius=3.5;
+    [self.headerBar addSubview:online];
+    self.status=[[UILabel alloc] initWithFrame:CGRectMake(25,39,w-37,21)];
     self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.status.textColor=[UIColor colorWithRed:0.43 green:0.48 blue:0.59 alpha:1];
+    self.status.textColor=XFSecondary();
     self.status.font=[UIFont systemFontOfSize:11];
     self.status.lineBreakMode=NSLineBreakByTruncatingMiddle;
     [self.headerBar addSubview:self.status];
@@ -246,7 +254,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.recordingBadge.textAlignment=NSTextAlignmentCenter;
     self.recordingBadge.layer.cornerRadius=7;
     self.recordingBadge.layer.masksToBounds=YES;
-    self.recordingBadge.backgroundColor=[UIColor colorWithRed:.86 green:.19 blue:.23 alpha:1];
+    self.recordingBadge.backgroundColor=XFDanger();
     self.recordingBadge.textColor=[UIColor whiteColor];
     self.recordingBadge.hidden=YES;
     [self.view addSubview:self.recordingBadge];
@@ -256,26 +264,26 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.view addSubview:self.footerBar];
     UIView *topRule=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,0.5)];
     topRule.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    topRule.backgroundColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.95 alpha:1];
+    topRule.backgroundColor=XFLine();
     [self.footerBar addSubview:topRule];
 
     // All secondary tools now live in the composer + menu.
 
     self.message=[[UITextView alloc] initWithFrame:CGRectZero];
     self.message.scrollEnabled=YES;
-    self.message.backgroundColor=[UIColor colorWithRed:0.965 green:0.973 blue:0.991 alpha:1];
+    self.message.backgroundColor=XFCanvas();
     self.message.textColor=[self ink];
-    self.message.font=[UIFont systemFontOfSize:14.5];
-    self.message.layer.cornerRadius=12;
-    self.message.layer.borderWidth=0.5;
-    self.message.layer.borderColor=[UIColor colorWithRed:0.88 green:0.90 blue:0.96 alpha:1].CGColor;
+    self.message.font=[UIFont systemFontOfSize:15];
+    self.message.layer.cornerRadius=15;
+    self.message.layer.borderWidth=0.7;
+    self.message.layer.borderColor=XFLine().CGColor;
     self.message.textContainerInset=UIEdgeInsetsMake(8,7,7,7);
     self.message.returnKeyType=UIReturnKeyDefault;
     self.message.delegate=self;
     [self.footerBar addSubview:self.message];
     self.messagePlaceholder=[[UILabel alloc] initWithFrame:CGRectZero];
-    self.messagePlaceholder.text=@"向 AI 提问…";
-    self.messagePlaceholder.textColor=[UIColor colorWithWhite:0.60 alpha:1];
+    self.messagePlaceholder.text=@"发消息给小斐…";
+    self.messagePlaceholder.textColor=XFSecondary();
     self.messagePlaceholder.font=[UIFont systemFontOfSize:14.5];
     self.messagePlaceholder.userInteractionEnabled=NO;
     [self.footerBar addSubview:self.messagePlaceholder];
@@ -284,22 +292,25 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.sendButton setTitle:@"发送" forState:UIControlStateNormal];
     self.sendButton.titleLabel.font=[UIFont boldSystemFontOfSize:14];
     [self styleNavigationButton:self.sendButton filled:YES];
-    self.sendButton.layer.cornerRadius=11;
+    self.sendButton.layer.cornerRadius=13;
+    self.sendButton.accessibilityLabel=@"发送消息或停止当前生成";
     [self.sendButton addTarget:self action:@selector(sendTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.footerBar addSubview:self.sendButton];
-    self.composerAttachButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    [self.composerAttachButton setTitle:@"＋" forState:UIControlStateNormal];
-    self.composerAttachButton.titleLabel.font=[UIFont systemFontOfSize:24];
-    [self styleNavigationButton:self.composerAttachButton filled:NO];
+    XFLineButton *addIcon=[[XFLineButton alloc] initWithSymbol:@"plus"];
+    self.composerAttachButton=addIcon;
+    addIcon.symbolColor=XFInk();
+    self.composerAttachButton.backgroundColor=XFCanvas();
+    self.composerAttachButton.layer.cornerRadius=13;
     [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
         forControlEvents:UIControlEventTouchUpInside];
     self.composerAttachButton.accessibilityLabel=@"更多功能：图片、录音、语音助手与工具";
     [self.footerBar addSubview:self.composerAttachButton];
 
-    self.composerGenerateButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    [self.composerGenerateButton setTitle:@"生图" forState:UIControlStateNormal];
-    self.composerGenerateButton.titleLabel.font=[UIFont boldSystemFontOfSize:12.5];
-    [self styleNavigationButton:self.composerGenerateButton filled:NO];
+    XFLineButton *imageIcon=[[XFLineButton alloc] initWithSymbol:@"image"];
+    self.composerGenerateButton=imageIcon;
+    imageIcon.symbolColor=XFAccent();
+    self.composerGenerateButton.backgroundColor=XFAccentPale();
+    self.composerGenerateButton.layer.cornerRadius=13;
     [self.composerGenerateButton addTarget:self action:@selector(generateImage)
         forControlEvents:UIControlEventTouchUpInside];
     self.composerGenerateButton.accessibilityLabel=@"按当前生图模型生成图片";
@@ -315,7 +326,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     [self.footerBar addSubview:self.pasteButton];
 
     self.attachmentPreview=[[UIImageView alloc] initWithFrame:CGRectZero];
-    self.attachmentPreview.backgroundColor=[UIColor colorWithWhite:0.92 alpha:1];
+    self.attachmentPreview.backgroundColor=XFCanvas();
     self.attachmentPreview.contentMode=UIViewContentModeScaleAspectFill;
     self.attachmentPreview.layer.cornerRadius=8;
     self.attachmentPreview.clipsToBounds=YES;
@@ -334,7 +345,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.attachmentCaption=[[UILabel alloc] initWithFrame:CGRectZero];
     self.attachmentCaption.text=@"已附加图片 · 点击缩略图预览";
     self.attachmentCaption.font=[UIFont systemFontOfSize:11];
-    self.attachmentCaption.textColor=[self ink];
+    self.attachmentCaption.textColor=XFSecondary();
     self.attachmentCaption.numberOfLines=2;
     [self.footerBar addSubview:self.attachmentCaption];
     [self updateAttachmentViews];
@@ -373,7 +384,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 - (void)refreshStatus {
     NSDictionary *profile=[XFModelsController activeProfileForCapability:@"chat"];
     NSString *name=profile[@"name"];
-    self.status.text=name.length?[NSString stringWithFormat:@"%@%@",name,self.isWorking?@" · 正在回复":@""]:@"点击「模型」选择聊天模型";
+    self.status.text=name.length?[NSString stringWithFormat:@"%@%@",name,self.isWorking?@" · 思考中":@" · 就绪"]:@"尚未选择模型 · 右上角设置";
 }
 // The iOS 8 Chinese candidate bar can change keyboard height while editing.
 // Use the actual end frame in this view, never cap it to half the screen.
@@ -408,9 +419,9 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     CGFloat footerY=MAX(0,availableBottom-footerHeight);
     self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
-    self.recordingBadge.frame=CGRectMake(6,typing?4:70,w-12,30);
+    self.recordingBadge.frame=CGRectMake(12,typing?4:72,w-24,28);
     if(typing){
-        CGFloat margin=7,gap=5,attachW=35,generateW=45,sendW=54;
+        CGFloat margin=8,gap=6,attachW=38,generateW=38,sendW=53;
         CGFloat inputW=MAX(80,w-2*margin-3*gap-attachW-generateW-sendW);
         CGFloat y=MAX(2,footerHeight-48);
         self.composerAttachButton.frame=CGRectMake(margin,y,attachW,44);
@@ -420,7 +431,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
         self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,44);
     } else {
         CGFloat inputY=hasImage?65:5;
-        CGFloat margin=8,gap=5,attachW=36,generateW=45,sendW=57;
+        CGFloat margin=8,gap=6,attachW=38,generateW=38,sendW=57;
         CGFloat inputW=MAX(82,w-2*margin-3*gap-attachW-generateW-sendW);
         self.composerAttachButton.frame=CGRectMake(margin,inputY+3,attachW,45);
         self.message.frame=CGRectMake(margin+attachW+gap,inputY,inputW,53);
@@ -1292,11 +1303,12 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     self.recordingBadge.hidden=!recording;
     // The same visible + control becomes an explicit stop button when recording.
     UIButton *button=self.composerAttachButton;
-    [button setTitle:recording?@"■":@"＋" forState:UIControlStateNormal];
-    button.backgroundColor=recording?[UIColor colorWithRed:.86 green:.19 blue:.23 alpha:1]:
-        [UIColor colorWithRed:.94 green:.95 blue:.99 alpha:1];
-    [button setTitleColor:recording?[UIColor whiteColor]:[self accent] forState:UIControlStateNormal];
-    button.titleLabel.font=[UIFont boldSystemFontOfSize:recording?18:23];
+    if([button isKindOfClass:[XFLineButton class]]){
+        XFLineButton *icon=(XFLineButton *)button;
+        icon.symbol=recording?@"stop":@"plus";
+        icon.symbolColor=recording?XFPaper():XFInk();
+    }
+    button.backgroundColor=recording?XFDanger():XFCanvas();
     button.accessibilityLabel=recording?@"停止录音":@"更多功能";
     if(recording)[self.recordingBadge setText:@"正在录音 · 按左下角停止"];
 }
