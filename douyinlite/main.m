@@ -833,16 +833,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    if(!problem&&[body[@"has_more"] respondsToSelector:@selector(boolValue)]&&![body[@"has_more"] boolValue])self.douyinEnd=YES;
    NSString *reason=problem;
    if(!reason.length){NSString *code=DLText(root[@"status_code"]);if(!code.length)code=DLText(body[@"status_code"]);reason=code.length&&![code isEqualToString:@"0"]?[NSString stringWithFormat:@"内容接口返回状态 %@。",code]:@"未返回新的兼容视频，可能需要账号登录或网页验证。";}
-   self.onlineError=[reason stringByAppendingString:@"\n点击「我」进入抖音账号，再返回首页刷新。"];
+   self.onlineError=[reason stringByAppendingString:@"\n也可以点右上角＋，粘贴公开视频分享链接直接播放。"];
    if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
   if(self.onlineMode && !self.presentedViewController){if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
  }];
 }
 - (void)loadOnlineFeed:(BOOL)reset {
-    if(![[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"] && ![[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadDouyinAccountFeed:reset];return;}
-    if([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]){[self loadJSONFeed:reset];return;}
-    [self loadOnlineFeed:reset preserveHost:NO];
+    // Only direct on-device requests: ignore settings left by previous releases.
+    [self loadDouyinAccountFeed:reset];
 }
 - (void)loadOnlineFeed:(BOOL)reset preserveHost:(BOOL)preserveHost {
     if(self.onlineLoading&&!reset)return;
@@ -1184,7 +1183,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.countText.text=@"";
     self.likeButton.hidden=!visible.count;
     self.rightRail.hidden=!visible.count;
-    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?([[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"] length]?@"DouyinBridge · 云端内容":([[NSUserDefaults standardUserDefaults] boolForKey:@"dl_use_peertube_v1"]?@"PeerTube 公开频道":@"抖音内容 · 本机连接")):(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
+    self.topText.text=self.searchMode?@"本地搜索":(self.favoritesOnly?@"我的收藏":(self.historyOnly?@"观看历史":(self.onlineMode?@"抖音 · 纯手机":(self.demoMode?@"视频样片 · 测试":@"我的视频"))));
     [self refreshTabBar];
     if(!visible.count){
         if(self.onlineMode){
@@ -1647,21 +1646,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
       self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
       [self loadOnlineFeed:YES];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"内置抖音浏览器（实验）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openDouyinBrowser];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"用 Safari 打开抖音网页（辅助）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        NSURL *url=[NSURL URLWithString:@"https://www.douyin.com/"];
-        if([[UIApplication sharedApplication] canOpenURL:url])[[UIApplication sharedApplication] openURL:url];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"PeerTube 公开频道（备用）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-      [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"dl_use_peertube_v1"];
-      [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"dl_feed_endpoint_v1"];
-      self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
-      [self loadOnlineFeed:YES];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"联网公开视频 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        self.onlineMode=YES;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
-        self.index=0;[self reloadCurrent];[self loadOnlineFeed:YES];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"公开样片（上下滑动测试）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         self.demoMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;[self reloadCurrent];
