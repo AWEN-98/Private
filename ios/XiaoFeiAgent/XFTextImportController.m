@@ -6,6 +6,7 @@
 @property(nonatomic,strong) UILabel *caption;
 @property(nonatomic,strong) UIButton *pasteButton;
 @property(nonatomic,strong) UIButton *useButton;
+@property(nonatomic,assign) CGFloat keyboardOverlap;
 @end
 @implementation XFTextImportController
 - (void)viewDidLoad {
@@ -48,21 +49,22 @@
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
+    CGFloat bottom=MAX(158,h-self.keyboardOverlap);
     self.caption.frame=CGRectMake(12,9,w-24,30);
-    self.editor.frame=CGRectMake(12,42,w-24,MAX(100,h-104));
-    self.pasteButton.frame=CGRectMake(12,h-53,(w-36)/2,44);
-    self.useButton.frame=CGRectMake(w/2+6,h-53,(w-36)/2,44);
+    self.editor.frame=CGRectMake(12,42,w-24,MAX(64,bottom-104));
+    self.pasteButton.frame=CGRectMake(12,bottom-53,(w-36)/2,44);
+    self.useButton.frame=CGRectMake(w/2+6,bottom-53,(w-36)/2,44);
 }
 - (void)keyboardShown:(NSNotification *)notice {
     CGRect frame=[notice.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
     CGRect local=[self.view convertRect:frame fromView:nil];
     CGFloat cover=MAX(0,CGRectGetMaxY(self.view.bounds)-CGRectGetMinY(local));
-    self.editor.contentInset=UIEdgeInsetsMake(0,0,cover+8,0);
-    self.editor.scrollIndicatorInsets=self.editor.contentInset;
+    self.keyboardOverlap=cover;
+    [self.view setNeedsLayout];
 }
 - (void)keyboardHidden:(NSNotification *)notice {
-    self.editor.contentInset=UIEdgeInsetsZero;
-    self.editor.scrollIndicatorInsets=UIEdgeInsetsZero;
+    self.keyboardOverlap=0;
+    [self.view setNeedsLayout];
 }
 - (void)hideKeyboard {[self.editor resignFirstResponder];}
 - (void)close {[self dismissViewControllerAnimated:YES completion:nil];}
