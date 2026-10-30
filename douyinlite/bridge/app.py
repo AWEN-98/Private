@@ -37,21 +37,31 @@ def _urls(address):
     return candidates if isinstance(candidates, list) else []
 
 def playable_url(video):
-    """Prefer AVC/H.264; never deliberately select a known HEVC-only rendition."""
+    """Select an explicitly compatible H.264 rendition when available."""
     if not isinstance(video, dict):
         return None
-    for rate in video.get("bit_rate", []) or []:
-        if not isinstance(rate, dict):
-            continue
+    rates = video.get("bit_rate") or video.get("dynamic_video_list") or []
+    if not isinstance(rates, list):
+        rates = []
+    rates = sorted((r for r in rates if isinstance(r, dict)),
+                   key=lambda r: r.get("bit_rate") if isinstance(r.get("bit_rate"), int) else 1e12)
+    for rate in rates:
         codec = str(rate.get("codec_type", "")).lower()
         if codec and not any(k in codec for k in ("h264", "avc", "264")):
             continue
-        for candidate in _urls(rate.get("play_addr")):
+        if rate.get("is_h265"):
+            continue
+        for candidate in _urls(rate.get("play_addr") or rate.get("playAddr")):
             if is_https_video(candidate):
                 return candidate
-    for candidate in _urls(video.get("play_addr")):
-        if is_https_video(candidate):
-            return candidate
+    for address in ("play_addr_h264", "playAddrH264", "play_addr_lowbr"):
+        for candidate in _urls(video.get(address)):
+            if is_https_video(candidate):
+                return candidate
+    if not video.get("is_h265"):
+        for candidate in _urls(video.get("play_addr") or video.get("playAddr")):
+            if is_https_video(candidate):
+                return candidate
     return None
 
 def is_https_video(value):
@@ -101,6 +111,7 @@ class BrowserFeed:
         self.page = None
         self.items = []
         self.ids = set()
+        self.public_attempted = set()
         self.status = "starting"
         self.error = None
         self.last_seen = 0.0
@@ -178,6 +189,67 @@ class BrowserFeed:
         except Exception:
             pass
 
+    async def discover_public_cards(self):
+        """Fallback: follow ordinary public video links displayed by Chromium.
+
+        This does not invent feed entries; each item must have a publicly
+        readable official share page with a real playable video address.
+        """
+        if not self.page or not self.context:
+            return 0
+        try:
+            links = await self.page.locator("a[href]").evaluate_all(
+                "(nodes) => nodes.slice(0,100).map(node => node.href).filter(url => "
+                "url && (/\\/video\\/|modal_id=|aweme_id=/.test(url))).slice(0,40)")
+        except Exception:
+            return 0
+        if not isinstance(links, list):
+            return 0
+        candidates = []
+        for link in [self.page.url] + links:
+            found = video_id(link) if isinstance(link, str) else None
+            if not found or found in self.ids or found in self.public_attempted:
+                continue
+            self.public_attempted.add(found)
+            candidates.append(found)
+            if len(candidates) >= 4:
+                break
+
+        async def check(found):
+            try:
+                response = await self.context.request.get(
+                    mobile_share_url(found),
+                    headers={"User-Agent": MOBILE_UA,
+                             "Referer": "https://www.douyin.com/"},
+                    timeout=6000, max_redirects=5)
+                if response.status != 200:
+                    return None
+                body = await response.body()
+                if len(body) > MAX_HTML_SIZE:
+                    return None
+                clip = parse_public_html(body.decode("utf-8", errors="replace"))
+                if not clip:
+                    return None
+                return {"id": found, "title": clip["title"],
+                        "url": clip["url"], "source": "douyin-public-card"}
+            except Exception:
+                return None
+
+        found_items = await asyncio.gather(*(check(id_) for id_ in candidates))
+        added = 0
+        async with self.lock:
+            for item in found_items:
+                if not item or item["id"] in self.ids or len(self.items) >= MAX_CACHE:
+                    continue
+                self.ids.add(item["id"])
+                self.items.append(item)
+                added += 1
+            if added:
+                self.last_seen = time.time()
+                self.status = "ready"
+                self.error = None
+        return added
+
     async def ensure_items(self, minimum):
         if not self.page or self.status == "browser_error":
             return
@@ -200,6 +272,8 @@ class BrowserFeed:
                 except Exception as exc:
                     self.error = str(exc)[:250]
                     break
+        if len(self.items) < minimum and self.status != "verification_required":
+            await self.discover_public_cards()
 
     async def session_info(self):
         """Report cookie presence without disclosing credentials or claiming login validity."""
@@ -413,6 +487,7 @@ async def refresh(request: Request):
     authorize(request)
     engine.items.clear()
     engine.ids.clear()
+    engine.public_attempted.clear()
     await engine.navigate()
     return {"status": engine.status, "items": len(engine.items)}
 
