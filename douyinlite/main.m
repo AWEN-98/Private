@@ -1872,6 +1872,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *clips=[self visibleVideos];
     NSInteger next=self.index+(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1);
     if(next<0 || next>=clips.count){
+        if(next>=clips.count && self.onlineMode && !self.onlineLoading){
+            [self loadOnlineFeed:NO];
+            self.message.text=@"正在请求更多视频…";
+            return;
+        }
         if(self.demoMode && clips.count){
             [self transitionToIndex:next<0?(NSInteger)clips.count-1:0 direction:(gesture.direction==UISwipeGestureRecognizerDirectionUp?1:-1)];return;
         }
