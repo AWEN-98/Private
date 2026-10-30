@@ -18,7 +18,7 @@ checks={
     "no automatic server fallback for share": "resolveShareWithBridge" not in entry,
     "no Surf from native tabs": "Surf 模式" not in tabs,
     "no cloud setup from native tabs": "连接 DouyinBridge" not in tabs,
-    "My tab opens QR directly": "else if(tab==2){[self openAccount];}" in tabs,
+    "My tab opens QR directly": "else if(tab==3)[self openAccount];" in tabs,
     "No pasted links in main tabs": "纯手机 · 粘贴抖音视频链接" not in tabs,
     "online feed stays native only": "[self loadDouyinAccountFeed:reset];" in src[src.index("- (void)loadOnlineFeed:(BOOL)reset {"):src.index("- (void)loadOnlineFeed:(BOOL)reset preserveHost:")],
 }
