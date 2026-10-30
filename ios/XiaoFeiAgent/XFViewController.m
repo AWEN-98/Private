@@ -10,6 +10,7 @@
 #import "XFJarvisController.h"
 #import "XFImageGeneration.h"
 #import "XFTheme.h"
+#import "XFActionHubController.h"
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
@@ -473,51 +474,14 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 - (void)composerAttachTapped {
     if(self.isRecording){[self finishRecording];return;}
     [self.message resignFirstResponder];
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"小斐工具"
-         message:nil preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"选择图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self pickImage];
-    }]];
-    if([UIPasteboard generalPasteboard].image){
-        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-            [self attachImage:[UIPasteboard generalPasteboard].image];
-        }]];
-    }
-    [menu addAction:[UIAlertAction actionWithTitle:@"语音助手" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self openJarvis];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"录音转文字" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self toggleRecord];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"导入文本" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self pickFile];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"新对话" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        if(self.isWorking){[self showAlert:@"正在回复" detail:@"请先停止当前请求再创建新对话。"];return;}
-        [self loadConversation:[XFChatStore createConversation]];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"更多工具" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        [self showMoreTools];
-    }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:menu animated:YES completion:nil];
+    XFActionHubController *hub=[[XFActionHubController alloc] initWithStyle:UITableViewStyleGrouped];
+    __weak XFViewController *weakSelf=self;
+    hub.onAction=^(NSString *key){[weakSelf executeTool:key];};
+    UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:hub];
+    [self presentViewController:nav animated:YES completion:nil];
 }
 - (void)showMoreTools {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"更多工具" message:nil
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    NSArray *actions=@[@[@"粘贴文字",@"paste"],@[@"提示词工具箱",@"prompts"],
-       @[@"双模型对比",@"compare"],@[@"联网提问",@"web"],
-       @[@"朗读回复",@"tts"],@[@"复制回复",@"copyreply"],
-       @[@"生图协议",@"imagemode"],@[@"诊断",@"diagnostics"]];
-    // Present a short, scrollable native action sheet instead of an extra toolbar.
-    for(NSArray *item in actions){
-        NSString *key=item[1];
-        [menu addAction:[UIAlertAction actionWithTitle:item[0] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-            [self executeTool:key];
-        }]];
-    }
-    [menu addAction:[UIAlertAction actionWithTitle:@"返回" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:menu animated:YES completion:nil];
+    [self composerAttachTapped];
 }
 - (void)pasteTapped {
     NSString *clip=[UIPasteboard generalPasteboard].string;
@@ -618,7 +582,10 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
 }
 - (void)executeTool:(NSString *)name {
     [self.message resignFirstResponder];
-    if([name isEqualToString:@"new"]) {[self loadConversation:[XFChatStore createConversation]];return;}
+    if([name isEqualToString:@"new"]) {
+        if(self.isWorking){[self showAlert:@"当前还在回复" detail:@"结束本次生成后再创建新对话。"];return;}
+        [self loadConversation:[XFChatStore createConversation]];return;
+    }
     if([name isEqualToString:@"copyreply"]) {
         if(self.lastAnswer.length) {[UIPasteboard generalPasteboard].string=self.lastAnswer;self.status.text=@"已复制上一次 AI 回复";}
         else [self showAlert:@"暂无可复制的回复" detail:@"收到 AI 回复后即可复制。"];
