@@ -1,5 +1,6 @@
 #import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
+#import <math.h>
 @interface XFLineButton ()
 @end
 @implementation XFLineButton
@@ -45,23 +46,23 @@
         CGContextMoveToPoint(c,12,7);CGContextAddLineToPoint(c,12,12);
         CGContextAddLineToPoint(c,16,14);
     }else if([n isEqualToString:@"models"]){
-        CGContextAddRoundedRect(c,CGRectMake(4,4,16,16),3,3);
+        CGContextAddPath(c,[UIBezierPath bezierPathWithRoundedRect:CGRectMake(4,4,16,16) cornerRadius:3].CGPath);
         CGContextMoveToPoint(c,9,4);CGContextAddLineToPoint(c,9,20);
         CGContextMoveToPoint(c,14,4);CGContextAddLineToPoint(c,14,20);
         CGContextMoveToPoint(c,4,10);CGContextAddLineToPoint(c,20,10);
     }else if([n isEqualToString:@"image"]){
-        CGContextAddRoundedRect(c,CGRectMake(3,4,18,16),3,3);
+        CGContextAddPath(c,[UIBezierPath bezierPathWithRoundedRect:CGRectMake(3,4,18,16) cornerRadius:3].CGPath);
         CGContextAddEllipseInRect(c,CGRectMake(14,7,3,3));
         CGContextMoveToPoint(c,4,17);CGContextAddLineToPoint(c,9,12);
         CGContextAddLineToPoint(c,12,15);CGContextAddLineToPoint(c,15,12);
         CGContextAddLineToPoint(c,20,18);
     }else if([n isEqualToString:@"mic"]){
-        CGContextAddRoundedRect(c,CGRectMake(9,4,6,11),3,3);
+        CGContextAddPath(c,[UIBezierPath bezierPathWithRoundedRect:CGRectMake(9,4,6,11) cornerRadius:3].CGPath);
         CGContextMoveToPoint(c,6,11);CGContextAddArc(c,12,11,6,M_PI,0,1);
         CGContextMoveToPoint(c,12,17);CGContextAddLineToPoint(c,12,21);
         CGContextMoveToPoint(c,8,21);CGContextAddLineToPoint(c,16,21);
     }else if([n isEqualToString:@"stop"]){
-        CGContextAddRoundedRect(c,CGRectMake(5,5,14,14),2.5,2.5);
+        CGContextAddPath(c,[UIBezierPath bezierPathWithRoundedRect:CGRectMake(5,5,14,14) cornerRadius:2.5].CGPath);
     }else if([n isEqualToString:@"search"]){
         CGContextAddEllipseInRect(c,CGRectMake(4,3,13,13));
         CGContextMoveToPoint(c,15,15);CGContextAddLineToPoint(c,21,21);
