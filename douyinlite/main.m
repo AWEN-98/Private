@@ -77,6 +77,27 @@ static NSString *DLPublicVideoFromHTML(NSString *html){
 }
 
 
+// Parse up to twelve actual official share links from a block of pasted text.
+static NSArray *DLShareURLsInText(NSString *input) {
+    if(!input.length)return @[];
+    NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"https?://[^\\s<>，。]+" options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSArray *matches=[re matchesInString:input options:0 range:NSMakeRange(0,MIN(input.length,(NSUInteger)16000))];
+    NSMutableArray *urls=[NSMutableArray array];
+    NSMutableSet *known=[NSMutableSet set];
+    for(NSTextCheckingResult *match in matches){
+        NSString *clean=DLFindURL([input substringWithRange:match.range]);
+        NSURL *url=[NSURL URLWithString:clean];
+        if(!DLDouyinHost(url.host) || ![url.scheme.lowercaseString isEqualToString:@"https"])continue;
+        NSString *videoID=DLShareVideoID(url);
+        NSString *unique=videoID.length?videoID:url.absoluteString;
+        if([known containsObject:unique])continue;
+        [known addObject:unique];
+        [urls addObject:url];
+        if(urls.count>=12)break;
+    }
+    return urls;
+}
+
 // Parse only metadata that a public Douyin share page actually returns.
 // No session cookie, signed private endpoint, or anti-bot challenge is bypassed.
 static NSDictionary *DLPublicInfoInTree(id node,NSInteger depth) {
@@ -320,6 +341,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,strong) NSArray *demoVideos;
 @property(nonatomic,strong) NSMutableArray *onlineVideos;
+@property(nonatomic,strong) NSMutableArray *pendingShareURLs;
+@property(nonatomic,assign) NSUInteger batchImported;
+@property(nonatomic,assign) NSUInteger batchFailed;
+@property(nonatomic,assign) NSUInteger batchTotal;
+@property(nonatomic,assign) BOOL batchInProgress;
+
 @property(nonatomic,assign) BOOL onlineMode;
 @property(nonatomic,assign) BOOL onlineLoading;
 @property(nonatomic,assign) NSInteger onlineOffset;
@@ -1397,7 +1424,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)addVideo {
     UIAlertController *input=[UIAlertController alertControllerWithTitle:@"添加视频"
-      message:@"粘贴抖音官方分享链接，优先读取公开分享页的视频数据。也可导入 MP4 或 HLS 直链。"
+      message:@"粘贴一条或多条抖音分享链接，最多连续导入12条。支持包含文案的分享内容，也可粘贴视频直链。"
       preferredStyle:UIAlertControllerStyleAlert];
     [input addTextFieldWithConfigurationHandler:^(UITextField *field){
         field.placeholder=@"粘贴视频链接或分享文案";
@@ -1412,24 +1439,96 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self presentViewController:input animated:YES completion:nil];
 }
 - (void)importText:(NSString *)text {
+    if(self.batchInProgress){[self alert:@"正在导入" message:@"请等这一批链接处理完成后再添加。"];return;}
+    NSArray *links=DLShareURLsInText(text);
+    if(links.count>1){
+        UIAlertController *prompt=[UIAlertController alertControllerWithTitle:@"连续导入抖音视频"
+            message:[NSString stringWithFormat:@"识别到 %lu 条分享链接，将在手机上逐条获取，成功后可上下滑动连续观看。",(unsigned long)links.count]
+            preferredStyle:UIAlertControllerStyleAlert];
+        [prompt addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+        [prompt addAction:[UIAlertAction actionWithTitle:@"开始导入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            [self startShareBatch:links];
+        }]];
+        [self presentViewController:prompt animated:YES completion:nil];
+        return;
+    }
+    if(links.count==1){[self inspectPublicShare:links[0]];return;}
     NSString *value=DLFindURL(text);
     NSURL *url=value.length?[NSURL URLWithString:value]:nil;
-    if(!url || !([url.scheme isEqualToString:@"https"]||[url.scheme isEqualToString:@"http"])){
-        [self alert:@"链接无效" message:@"请粘贴 http 或 https 的公开链接。"];
+    if(!url||!([url.scheme isEqualToString:@"https"]||[url.scheme isEqualToString:@"http"])){
+        [self alert:@"链接无效" message:@"请粘贴抖音公开分享链接或可播放的视频直链。"];
         return;
     }
-    if(DLDouyinHost(url.host)){
-        [self inspectPublicShare:url];
+    if(DLDouyinHost(url.host)){[self inspectPublicShare:url];return;}
+    [self addPlayableURL:value name:url.lastPathComponent?:@"我的视频" source:@"link"];
+}
+- (void)startShareBatch:(NSArray *)links {
+    if(self.batchInProgress||!links.count)return;
+    self.batchInProgress=YES;
+    self.batchImported=0;self.batchFailed=0;self.batchTotal=links.count;
+    self.pendingShareURLs=[links mutableCopy];
+    [self processNextShareBatch];
+}
+- (void)processNextShareBatch {
+    if(!self.batchInProgress)return;
+    if(!self.pendingShareURLs.count){
+        NSUInteger imported=self.batchImported,failed=self.batchFailed;
+        self.batchInProgress=NO;
+        self.pendingShareURLs=nil;
+        self.message.text=@"";
+        if(imported>0){
+            self.subtitleText.text=[NSString stringWithFormat:@"已导入 %lu 条%@ · 上滑继续观看",
+                (unsigned long)imported,failed?[NSString stringWithFormat:@"，%lu 条失败",(unsigned long)failed]:@""];
+            [self prepareNextAsset];
+        }else [self alert:@"这一批链接暂时无法播放"
+                message:@"已尝试全部官方公开链接，但当前网络没有取得有效视频。请换其他公开链接重试。"];
         return;
     }
-    [self addPlayableURL:value name:[url lastPathComponent]?:@"我的视频" source:@"link"];
+    NSURL *next=self.pendingShareURLs[0];
+    [self.pendingShareURLs removeObjectAtIndex:0];
+    self.message.text=[NSString stringWithFormat:@"正在导入第 %lu / %lu 条…",
+        (unsigned long)(self.batchImported+self.batchFailed+1),(unsigned long)self.batchTotal];
+    [self inspectPublicShare:next];
+}
+- (void)acceptImportedVideo:(NSString *)address title:(NSString *)title {
+    if(!self.batchInProgress){
+        [self addPlayableURL:address name:title source:@"public-share"];
+        return;
+    }
+    BOOL existing=NO;
+    for(NSDictionary *clip in self.videos)
+        if([DLText(clip[@"url"]) isEqualToString:address]){existing=YES;break;}
+    if(!existing){
+        NSDictionary *item=@{@"url":address,@"title":title.length?title:@"抖音公开视频",
+                            @"source":@"public-share"};
+        [self.videos addObject:item];
+        if(self.videos.count>240)[self.videos removeObjectAtIndex:0];
+        [self storeLibrary];
+        if(self.batchImported==0){
+            self.onlineMode=NO;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+            self.index=(NSInteger)self.videos.count-1;
+            [self reloadCurrent];
+        }else if(!self.onlineMode && !self.demoMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly)
+            [self reloadMetadata];
+    }
+    self.batchImported++;
+    [self processNextShareBatch];
+}
+- (void)failImportedVideo:(NSString *)detail {
+    if(self.batchInProgress){
+        self.batchFailed++;
+        [self processNextShareBatch];
+        return;
+    }
+    [self alert:@"手机直接获取失败"
+        message:[NSString stringWithFormat:@"%@\n可能是视频需要验证、网络受限或视频已经失效。可以换其他公开视频重试。",detail?:@"公开页面没有返回视频数据。"]];
 }
 - (void)inspectPublicShare:(NSURL *)url {
     if(!DLDouyinHost(url.host)){
         [self alert:@"仅支持抖音链接" message:@"请粘贴抖音官方分享的公开视频链接。"];
         return;
     }
-    self.message.text=@"手机正在读取公开视频…";
+    if(!self.batchInProgress)self.message.text=@"手机正在读取公开视频…";
     NSString *known=DLShareVideoID(url);
     if(known.length){
         [self requestMobileVideoID:known original:url endpointIndex:0];
@@ -1469,7 +1568,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         dispatch_async(dispatch_get_main_queue(),^{
             if(video.length){
                 self.message.text=@"";
-                [self addPlayableURL:video name:caption.length?caption:@"抖音公开视频" source:@"public-share"];
+                [self acceptImportedVideo:video title:caption.length?caption:@"抖音公开视频"];
                 return;
             }
             if(index+1<servers.count)self.message.text=@"手机正在切换备用视频接口…";
@@ -1497,7 +1596,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         dispatch_async(dispatch_get_main_queue(),^{
             if(video.length){
                 self.message.text=@"";
-                [self addPlayableURL:video name:DLText(clip[@"title"]) source:@"public-share"];
+                [self acceptImportedVideo:video title:DLText(clip[@"title"])];
                 return;
             }
             if(stage==0 && !knownID.length && identifier.length){
@@ -1516,8 +1615,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             self.message.text=@"";
             NSString *reason=error.localizedDescription?:@"";
             if(!reason.length)reason=[NSString stringWithFormat:@"官方页面未提供可播放视频（网页状态 %ld）。",(long)http.statusCode];
-            [self alert:@"手机直接获取失败"
-                message:[NSString stringWithFormat:@"%@\n\n可能是该视频需要验证、当前网络受限，或系统证书无法访问视频源。可以稍后再试其他公开链接。本模式不需要电脑或服务器。",reason]];
+            [self failImportedVideo:reason];
         });
     }] resume];
 }
@@ -1640,6 +1738,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"DouyinLite · 视频来源"
         message:@"本机直接连接抖音。可以粘贴公开视频分享链接；账号推荐是否可用取决于登录与平台接口。" preferredStyle:UIAlertControllerStyleActionSheet];
     [menu addAction:[UIAlertAction actionWithTitle:@"纯手机 · 粘贴抖音视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"从剪贴板连续导入（最多12条）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        [self importText:[UIPasteboard generalPasteboard].string?:@""];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:(DLAccountSession.shared.hasSession?@"抖音账号 · 检查 / 重新登录":@"抖音账号 · 扫码登录") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"抖音内容 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
       [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"dl_use_peertube_v1"];
