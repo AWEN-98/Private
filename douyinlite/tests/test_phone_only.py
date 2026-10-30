@@ -3,7 +3,7 @@
 from pathlib import Path
 src=(Path(__file__).resolve().parents[1]/"main.m").read_text(encoding="utf-8")
 entry=src[src.index("- (void)inspectPublicShare:"):src.index("- (void)resolveShareWithBridge:")]
-menu=src[src.index("- (void)openMenu {"):src.index("    [menu addAction:[UIAlertAction actionWithTitle:@\"公开样片（上下滑动测试）\"")]
+menu=src[src.index("- (void)openMenu {"):src.index("- (void)viewWillDisappear:(BOOL)animated")]
 checks={
     "official video input validated": "DLDouyinHost(url.host)" in entry,
     "only user-supplied ID for mobile lookup": "DLShareVideoID(url)" in entry,
@@ -18,7 +18,9 @@ checks={
     "no automatic server fallback for share": "resolveShareWithBridge" not in entry,
     "no Surf from native menu": "Surf 模式" not in menu,
     "no cloud setup from native menu": "连接 DouyinBridge" not in menu,
-    "Chinese phone-only menu item": "纯手机 · 粘贴抖音视频链接" in menu,
+    "Visitor mode shown": "当前为游客模式" in menu,
+    "QR login available": "扫码登录抖音" in menu,
+    "No pasted links in main menu": "纯手机 · 粘贴抖音视频链接" not in menu,
     "online feed stays native only": "[self loadDouyinAccountFeed:reset];" in src[src.index("- (void)loadOnlineFeed:(BOOL)reset {"):src.index("- (void)loadOnlineFeed:(BOOL)reset preserveHost:")],
 }
 for label,ok in checks.items():
