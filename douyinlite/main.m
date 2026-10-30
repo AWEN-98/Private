@@ -1208,7 +1208,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;
         self.favoritesOnly=YES;self.historyOnly=NO;self.index=0;
         [self reloadCurrent];
-    }else if(tab==2)[self openMenu];
+    }else if(tab==2){[self openAccount];}
     [self refreshTabBar];
 }
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
@@ -1900,27 +1900,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [self.player pause];
     DLBrowserController *browser=[[DLBrowserController alloc] initWithURL:[NSURL URLWithString:@"https://www.douyin.com/"]];
     [self presentViewController:browser animated:YES completion:nil];
-}
-- (void)openMenu {
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"我的"
-        message:DLAccountSession.shared.hasSession?@"已保存账号会话":@"当前为游客模式，登录可选"
-        preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"刷新推荐"
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            self.demoMode=NO;self.onlineMode=YES;self.searchMode=NO;
-            self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
-            [self loadOnlineFeed:YES];
-        }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"扫码登录抖音"
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"观看历史"
-        style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            self.demoMode=NO;self.onlineMode=NO;self.searchMode=NO;
-            self.favoritesOnly=NO;self.historyOnly=YES;self.index=0;
-            [self reloadCurrent];
-        }]];
-    [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)viewWillDisappear:(BOOL)animated {
     [self saveCurrentPosition];
