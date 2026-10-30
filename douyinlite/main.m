@@ -304,6 +304,15 @@ static UIImage *DLLineIcon(NSString *kind,CGFloat size,UIColor *color){
     }else if([kind isEqualToString:@"search"]){
         CGContextAddArc(c,10.5,10.5,6.5,0,2*M_PI,0);
         CGContextMoveToPoint(c,15.1,15.1);CGContextAddLineToPoint(c,21,21);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"expand"]){
+        CGContextMoveToPoint(c,4,10);CGContextAddLineToPoint(c,4,4);CGContextAddLineToPoint(c,10,4);
+        CGContextMoveToPoint(c,14,4);CGContextAddLineToPoint(c,20,4);CGContextAddLineToPoint(c,20,10);
+        CGContextMoveToPoint(c,4,14);CGContextAddLineToPoint(c,4,20);CGContextAddLineToPoint(c,10,20);
+        CGContextMoveToPoint(c,14,20);CGContextAddLineToPoint(c,20,20);CGContextAddLineToPoint(c,20,14);CGContextStrokePath(c);
+    }else if([kind isEqualToString:@"live"]){
+        CGContextAddRoundedRect(c,CGRectMake(3.5,6,17,13),3,3);
+        CGContextMoveToPoint(c,8,9);CGContextAddLineToPoint(c,15,12.5);
+        CGContextAddLineToPoint(c,8,16);CGContextClosePath(c);CGContextStrokePath(c);
     }else if([kind isEqualToString:@"user"]){
         CGContextAddArc(c,12,8,4.1,0,2*M_PI,0);
         CGContextMoveToPoint(c,4.5,21);CGContextAddQuadCurveToPoint(c,3.9,14,12,14);
@@ -381,6 +390,20 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSInteger failedDemoCount;
 @property(nonatomic,strong) UIView *rightRail;
 @property(nonatomic,strong) UIView *tabBar;
+@property(nonatomic,strong) UIView *topBar;
+@property(nonatomic,strong) UIScrollView *categoryScroll;
+@property(nonatomic,strong) NSArray *categoryButtons;
+@property(nonatomic,strong) UIButton *searchButton;
+@property(nonatomic,strong) UIButton *fullscreenButton;
+@property(nonatomic,strong) NSMutableArray *liveVideos;
+@property(nonatomic,copy) NSString *category;
+@property(nonatomic,assign) BOOL liveMode;
+@property(nonatomic,assign) BOOL fullscreenMode;
+@property(nonatomic,assign) BOOL bottomHidden;
+@property(nonatomic,assign) NSUInteger searchGeneration;
+@property(nonatomic,assign) NSInteger searchOffset;
+@property(nonatomic,assign) BOOL searchLoading;
+
 @property(nonatomic,strong) NSArray *tabButtons;
 @property(nonatomic,strong) NSArray *tabLabels;
 @property(nonatomic,strong) NSArray *searchResults;
@@ -453,6 +476,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
     self.onlineVideos=[NSMutableArray array];
+    self.liveVideos=[NSMutableArray array];self.category=@"推荐";
     self.onlineMode=YES;self.demoMode=NO;self.index=0;
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
     self.surface.backgroundColor=DLBG();
@@ -477,10 +501,26 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     // A double tap is deliberately not mapped to a platform like.
 
     UIView *top=[[UIView alloc] initWithFrame:CGRectZero];
-    top.tag=100;top.backgroundColor=[UIColor clearColor];top.userInteractionEnabled=NO;
+    top.tag=100;top.backgroundColor=[UIColor clearColor];top.userInteractionEnabled=YES;
+    self.topBar=top;
     [self.view addSubview:top];
     self.topText=[self label:16];self.topText.font=[UIFont boldSystemFontOfSize:16];
     self.topText.textAlignment=NSTextAlignmentCenter;[top addSubview:self.topText];
+    self.categoryScroll=[[UIScrollView alloc]initWithFrame:CGRectZero];
+    self.categoryScroll.showsHorizontalScrollIndicator=NO;
+    [top addSubview:self.categoryScroll];
+    NSArray *categories=@[@"推荐",@"热门",@"游戏",@"音乐",@"生活"];
+    NSMutableArray *categoryControls=[NSMutableArray array];
+    for(NSInteger i=0;i<(NSInteger)categories.count;i++){
+        UIButton *control=[self button:categories[i] action:@selector(categoryPressed:) font:14];
+        control.tag=300+i;[self.categoryScroll addSubview:control];[categoryControls addObject:control];
+    }
+    self.categoryButtons=categoryControls;
+    self.searchButton=[self button:@"搜索" action:@selector(openSearch) font:14];
+    DLStyleIcon(self.searchButton,@"search",21,[UIColor whiteColor]);[top addSubview:self.searchButton];
+    self.fullscreenButton=[self button:@"全屏" action:@selector(toggleFullscreen) font:14];
+    DLStyleIcon(self.fullscreenButton,@"expand",21,[UIColor whiteColor]);[top addSubview:self.fullscreenButton];
+
 
     self.rightRail=[[UIView alloc] initWithFrame:CGRectZero];
     [self.view addSubview:self.rightRail];
@@ -523,11 +563,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.tabBar=[[UIView alloc] initWithFrame:CGRectZero];
     self.tabBar.backgroundColor=[UIColor colorWithWhite:0 alpha:.94];
     [self.view addSubview:self.tabBar];
-    NSArray *kinds=@[@"home",@"bookmark",@"user"];
-    NSArray *names=@[@"首页",@"收藏",@"我的"];
+    NSArray *kinds=@[@"home",@"live",@"bookmark",@"user"];
+    NSArray *names=@[@"首页",@"直播",@"收藏",@"我的"];
     NSMutableArray *buttons=[NSMutableArray array];
     NSMutableArray *labels=[NSMutableArray array];
-    for(NSInteger i=0;i<3;i++){
+    for(NSInteger i=0;i<4;i++){
         UIButton *button=[self button:names[i] action:@selector(tabPressed:) font:12];
         button.tag=200+i;button.contentVerticalAlignment=UIControlContentVerticalAlignmentTop;
         DLStyleIcon(button,kinds[i],22,[UIColor whiteColor]);
@@ -549,26 +589,72 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)viewDidLayoutSubviews {[super viewDidLayoutSubviews];[self layoutScreen];}
 - (void)layoutScreen {
     CGFloat w=self.view.bounds.size.width,h=self.view.bounds.size.height;
-    UIView *top=[self.view viewWithTag:100];top.frame=CGRectMake(0,0,w,46);
-    self.topText.frame=CGRectMake(34,8,w-68,32);
-    self.rightRail.frame=CGRectMake(w-62,MAX(88,h-280),58,140);
+    self.topBar.frame=CGRectMake(0,0,w,43);
+    CGFloat actionW=38;
+    self.categoryScroll.frame=CGRectMake(9,5,MAX(100,w-actionW*2-16),36);
+    CGFloat x=0;
+    for(UIButton *b in self.categoryButtons){
+        CGFloat width=[b.titleLabel.text isEqualToString:@"推荐"]?49:45;
+        b.frame=CGRectMake(x,1,width,34);x+=width;
+    }
+    self.categoryScroll.contentSize=CGSizeMake(x+5,35);
+    self.searchButton.frame=CGRectMake(w-76,4,36,35);
+    self.fullscreenButton.frame=CGRectMake(w-38,4,36,35);
+    self.topText.frame=CGRectMake(24,6,w-105,30);
+    self.topText.textAlignment=NSTextAlignmentLeft;
+    self.categoryScroll.hidden=self.favoritesOnly||self.liveMode||self.historyOnly||self.searchMode||self.fullscreenMode;
+    self.topText.hidden=!self.categoryScroll.hidden||self.fullscreenMode;
+    self.searchButton.hidden=self.fullscreenMode;
+    self.fullscreenButton.hidden=self.fullscreenMode;
+    for(UIButton *b in self.categoryButtons){
+        BOOL selected=[b.currentTitle isEqualToString:self.category?:@"推荐"];
+        [b setTitleColor:selected?[UIColor whiteColor]:[UIColor colorWithWhite:.75 alpha:1] forState:UIControlStateNormal];
+        b.titleLabel.font=selected?[UIFont boldSystemFontOfSize:15]:[UIFont systemFontOfSize:14];
+    }
+    self.rightRail.frame=CGRectMake(w-62,MAX(78,h-250),58,140);
     self.likeButton.frame=CGRectMake(2,0,54,43);
     [self.rightRail viewWithTag:111].frame=CGRectMake(1,43,56,18);
     [self.rightRail viewWithTag:112].frame=CGRectMake(2,75,54,41);
     [self.rightRail viewWithTag:113].frame=CGRectMake(1,116,56,19);
+    self.rightRail.hidden=self.fullscreenMode||self.liveMode||![self visibleVideos].count;
     self.playButton.frame=CGRectMake((w-72)/2,(h-72)/2,72,72);
-    self.titleText.frame=CGRectMake(12,h-144,MAX(100,w-88),44);
-    self.subtitleText.frame=CGRectMake(12,h-102,MAX(100,w-88),24);
+    self.titleText.frame=CGRectMake(12,h-120,MAX(100,w-88),47);
+    self.subtitleText.frame=CGRectMake(12,h-80,MAX(100,w-88),24);
+    self.titleText.hidden=self.fullscreenMode;
+    self.subtitleText.hidden=self.fullscreenMode;
     self.countText.frame=CGRectZero;
     self.message.frame=CGRectMake(20,MAX(84,(h-100)/2),w-40,110);
     self.loadingIndicator.center=CGPointMake(w/2,MAX(76,h/2-44));
-    self.tabBar.frame=CGRectMake(0,h-50,w,50);
-    CGFloat step=w/3.0;
-    for(NSInteger i=0;i<self.tabButtons.count;i++){
-        UIButton *button=self.tabButtons[i];button.frame=CGRectMake(i*step,0,step,50);
-        UILabel *label=self.tabLabels[i];label.frame=CGRectMake(0,32,step,16);
+    const CGFloat barHeight=38;
+    self.tabBar.hidden=self.bottomHidden||self.fullscreenMode;
+    self.tabBar.frame=CGRectMake(0,h-barHeight,w,barHeight);
+    CGFloat step=w/4.0;
+    for(NSInteger i=0;i<(NSInteger)self.tabButtons.count;i++){
+        UIButton *b=self.tabButtons[i];
+        b.frame=CGRectMake(i*step,0,step,barHeight);
+        UILabel *label=self.tabLabels[i];
+        label.frame=CGRectMake(0,24,step,13);
     }
-    self.progress.frame=CGRectMake(0,h-52,w,2);
+    self.progress.frame=CGRectMake(0,h-(self.tabBar.hidden?2:40),w,2);
+}
+- (void)hideBottomAfterDelay {
+    if(self.presentedViewController||self.fullscreenMode)return;
+    self.bottomHidden=YES;[self layoutScreen];
+}
+- (void)showBottomTemporarily {
+    if(self.fullscreenMode)return;
+    self.bottomHidden=NO;[self layoutScreen];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideBottomAfterDelay) object:nil];
+    [self performSelector:@selector(hideBottomAfterDelay) withObject:nil afterDelay:5];
+}
+- (void)toggleFullscreen {
+    self.fullscreenMode=!self.fullscreenMode;
+    self.topBar.hidden=self.fullscreenMode;
+    self.bottomHidden=self.fullscreenMode;
+    ((AVPlayerLayer *)self.surface.layer).videoGravity=self.fullscreenMode?
+        AVLayerVideoGravityResizeAspectFill:AVLayerVideoGravityResizeAspect;
+    [self layoutScreen];
+    if(!self.fullscreenMode)[self showBottomTemporarily];
 }
 
 // Independent PeerTube public feed. It is deliberately NOT a Douyin recommender.
