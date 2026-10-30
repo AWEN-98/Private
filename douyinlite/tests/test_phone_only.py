@@ -3,7 +3,7 @@
 from pathlib import Path
 src=(Path(__file__).resolve().parents[1]/"main.m").read_text(encoding="utf-8")
 entry=src[src.index("- (void)inspectPublicShare:"):src.index("- (void)resolveShareWithBridge:")]
-menu=src[src.index("- (void)openMenu {"):src.index("- (void)viewWillDisappear:(BOOL)animated")]
+tabs=src[src.index("- (void)tabPressed:"):src.index("- (BOOL)gestureRecognizer:")]
 checks={
     "official video input validated": "DLDouyinHost(url.host)" in entry,
     "only user-supplied ID for mobile lookup": "DLShareVideoID(url)" in entry,
@@ -16,11 +16,10 @@ checks={
     "iesdouyin share fallback": "https://www.iesdouyin.com/share/video/" in entry,
     "bounded response buffers": "data.length<2500000" in entry and "data.length<3000000" in entry,
     "no automatic server fallback for share": "resolveShareWithBridge" not in entry,
-    "no Surf from native menu": "Surf 模式" not in menu,
-    "no cloud setup from native menu": "连接 DouyinBridge" not in menu,
-    "Visitor mode shown": "当前为游客模式" in menu,
-    "QR login available": "扫码登录抖音" in menu,
-    "No pasted links in main menu": "纯手机 · 粘贴抖音视频链接" not in menu,
+    "no Surf from native tabs": "Surf 模式" not in tabs,
+    "no cloud setup from native tabs": "连接 DouyinBridge" not in tabs,
+    "My tab opens QR directly": "else if(tab==2){[self openAccount];}" in tabs,
+    "No pasted links in main tabs": "纯手机 · 粘贴抖音视频链接" not in tabs,
     "online feed stays native only": "[self loadDouyinAccountFeed:reset];" in src[src.index("- (void)loadOnlineFeed:(BOOL)reset {"):src.index("- (void)loadOnlineFeed:(BOOL)reset preserveHost:")],
 }
 for label,ok in checks.items():
