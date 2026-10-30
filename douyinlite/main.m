@@ -1095,7 +1095,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
  NSString *signError=nil;
- NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset error:&signError];
+ NSMutableArray *seenIDs=[NSMutableArray array];
+ for(NSDictionary *clip in [self.onlineVideos reverseObjectEnumerator]){
+  NSString *vid=DLText(clip[@"id"]);
+  if(vid.length)[seenIDs addObject:vid];
+  if(seenIDs.count>=30)break;
+ }
+ NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset seenIDs:seenIDs error:&signError];
  if(!request){
   self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;
   if(!self.onlineVideos.count)[self loadAnonymousHotVideos:token];
