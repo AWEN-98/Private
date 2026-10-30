@@ -20,6 +20,28 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     // Providers sometimes prefix the model ID with a namespace.
     return [model containsString:@"qwen3-asr-flash"] && ![model containsString:@"filetrans"];
 }
+// Official Alibaba Cloud compatible-mode routing. For third-party gateways,
+// preserve the configured host and endpoint; never silently switch providers.
+static BOOL XFIsAlibabaASRHost(NSString *host) {
+    NSString *h=[host lowercaseString]?:@"";
+    return [h isEqualToString:@"dashscope.aliyuncs.com"] ||
+        [h isEqualToString:@"dashscope-intl.aliyuncs.com"] ||
+        [h hasSuffix:@".maas.aliyuncs.com"];
+}
+static NSURL *XFQwenASRURL(NSDictionary *profile) {
+    NSURL *configured=[NSURL URLWithString:profile[@"chat_endpoint"]?:@""];
+    if(![[configured.scheme lowercaseString] isEqualToString:@"https"] || !configured.host.length)return nil;
+    if(XFIsAlibabaASRHost(configured.host)){
+        NSString *target=[NSString stringWithFormat:@"https://%@/compatible-mode/v1/chat/completions",configured.host];
+        return [NSURL URLWithString:target];
+    }
+    return configured;
+}
+static NSString *XFASRSafeEndpoint(NSURL *url){
+    if(!url)return @"未知地址";
+    // No query string, credentials, audio data, or token details in diagnostics.
+    return [NSString stringWithFormat:@"%@%@",url.host?:@"未知域名",url.path?:@"/"];
+}
 static NSString *XFASRReadableText(id value) {
     if([value isKindOfClass:[NSString class]])return (NSString *)value;
     if(![value isKindOfClass:[NSArray class]])return nil;
@@ -1415,7 +1437,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
     if(qwen){
         // Chat Completions is the documented interface for Qwen3-ASR-Flash.
         // Don't send a multipart POST to /audio/transcriptions (HTTP 404).
-        NSURL *chatURL=[NSURL URLWithString:p[@"chat_endpoint"]?:@""];
+        NSURL *chatURL=XFQwenASRURL(p);
         if(![[chatURL.scheme lowercaseString] isEqualToString:@"https"] || !chatURL.host.length){
             if(wasVoice)[self voiceError:@"千问语音接口配置错误，请检查 API 服务的 Base URL"];
             else self.status.text=@"千问语音接口无效，请检查 API Base URL";
@@ -1446,6 +1468,7 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
         [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
         req.HTTPBody=body;
     }
+    NSString *safeEndpoint=XFASRSafeEndpoint(req.URL);
     self.status.text=@"正在语音识别…";
     [NSURLConnection sendAsynchronousRequest:req queue:[NSOperationQueue mainQueue] completionHandler:^(NSURLResponse *resp,NSData *data,NSError *err){
         if(wasVoice && (!self.voiceActive || !self.voiceCapture))return;
@@ -1466,18 +1489,30 @@ static NSString *XFASRShapeSummary(NSDictionary *root, NSString *mime) {
             if(!reason.length && [json[@"code"] isKindOfClass:[NSString class]])reason=json[@"code"];
             NSString *mime=[resp.MIMEType isKindOfClass:[NSString class]]?resp.MIMEType:nil;
             NSString *shape=XFASRShapeSummary(json,mime);
+            BOOL wrongPath=(code==404);
+            if(wrongPath) {
+                if(qwen && XFIsAlibabaASRHost(req.URL.host)){
+                    reason=@"阿里云接口返回404，请检查密钥地域和模型服务权限";
+                }else if(qwen){
+                    reason=@"当前服务商可能未提供千问 ASR 聊天接口，请检查 API Base URL";
+                }else{
+                    reason=@"该服务没有找到音频转写接口，请检查服务商的 STT 路径";
+                }
+            }
             if(!reason.length && code>=200 && code<300)
                 reason=[NSString stringWithFormat:@"无法提取识别文字。%@",shape];
             if(!reason.length)reason=[NSString stringWithFormat:@"STT 请求失败。%@",shape];
             if(reason.length>170)reason=[reason substringToIndex:170];
-            NSString *detail=[NSString stringWithFormat:@"模型：%@；协议：%@；HTTP %ld；%@",
-                modelName,qwen?@"千问 JSON":@"通用转写",(long)code,shape];
-            [XFDiagnostics record:@"STT 结果解析失败" code:code detail:detail];
+            NSString *detail=[NSString stringWithFormat:@"模型：%@；HTTP %ld；路径：%@；协议：%@",
+                modelName,(long)code,safeEndpoint,qwen?@"千问 JSON":@"通用转写"];
+            [XFDiagnostics record:@"STT 请求检查" code:code detail:detail];
             NSString *notice=[NSString stringWithFormat:@"STT HTTP %ld：%@",(long)code,reason];
             self.status.text=notice;
-            if(wasVoice)[self voiceError:notice];
-            else [self showAlert:@"语音识别失败" detail:
-                [NSString stringWithFormat:@"%@\n模型：%@\n%@",notice,modelName,shape]];
+            NSString *instructions=wrongPath?@"请检查模型是否归属该服务、Base URL 和密钥地域。":shape;
+            NSString *explain=[NSString stringWithFormat:@"%@\n请求：%@\n模型：%@\n%@",
+                notice,safeEndpoint,modelName,instructions];
+            if(wasVoice)[self voiceError:[NSString stringWithFormat:@"%@；请求：%@",notice,safeEndpoint]];
+            else [self showAlert:@"语音识别失败" detail:explain];
             return;
         }
         if(!text.length){if(wasVoice)[self voiceError:@"没有识别出文字，请再试一次"];return;}
