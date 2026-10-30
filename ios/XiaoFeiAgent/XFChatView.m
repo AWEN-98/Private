@@ -1,8 +1,10 @@
 #import "XFChatView.h"
 #import "XFChatStore.h"
+#import "XFTheme.h"
 #import <QuartzCore/QuartzCore.h>
 @interface XFChatBubble : UIView
 @property(nonatomic,strong) UILabel *label;
+@property(nonatomic,strong) UILabel *roleLabel;
 @property(nonatomic,strong) UIImageView *imagePreview;
 @property(nonatomic,copy) NSString *imageName;
 @property(nonatomic,assign) BOOL user;
@@ -15,6 +17,9 @@
 @property(nonatomic,strong) UIScrollView *scroll;
 @property(nonatomic,strong) NSMutableArray *bubbles;
 @property(nonatomic,strong) UILabel *welcomeTitle;
+@property(nonatomic,strong) UILabel *welcomeMark;
+@property(nonatomic,strong) UIButton *ideaButton;
+@property(nonatomic,strong) UIButton *helpButton;
 @property(nonatomic,strong) UILabel *welcomeSubtitle;
 @property(nonatomic,strong) XFChatBubble *streamBubble;
 @property(nonatomic,strong) XFChatBubble *selectedBubble;
@@ -22,13 +27,10 @@
 
 @implementation XFChatView
 
-static UIColor *XFInk(void) {return [UIColor colorWithRed:0.15 green:0.20 blue:0.31 alpha:1];}
-static UIColor *XFIndigo(void) {return [UIColor colorWithRed:0.32 green:0.38 blue:0.79 alpha:1];}
-static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:0.58 alpha:1];}
 
 - (id)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])){
-        self.backgroundColor=[UIColor colorWithRed:0.966 green:0.973 blue:0.987 alpha:1];
+        self.backgroundColor=XFCanvas();
         self.scroll=[[UIScrollView alloc] initWithFrame:self.bounds];
         self.scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
         self.scroll.backgroundColor=[UIColor clearColor];
@@ -48,48 +50,85 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
 - (void)hideWelcome {
     self.welcomeTitle.hidden=YES;
     self.welcomeSubtitle.hidden=YES;
+    self.welcomeMark.hidden=YES;
+    self.ideaButton.hidden=YES;
+    self.helpButton.hidden=YES;
 }
 - (void)showWelcome {
     [self clearBubbles];
     if(!self.welcomeTitle){
+        UILabel *mark=[[UILabel alloc] init];
+        mark.text=@"斐";
+        mark.textColor=XFAccent();
+        mark.font=[UIFont boldSystemFontOfSize:30];
+        mark.textAlignment=NSTextAlignmentCenter;
+        mark.backgroundColor=XFAccentPale();
+        mark.layer.cornerRadius=26;
+        mark.layer.masksToBounds=YES;
+        [self addSubview:mark];
+        self.welcomeMark=mark;
         UILabel *title=[[UILabel alloc] init];
-        title.font=[UIFont boldSystemFontOfSize:24];
+        title.font=[UIFont boldSystemFontOfSize:23];
         title.textColor=XFInk();
-        title.text=@"你好，我是小斐";
+        title.text=@"有什么新想法？";
         title.textAlignment=NSTextAlignmentCenter;
         [self addSubview:title];self.welcomeTitle=title;
         UILabel *subtitle=[[UILabel alloc] init];
         subtitle.font=[UIFont systemFontOfSize:13];
-        subtitle.textColor=XFGray();
+        subtitle.textColor=XFSecondary();
         subtitle.numberOfLines=0;subtitle.textAlignment=NSTextAlignmentCenter;
-        subtitle.text=@"让每个模型，都成为你的灵感助手\n选择模型，然后开始对话";
+        subtitle.text=@"随时提问、创作、看图或聊聊天";
         [self addSubview:subtitle];self.welcomeSubtitle=subtitle;
+        self.ideaButton=[self quickButton:@"帮我想一个创意" target:@selector(quickIdea)];
+        self.helpButton=[self quickButton:@"帮我分析一个问题" target:@selector(quickHelp)];
     }
     self.welcomeTitle.hidden=NO;self.welcomeSubtitle.hidden=NO;
+    self.welcomeMark.hidden=NO;self.ideaButton.hidden=NO;self.helpButton.hidden=NO;
     [self layoutWelcome];
     self.scroll.contentSize=CGSizeMake(self.bounds.size.width,self.bounds.size.height+1);
     self.scroll.contentOffset=CGPointZero;
 }
+- (UIButton *)quickButton:(NSString *)text target:(SEL)target {
+    UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
+    [button setTitle:text forState:UIControlStateNormal];
+    [button setTitleColor:XFInk() forState:UIControlStateNormal];
+    button.titleLabel.font=[UIFont systemFontOfSize:13];
+    XFCard(button,12);
+    [button addTarget:self action:target forControlEvents:UIControlEventTouchUpInside];
+    [self addSubview:button];
+    return button;
+}
+- (void)quickIdea {if(self.onQuickPrompt)self.onQuickPrompt(@"帮我想一个有趣的创意，先给三个不同方向");}
+- (void)quickHelp {if(self.onQuickPrompt)self.onQuickPrompt(@"帮我分析这个问题：");}
 - (void)layoutWelcome {
     CGFloat w=self.bounds.size.width,h=self.bounds.size.height;
-    CGFloat center=MAX(110,h*0.40);
-    self.welcomeTitle.frame=CGRectMake(12,center-45,w-24,35);
-    self.welcomeSubtitle.frame=CGRectMake(20,center+4,w-40,45);
+    CGFloat center=MAX(104,h*0.36);
+    self.welcomeMark.frame=CGRectMake((w-52)/2,center-81,52,52);
+    self.welcomeTitle.frame=CGRectMake(12,center-14,w-24,35);
+    self.welcomeSubtitle.frame=CGRectMake(20,center+21,w-40,38);
+    CGFloat buttonW=MIN(244,w-42);
+    self.ideaButton.frame=CGRectMake((w-buttonW)/2,center+79,buttonW,43);
+    self.helpButton.frame=CGRectMake((w-buttonW)/2,center+130,buttonW,43);
 }
 - (XFChatBubble *)makeBubble:(NSString *)text user:(BOOL)user notice:(BOOL)notice imageName:(NSString *)imageName {
     XFChatBubble *bubble=[[XFChatBubble alloc] initWithFrame:CGRectZero];
     bubble.user=user;bubble.notice=notice;
-    bubble.backgroundColor=notice?[UIColor colorWithRed:0.91 green:0.93 blue:0.98 alpha:1]:
-        (user?XFIndigo():[UIColor whiteColor]);
-    bubble.layer.cornerRadius=13;
+    bubble.backgroundColor=notice?XFAccentPale():(user?XFInk():XFPaper());
+    bubble.layer.cornerRadius=15;
+    bubble.layer.borderWidth=notice?0:0.7;
+    bubble.layer.borderColor=XFLine().CGColor;
     if(!user && !notice){
-        bubble.layer.borderWidth=0.5;
-        bubble.layer.borderColor=[UIColor colorWithRed:0.88 green:0.90 blue:0.95 alpha:1].CGColor;
+        UILabel *role=[[UILabel alloc] initWithFrame:CGRectZero];
+        role.text=@"小斐";
+        role.font=[UIFont boldSystemFontOfSize:10];
+        role.textColor=XFAccent();
+        [bubble addSubview:role];
+        bubble.roleLabel=role;
     }
     UILabel *label=[[UILabel alloc] initWithFrame:CGRectZero];
     label.font=[UIFont systemFontOfSize:15.0];
-    label.textColor=user?[UIColor whiteColor]:XFInk();
-    if(notice){label.textColor=XFGray();label.font=[UIFont systemFontOfSize:12];}
+    label.textColor=user?XFPaper():XFInk();
+    if(notice){label.textColor=XFAccent();label.font=[UIFont systemFontOfSize:12];}
     label.numberOfLines=0;label.lineBreakMode=NSLineBreakByWordWrapping;
     label.text=text?:@"";
     [bubble addSubview:label];
@@ -214,22 +253,24 @@ static UIColor *XFGray(void) {return [UIColor colorWithRed:0.45 green:0.49 blue:
     if(width<100)return;
     CGFloat y=15;
     for(XFChatBubble *bubble in self.bubbles){
-        CGFloat bubbleWidth=MIN(width-52,300);
-        CGFloat labelWidth=bubbleWidth-26;
+        CGFloat bubbleWidth=MIN(width-42,300);
+        CGFloat labelWidth=bubbleWidth-28;
         CGSize max=CGSizeMake(labelWidth,CGFLOAT_MAX);
         CGSize measured=[bubble.label sizeThatFits:max];
         CGFloat actualWidth=MIN(labelWidth,MAX(65,ceil(measured.width)));
         BOOL hasImage=bubble.imagePreview!=nil;
         if(hasImage)actualWidth=MAX(actualWidth,165);
         CGFloat imageHeight=hasImage?118:0;
-        CGFloat h=MAX(37,ceil(measured.height)+21)+(hasImage?imageHeight+11:0);
-        CGFloat w=actualWidth+26;
-        CGFloat x=bubble.user?width-13-w:13;
+        CGFloat labelTop=bubble.roleLabel?29:12;
+        CGFloat h=MAX(39,ceil(measured.height)+labelTop+13)+(hasImage?imageHeight+10:0);
+        CGFloat w=actualWidth+28;
+        CGFloat x=bubble.user?width-12-w:12;
         if(bubble.notice){x=(width-w)/2;}
         bubble.frame=CGRectMake(floor(x),y,ceil(w),h);
-        bubble.label.frame=CGRectMake(13,10,actualWidth,ceil(measured.height)+2);
-        if(hasImage)bubble.imagePreview.frame=CGRectMake(13,ceil(measured.height)+17,actualWidth,imageHeight);
-        y+=h+12;
+        bubble.roleLabel.frame=CGRectMake(14,9,actualWidth,13);
+        bubble.label.frame=CGRectMake(14,labelTop,actualWidth,ceil(measured.height)+2);
+        if(hasImage)bubble.imagePreview.frame=CGRectMake(14,labelTop+ceil(measured.height)+7,actualWidth,imageHeight);
+        y+=h+10;
     }
     self.scroll.contentSize=CGSizeMake(width,MAX(self.scroll.bounds.size.height+1,y+9));
     if(scrollToBottom){
