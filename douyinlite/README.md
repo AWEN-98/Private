@@ -1,4 +1,4 @@
-# DouyinLite 0.10.7
+# DouyinLite 0.10.8
 
 Native ARMv7 application for jailbroken iPhone 4S, iOS 8.0 and later.
 
@@ -46,3 +46,21 @@ site is accessible but its JSON feed is empty, it also reads actual public
 video links already displayed in the page, then checks their official
 public share pages. It never invents recommendations or assumes a login
 challenge is solved. Only returned accessible media URLs are sent to iOS.
+
+
+## 0.10.8 Surf handoff
+
+The video-source menu has a **Surf 模式 · 刷抖音（推荐）** option.
+When the official Surf native client v0.17.0 is installed, this opens
+`surf-https://www.douyin.com/` through its URL handler and uses a paired
+modern desktop Chromium browser to load Douyin.
+
+Surf is a separate MIT-licensed program from https://github.com/seg6/surf.
+It requires a Windows, macOS, or Linux host for video and audio; this app
+does not bundle Chromium or claim standalone modern web compatibility.
+For an iPhone 4S on iOS 8.4.1, use the companion setup kit from the
+repository's downloads directory, start Surf on a Windows computer, and
+pair the phone before pressing the new option.
+
+Actual Douyin browser access, account verification and video autoplay depend
+on the website and network; a build test alone does not verify those.

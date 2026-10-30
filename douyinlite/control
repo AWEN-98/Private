@@ -1,6 +1,6 @@
 Package: com.finn.douyinlite
 Name: DouyinLite
-Version: 0.10.7
+Version: 0.10.8
 Architecture: iphoneos-arm
 Description: Lightweight native video client with optional web page for jailbroken iPhone 4S and iOS 8
 Maintainer: Finn
