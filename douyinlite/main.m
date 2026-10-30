@@ -346,6 +346,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSUInteger batchFailed;
 @property(nonatomic,assign) NSUInteger batchTotal;
 @property(nonatomic,assign) BOOL batchInProgress;
+@property(nonatomic,strong) NSMutableSet *refreshedShareOrigins;
 
 @property(nonatomic,assign) BOOL onlineMode;
 @property(nonatomic,assign) BOOL onlineLoading;
@@ -434,6 +435,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.favorites=[[[defaults arrayForKey:@"dl_favorites_v1"]?:@[] mutableCopy] mutableCopy];
     self.history=[[[defaults arrayForKey:@"dl_history_v1"]?:@[] mutableCopy] mutableCopy];
     self.positions=[[[defaults dictionaryForKey:@"dl_positions_v1"]?:@{} mutableCopy] mutableCopy];
+    self.refreshedShareOrigins=[NSMutableSet set];
     self.animationsEnabled=![[defaults objectForKey:@"dl_animations_enabled_v1"] isEqual:@NO];
     self.preloadEnabled=![[defaults objectForKey:@"dl_preload_enabled_v1"] isEqual:@NO];
     self.autoplayNext=![[defaults objectForKey:@"dl_autonext_enabled_v1"] isEqual:@NO];
@@ -1283,6 +1285,16 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             [self storeLibrary];
         }else if(item.status==AVPlayerItemStatusFailed){
             [self setLoading:NO];
+            NSArray *shown=[self visibleVideos];
+            NSDictionary *clip=(self.index>=0&&self.index<(NSInteger)shown.count)?shown[self.index]:nil;
+            NSString *origin=DLText(clip[@"originURL"]);
+            if(!self.batchInProgress && [clip[@"source"] isEqualToString:@"public-share"] &&
+               origin.length && ![self.refreshedShareOrigins containsObject:origin]){
+                [self.refreshedShareOrigins addObject:origin];
+                self.message.text=@"视频地址可能已过期，正在从手机重新获取…";
+                [self inspectPublicShare:[NSURL URLWithString:origin]];
+                return;
+            }
             self.message.text=self.onlineMode?@"这个公开视频源暂时无法在 iPhone 4S 播放。\n上滑切换下一条，或从菜单切换来源":@"无法播放该视频\n可能是链接失效、编码不兼容或需要平台授权";
             self.playButton.hidden=NO;
         }
@@ -1490,29 +1502,57 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         (unsigned long)(self.batchImported+self.batchFailed+1),(unsigned long)self.batchTotal];
     [self inspectPublicShare:next];
 }
-- (void)acceptImportedVideo:(NSString *)address title:(NSString *)title {
-    if(!self.batchInProgress){
-        [self addPlayableURL:address name:title source:@"public-share"];
-        return;
+- (void)acceptImportedVideo:(NSString *)address title:(NSString *)title original:(NSURL *)original {
+    NSString *origin=original.absoluteString?:@"";
+    NSString *videoID=DLShareVideoID(original)?:@"";
+    NSDictionary *entry=@{@"url":address,@"title":title.length?title:@"抖音公开视频",
+        @"source":@"public-share",@"originURL":origin,@"id":videoID};
+    NSInteger existing=-1;
+    for(NSUInteger i=0;i<self.videos.count;i++){
+        NSDictionary *old=self.videos[i];
+        BOOL sameURL=[DLText(old[@"url"]) isEqualToString:address];
+        BOOL sameOrigin=origin.length && [DLText(old[@"originURL"]) isEqualToString:origin];
+        BOOL sameID=videoID.length && [DLText(old[@"id"]) isEqualToString:videoID];
+        if(sameURL||sameOrigin||sameID){existing=(NSInteger)i;break;}
     }
-    BOOL existing=NO;
-    for(NSDictionary *clip in self.videos)
-        if([DLText(clip[@"url"]) isEqualToString:address]){existing=YES;break;}
-    if(!existing){
-        NSDictionary *item=@{@"url":address,@"title":title.length?title:@"抖音公开视频",
-                            @"source":@"public-share"};
-        [self.videos addObject:item];
-        if(self.videos.count>240)[self.videos removeObjectAtIndex:0];
+    if(self.batchInProgress){
+        if(existing>=0){
+            NSMutableDictionary *updated=[self.videos[existing] mutableCopy];
+            [updated addEntriesFromDictionary:entry];
+            self.videos[existing]=updated;
+        }else{
+            [self.videos addObject:entry];
+            existing=(NSInteger)self.videos.count-1;
+        }
+        while(self.videos.count>240){
+            [self.videos removeObjectAtIndex:0];
+            if(existing>0)existing--;
+            if(self.index>0)self.index--;
+        }
         [self storeLibrary];
         if(self.batchImported==0){
             self.onlineMode=NO;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
-            self.index=(NSInteger)self.videos.count-1;
+            self.index=existing;
             [self reloadCurrent];
         }else if(!self.onlineMode && !self.demoMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly)
             [self reloadMetadata];
+        self.batchImported++;
+        [self processNextShareBatch];
+        return;
     }
-    self.batchImported++;
-    [self processNextShareBatch];
+    self.onlineMode=NO;self.demoMode=NO;self.searchMode=NO;self.favoritesOnly=NO;self.historyOnly=NO;
+    if(existing>=0){
+        NSMutableDictionary *updated=[self.videos[existing] mutableCopy];
+        [updated addEntriesFromDictionary:entry];
+        self.videos[existing]=updated;
+        self.index=existing;
+    }else{
+        [self.videos insertObject:entry atIndex:0];
+        self.index=0;
+        if(self.videos.count>240)[self.videos removeLastObject];
+    }
+    [self storeLibrary];
+    [self reloadCurrent];
 }
 - (void)failImportedVideo:(NSString *)detail {
     if(self.batchInProgress){
@@ -1568,7 +1608,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         dispatch_async(dispatch_get_main_queue(),^{
             if(video.length){
                 self.message.text=@"";
-                [self acceptImportedVideo:video title:caption.length?caption:@"抖音公开视频"];
+                [self acceptImportedVideo:video title:caption.length?caption:@"抖音公开视频" original:original];
                 return;
             }
             if(index+1<servers.count)self.message.text=@"手机正在切换备用视频接口…";
@@ -1596,7 +1636,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         dispatch_async(dispatch_get_main_queue(),^{
             if(video.length){
                 self.message.text=@"";
-                [self acceptImportedVideo:video title:DLText(clip[@"title"])];
+                [self acceptImportedVideo:video title:DLText(clip[@"title"]) original:original];
                 return;
             }
             if(stage==0 && !knownID.length && identifier.length){
@@ -1740,6 +1780,14 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [menu addAction:[UIAlertAction actionWithTitle:@"纯手机 · 粘贴抖音视频链接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self addVideo];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"从剪贴板连续导入（最多12条）" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         [self importText:[UIPasteboard generalPasteboard].string?:@""];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"重新获取当前视频地址" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSArray *shown=[self visibleVideos];
+        NSDictionary *clip=(self.index>=0&&self.index<(NSInteger)shown.count)?shown[self.index]:nil;
+        NSString *origin=DLText(clip[@"originURL"]);
+        if(!origin.length){[self alert:@"没有原分享链接" message:@"此视频没有保存抖音分享来源。可以重新粘贴分享链接。"];return;}
+        [self.refreshedShareOrigins removeObject:origin];
+        [self inspectPublicShare:[NSURL URLWithString:origin]];
     }]];
     [menu addAction:[UIAlertAction actionWithTitle:(DLAccountSession.shared.hasSession?@"抖音账号 · 检查 / 重新登录":@"抖音账号 · 扫码登录") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){[self openAccount];}]];
     [menu addAction:[UIAlertAction actionWithTitle:@"抖音内容 · 刷新" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
