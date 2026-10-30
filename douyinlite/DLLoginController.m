@@ -119,6 +119,14 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
   if(generation!=self.generation)return;self.polling=NO;
   if(problem){self.status.text=problem;return;}
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
+  NSString *serverCode=DLLoginText(data[@"error_code"]);
+  if(!serverCode.length)serverCode=DLLoginText(json[@"error_code"]);
+  if(!serverCode.length)serverCode=DLLoginText(json[@"status_code"]);
+  if([serverCode isEqualToString:@"4031"]){
+    [self suspend];
+    self.status.text=@"抖音登录接口返回 4031，当前扫码会话被服务端拒绝。请刷新二维码，使用最新版抖音扫码；如持续出现，请在现代设备的官方浏览器完成登录验证。游客浏览不受影响。";
+    return;
+  }
   NSString *status=[DLLoginText(data[@"status"]) lowercaseString],*redirect=DLLoginText(data[@"redirect_url"]);
   if([DLLoginText(data[@"error_code"]) isEqualToString:@"2046"]||[DLLoginText(json[@"error_code"]) isEqualToString:@"2046"]){[self suspend];self.status.text=@"账号需要额外验证，请打开官方页面完成。";return;}
   if(redirect.length){[self suspend];self.completing=YES;self.status.text=@"已确认，正在完成登录回调…";NSUInteger finishGeneration=self.generation;
