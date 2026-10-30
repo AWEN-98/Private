@@ -468,7 +468,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL historyOnly;
 @end
 @implementation DLFeedController
-- (BOOL)prefersStatusBarHidden{return YES;}
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations{return UIInterfaceOrientationMaskPortrait;}
 - (BOOL)shouldAutorotate{return NO;}
 - (UIButton *)button:(NSString *)title action:(SEL)action font:(CGFloat)size {
