@@ -111,43 +111,41 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     self.speechSynth=[[AVSpeechSynthesizer alloc] init];
     self.speechSynth.delegate=self;
     CGFloat w=self.view.bounds.size.width;
-    self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,88)];
+    self.headerBar=[[UIView alloc] initWithFrame:CGRectMake(0,0,w,66)];
     self.headerBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.headerBar.backgroundColor=[UIColor whiteColor];
     [self.view addSubview:self.headerBar];
-    UIView *rule=[[UIView alloc] initWithFrame:CGRectMake(0,87,w,0.5)];
+    UIView *rule=[[UIView alloc] initWithFrame:CGRectMake(0,65,w,0.5)];
     rule.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     rule.backgroundColor=[UIColor colorWithRed:0.90 green:0.92 blue:0.96 alpha:1];
     [self.headerBar addSubview:rule];
 
     self.sessionsButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.sessionsButton.frame=CGRectMake(12,27,62,33);
+    self.sessionsButton.frame=CGRectMake(10,6,55,32);
     [self.sessionsButton setTitle:@"会话" forState:UIControlStateNormal];
     [self styleNavigationButton:self.sessionsButton filled:NO];
     [self.sessionsButton addTarget:self action:@selector(historyTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.headerBar addSubview:self.sessionsButton];
 
-    self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(80,25,w-160,38)];
+    self.brandTitle=[[UILabel alloc] initWithFrame:CGRectMake(71,5,w-142,34)];
     self.brandTitle.autoresizingMask=UIViewAutoresizingFlexibleWidth;
-    self.brandTitle.text=@"小斐 AI";
-    self.brandTitle.font=[UIFont boldSystemFontOfSize:20];
+    self.brandTitle.text=@"小斐";
+    self.brandTitle.font=[UIFont boldSystemFontOfSize:18];
     self.brandTitle.textColor=[self ink];
     self.brandTitle.textAlignment=NSTextAlignmentCenter;
     [self.headerBar addSubview:self.brandTitle];
-    self.brandTitle.userInteractionEnabled=YES;
-    UITapGestureRecognizer *jarvisTap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(openJarvis)];
-    [self.brandTitle addGestureRecognizer:jarvisTap];
+    self.brandTitle.userInteractionEnabled=NO;
 
     self.modelsButton=[UIButton buttonWithType:UIButtonTypeCustom];
-    self.modelsButton.frame=CGRectMake(w-76,27,64,33);
+    self.modelsButton.frame=CGRectMake(w-66,6,56,32);
     self.modelsButton.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
-    [self.modelsButton setTitle:@"切换模型" forState:UIControlStateNormal];
+    [self.modelsButton setTitle:@"模型" forState:UIControlStateNormal];
     [self styleNavigationButton:self.modelsButton filled:YES];
     self.modelsButton.titleLabel.font=[UIFont boldSystemFontOfSize:11.5];
     [self.modelsButton addTarget:self action:@selector(modelsTapped) forControlEvents:UIControlEventTouchUpInside];
     [self.headerBar addSubview:self.modelsButton];
 
-    self.status=[[UILabel alloc] initWithFrame:CGRectMake(13,65,w-26,18)];
+    self.status=[[UILabel alloc] initWithFrame:CGRectMake(12,40,w-24,17)];
     self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     self.status.textColor=[UIColor colorWithRed:0.43 green:0.48 blue:0.59 alpha:1];
     self.status.font=[UIFont systemFontOfSize:11];
@@ -180,31 +178,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     topRule.backgroundColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.95 alpha:1];
     [self.footerBar addSubview:topRule];
 
-    self.tools=[[UIScrollView alloc] initWithFrame:CGRectZero];
-    self.tools.showsHorizontalScrollIndicator=NO;
-    self.tools.alwaysBounceHorizontal=YES;
-    [self.footerBar addSubview:self.tools];
-    NSArray *items=@[@[@"◉ JARVIS",@"jarvis"],@[@"＋ 新对话",@"new"],@[@"≡ 文本",@"file"],
-      @[@"● 录音",@"record"],@[@"♪ 朗读",@"tts"],@[@"生图协议",@"imagemode"],@[@"◎ 联网",@"web"],@[@"复制回复",@"copyreply"],@[@"提示词",@"prompts"],@[@"双模型",@"compare"],@[@"诊断",@"diagnostics"]];
-    CGFloat x=1;
-    for(NSArray *item in items){
-        UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
-        CGFloat bw=[item[1] isEqualToString:@"new"]?77:65;
-        button.frame=CGRectMake(x,4,bw,34);
-        button.backgroundColor=[UIColor colorWithRed:0.954 green:0.962 blue:0.988 alpha:1];
-        [button setTitle:item[0] forState:UIControlStateNormal];
-        [button setTitleColor:[self ink] forState:UIControlStateNormal];
-        button.titleLabel.font=[UIFont systemFontOfSize:12.5];
-        button.layer.cornerRadius=9;
-        button.layer.borderWidth=0.5;
-        button.layer.borderColor=[UIColor colorWithRed:0.89 green:0.91 blue:0.96 alpha:1].CGColor;
-        [button setAccessibilityIdentifier:item[1]];
-        if([item[1] isEqualToString:@"record"])self.recordButton=button;
-        [button addTarget:self action:@selector(toolTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [self.tools addSubview:button];
-        x+=bw+7;
-    }
-    self.tools.contentSize=CGSizeMake(x,42);
+    // All secondary tools now live in the composer + menu.
 
     self.message=[[UITextView alloc] initWithFrame:CGRectZero];
     self.message.scrollEnabled=YES;
@@ -238,7 +212,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     [self styleNavigationButton:self.composerAttachButton filled:NO];
     [self.composerAttachButton addTarget:self action:@selector(composerAttachTapped)
         forControlEvents:UIControlEventTouchUpInside];
-    self.composerAttachButton.accessibilityLabel=@"添加图片或文字";
+    self.composerAttachButton.accessibilityLabel=@"更多功能：图片、录音、语音助手与工具";
     [self.footerBar addSubview:self.composerAttachButton];
 
     self.composerGenerateButton=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -318,7 +292,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
 - (void)refreshStatus {
     NSDictionary *profile=[XFModelsController activeProfileForCapability:@"chat"];
     NSString *name=profile[@"name"];
-    self.status.text=name.length?[NSString stringWithFormat:@"聊天模型：%@ · %@",name,self.isWorking?@"处理中":@"已就绪"]:@"尚未选择聊天模型，点击右上角「模型」";
+    self.status.text=name.length?[NSString stringWithFormat:@"%@%@",name,self.isWorking?@" · 正在回复":@""]:@"点击「模型」选择聊天模型";
 }
 // The iOS 8 Chinese candidate bar can change keyboard height while editing.
 // Use the actual end frame in this view, never cap it to half the screen.
@@ -345,28 +319,26 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     // Leave a small gap above the Chinese predictive-word bar.
     CGFloat availableBottom=MAX(0,h-self.keyboardOffset-(typing?5:0));
     self.headerBar.hidden=typing;
-    self.tools.hidden=typing;
     // Image actions remain visible with the keyboard; text paste lives in the + menu.
     self.pasteButton.hidden=YES;
-    CGFloat top=typing?0:88;
+    CGFloat top=typing?0:66;
     BOOL hasImage=self.pendingImage!=nil;
-    CGFloat footerHeight=typing?MIN(hasImage?110:62,availableBottom):(hasImage?192:125);
+    CGFloat footerHeight=typing?MIN(hasImage?102:58,availableBottom):(hasImage?115:62);
     CGFloat footerY=MAX(0,availableBottom-footerHeight);
     self.chat.frame=CGRectMake(0,top,w,MAX(0,footerY-top));
     self.footerBar.frame=CGRectMake(0,footerY,w,footerHeight);
-    self.recordingBadge.frame=CGRectMake(6,typing?4:94,w-12,30);
+    self.recordingBadge.frame=CGRectMake(6,typing?4:70,w-12,30);
     if(typing){
         CGFloat margin=7,gap=5,attachW=35,generateW=45,sendW=54;
         CGFloat inputW=MAX(80,w-2*margin-3*gap-attachW-generateW-sendW);
-        CGFloat y=hasImage?MAX(2,footerHeight-48):MAX(2,(footerHeight-44)/2);
+        CGFloat y=MAX(2,footerHeight-48);
         self.composerAttachButton.frame=CGRectMake(margin,y,attachW,44);
         self.message.frame=CGRectMake(margin+attachW+gap,y,inputW,44);
         self.messagePlaceholder.frame=CGRectMake(margin+attachW+gap+11,y+6,inputW-15,27);
         self.composerGenerateButton.frame=CGRectMake(margin+attachW+gap+inputW+gap,y,generateW,44);
         self.sendButton.frame=CGRectMake(w-margin-sendW,y,sendW,44);
     } else {
-        self.tools.frame=CGRectMake(10,7,w-20,42);
-        CGFloat inputY=hasImage?130:57;
+        CGFloat inputY=hasImage?65:5;
         CGFloat margin=8,gap=5,attachW=36,generateW=45,sendW=57;
         CGFloat inputW=MAX(82,w-2*margin-3*gap-attachW-generateW-sendW);
         self.composerAttachButton.frame=CGRectMake(margin,inputY+3,attachW,45);
@@ -375,9 +347,14 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
         self.composerGenerateButton.frame=CGRectMake(margin+attachW+gap+inputW+gap,inputY+3,generateW,44);
         self.sendButton.frame=CGRectMake(w-margin-sendW,inputY+3,sendW,44);
     }
-    self.attachmentPreview.frame=typing?CGRectMake(10,7,36,36):CGRectMake(11,54,63,63);
-    self.removeAttachmentButton.frame=typing?CGRectMake(53,8,43,30):CGRectMake(82,63,43,30);
-    self.attachmentCaption.frame=typing?CGRectMake(102,7,MAX(30,w-112),35):CGRectMake(133,59,MAX(30,w-144),46);
+    self.attachmentPreview.frame=CGRectMake(10,4,35,35);
+    self.removeAttachmentButton.frame=CGRectMake(50,7,44,29);
+    self.attachmentCaption.frame=CGRectMake(100,3,MAX(30,w-112),38);
+    if(typing && hasImage){
+        self.attachmentPreview.frame=CGRectMake(10,4,32,32);
+        self.removeAttachmentButton.frame=CGRectMake(47,5,43,27);
+        self.attachmentCaption.frame=CGRectMake(96,2,MAX(30,w-106),33);
+    }
     [self updateAttachmentViews];
 }
 - (void)updateAttachmentViews {
@@ -396,24 +373,49 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     if(self.pendingImage)[self showGeneratedImage:self.pendingImage];
 }
 - (void)composerAttachTapped {
+    if(self.isRecording){[self finishRecording];return;}
     [self.message resignFirstResponder];
-    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"添加到对话"
-      message:@"可以从相册或剪贴板添加图片" preferredStyle:UIAlertControllerStyleActionSheet];
-    [menu addAction:[UIAlertAction actionWithTitle:@"选择相册图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"小斐工具"
+         message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    [menu addAction:[UIAlertAction actionWithTitle:@"选择图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
         [self pickImage];
     }]];
-    UIImage *pasted=[UIPasteboard generalPasteboard].image;
-    if(pasted){
-        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            [self attachImage:pasted];
+    if([UIPasteboard generalPasteboard].image){
+        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴图片" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            [self attachImage:[UIPasteboard generalPasteboard].image];
         }]];
     }
-    if([UIPasteboard generalPasteboard].string.length){
-        [menu addAction:[UIAlertAction actionWithTitle:@"粘贴文字" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-            [self pasteTapped];
-        }]];
-    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"语音助手" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self openJarvis];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"录音转文字" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self toggleRecord];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"新对话" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        if(self.isWorking){[self showAlert:@"正在回复" detail:@"请先停止当前请求再创建新对话。"];return;}
+        [self loadConversation:[XFChatStore createConversation]];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"更多工具" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        [self showMoreTools];
+    }]];
     [menu addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:menu animated:YES completion:nil];
+}
+- (void)showMoreTools {
+    UIAlertController *menu=[UIAlertController alertControllerWithTitle:@"更多工具" message:nil
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *actions=@[@[@"导入文本",@"file"],@[@"提示词工具箱",@"prompts"],
+       @[@"双模型对比",@"compare"],@[@"联网提问",@"web"],
+       @[@"朗读回复",@"tts"],@[@"复制回复",@"copyreply"],
+       @[@"生图协议",@"imagemode"],@[@"诊断",@"diagnostics"]];
+    // Present a short, scrollable native action sheet instead of an extra toolbar.
+    for(NSArray *item in actions){
+        NSString *key=item[1];
+        [menu addAction:[UIAlertAction actionWithTitle:item[0] style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+            [self executeTool:key];
+        }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"返回" style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:menu animated:YES completion:nil];
 }
 - (void)pasteTapped {
@@ -513,8 +515,7 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
     self.composerGenerateButton.enabled=!value;
     self.composerGenerateButton.alpha=value?.45:1.0;
 }
-- (void)toolTapped:(UIButton *)button {
-    NSString *name=[button accessibilityIdentifier];
+- (void)executeTool:(NSString *)name {
     [self.message resignFirstResponder];
     if([name isEqualToString:@"new"]) {[self loadConversation:[XFChatStore createConversation]];return;}
     if([name isEqualToString:@"copyreply"]) {
@@ -1204,16 +1205,15 @@ static BOOL XFUsesQwen3ASR(NSDictionary *profile) {
 
 - (void)setRecordingDisplay:(BOOL)recording {
     self.recordingBadge.hidden=!recording;
-    if(recording){
-        self.recordButton.backgroundColor=[UIColor colorWithRed:.84 green:.18 blue:.21 alpha:1];
-        [self.recordButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [self.recordButton setTitle:@"■ 停止录音" forState:UIControlStateNormal];
-        [self.recordingBadge setText:@"● 正在录音 00:00 · 点击停止"];
-    } else {
-        self.recordButton.backgroundColor=[UIColor colorWithRed:.954 green:.962 blue:.988 alpha:1];
-        [self.recordButton setTitleColor:[self ink] forState:UIControlStateNormal];
-        [self.recordButton setTitle:@"● 录音" forState:UIControlStateNormal];
-    }
+    // The same visible + control becomes an explicit stop button when recording.
+    UIButton *button=self.composerAttachButton;
+    [button setTitle:recording?@"■":@"＋" forState:UIControlStateNormal];
+    button.backgroundColor=recording?[UIColor colorWithRed:.86 green:.19 blue:.23 alpha:1]:
+        [UIColor colorWithRed:.94 green:.95 blue:.99 alpha:1];
+    [button setTitleColor:recording?[UIColor whiteColor]:[self accent] forState:UIControlStateNormal];
+    button.titleLabel.font=[UIFont boldSystemFontOfSize:recording?18:23];
+    button.accessibilityLabel=recording?@"停止录音":@"更多功能";
+    if(recording)[self.recordingBadge setText:@"正在录音 · 按左下角停止"];
 }
 - (void)updateRecordingClock:(NSTimer *)timer {
     if(!self.isRecording)return;
