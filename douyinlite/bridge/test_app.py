@@ -122,3 +122,73 @@ def test_audio_only_selects_named_virtual_sink(monkeypatch):
     assert available_audio_source() == "douyin_capture.monitor"
     monkeypatch.setenv("DOUYIN_AUDIO_SOURCE", "not-installed.monitor")
     assert available_audio_source() is None
+
+
+
+def test_public_share_page_with_nested_router_data():
+    import json
+    from share import parse_public_html
+    payload = {"loaderData": {"video_(123)/page": {"videoInfoRes": {
+        "item_list": [{"aweme_id": "7234567890123456789",
+                       "desc": "This is a public clip",
+                       "video": {"play_addr": {"url_list": ["https://media.example/video.mp4?a=1&b=2"]},
+                                 "bit_rate": [{"codec_type": "h265",
+                                               "play_addr": {"url_list": ["https://media.example/h265.mp4"]}},
+                                              {"codec_type": "h264",
+                                               "bit_rate": 330000,
+                                               "play_addr": {"url_list": ["https://media.example/avc.mp4"]}}]}}]
+    }}}}
+    html = "<script>window._ROUTER_DATA = " + json.dumps(payload) + ";</script>"
+    clip = parse_public_html(html)
+    assert clip["url"] == "https://media.example/avc.mp4"
+    assert clip["title"] == "This is a public clip"
+
+
+def test_official_share_id_validation():
+    from share import official_link, video_id, mobile_share_url
+    assert video_id("https://www.douyin.com/video/7234567890123456789") == "7234567890123456789"
+    assert video_id("https://www.douyin.com/?modal_id=7234567890123456789") == "7234567890123456789"
+    assert mobile_share_url("7234567890123456789") == "https://www.iesdouyin.com/share/video/7234567890123456789/"
+    for dangerous in ("http://www.douyin.com/video/7234567890123456789",
+                      "https://douyin.com.attacker.test/video/7234567890123456789",
+                      "https://127.0.0.1/video/7234567890123456789",
+                      "https://www.douyin.com:8443/video/7234567890123456789"):
+        assert not official_link(dangerous)
+
+
+def test_public_share_resolution_falls_back_to_mobile_page(monkeypatch):
+    import asyncio
+    import json
+    import app as bridge
+
+    share = "https://www.douyin.com/video/7234567890123456789"
+    public = "https://www.iesdouyin.com/share/video/7234567890123456789/"
+    nested = {"loaderData": {"video_x/page": {"videoInfoRes": {"item_list": [
+        {"desc": "Public", "video": {"play_addr": {"url_list": ["https://media.example/actual.mp4"]}}}
+    ]}}}}
+    class FakeResponse:
+        def __init__(self, url, body):
+            self.url = url
+            self.status = 200
+            self._body = body
+        async def body(self):
+            return self._body
+    class FakeAPI:
+        def __init__(self):
+            self.visited = []
+        async def get(self, url, **kwargs):
+            self.visited.append(url)
+            if url == public:
+                return FakeResponse(url, ("window._ROUTER_DATA=" + json.dumps(nested)).encode())
+            return FakeResponse(url, b"<html>Web JS shell only</html>")
+    class FakeBrowserContext:
+        request = FakeAPI()
+    class FakeRequest:
+        headers = {"authorization": "Bearer valid-test-bridge-secret"}
+    fake = FakeBrowserContext()
+    monkeypatch.setattr(bridge, "KEY", "valid-test-bridge-secret")
+    monkeypatch.setattr(bridge.engine, "context", fake)
+    result = asyncio.run(bridge.resolve_public_share(
+        FakeRequest(), bridge.PublicShareRequest(url=share)))
+    assert result["url"] == "https://media.example/actual.mp4"
+    assert fake.request.visited == [share, public]
