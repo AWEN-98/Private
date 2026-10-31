@@ -19,7 +19,7 @@ checks={
  "Live list parses nested rooms": 'for(NSString *key in @[@"ranks",@"data",@"room_list",@"rooms",@"feed",@"list"])' in main,
  "Live room source must provide playable HLS": 'DLLiveHLSFromData(data)' in main,
  "Live list accepts direct HLS streams": 'NSString *hls=DLLiveHLS(room,0);' in main,
- "Live stream retries alternate sources": 'stage>=3' in main and 'checkLiveStageFallback:' in main,
+ "Live stream retries alternate sources": 'stage>=4' in main and 'stage<3' in main and 'checkLiveStageFallback:' in main,
  "Live fallback allows direct input": 'alertControllerWithTitle:@"进入直播间"' in main and 'DLLiveID' in main,
  "QR primary is captured official login": 'https://login.douyin.com/passport/web/get_qrcode/' in qr,
  "QR has bounded parameter variants": 'if(self.provider==0){self.provider=1;' in qr and 'account_sdk_source=web' in qr,
