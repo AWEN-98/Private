@@ -45,8 +45,9 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 - (void)viewWillDisappear:(BOOL)animated{[self suspend];[super viewWillDisappear:animated];}
 - (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];[self resume];}
 - (NSString *)params{
- if(self.provider==0)return @"aid=6383&language=zh&is_new_login=1&need_logo=false";
- return @"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&service=https%3A%2F%2Fwww.douyin.com%2F&next=https%3A%2F%2Fwww.douyin.com%2F";
+ NSString *stamp=[NSString stringWithFormat:@"%.0f",floor(NSDate.date.timeIntervalSince1970*1000)];
+ if(self.provider==0)return [NSString stringWithFormat:@"aid=10006&service=https%%3A%%2F%%2Fwww.douyin.com%%2Fpay&t=%@",stamp];
+ return [NSString stringWithFormat:@"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&service=https%%3A%%2F%%2Fwww.douyin.com%%2F&next=https%%3A%%2F%%2Fwww.douyin.com%%2F&t=%@",stamp];
 }
 - (void)startLogin{
  [self suspend];self.token=nil;self.qr.image=nil;self.provider=0;self.qrFailureReason=nil;self.scanned=NO;self.completing=NO;self.refresh.enabled=NO;self.status.text=@"正在向抖音申请登录二维码…";
@@ -56,8 +57,8 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 - (void)createQRForGeneration:(NSUInteger)generation{
  // Two bounded official request variants on the same login service. Older
  // www/sso routes often redirect to an HTML challenge rather than JSON.
- NSString *base=@"https://login.douyin.com/passport/web/get_qrcode/?";
- [DLAccountSession.shared requestJSON:[DLAccountSession.shared webRequest:[base stringByAppendingString:[self params]]] completion:^(NSDictionary *json,NSString *problem){
+ NSString *base=self.provider==0?@"https://sso.douyin.com/get_qrcode/?":@"https://login.douyin.com/passport/web/get_qrcode/?";
+ [DLAccountSession.shared requestJSON:[DLAccountSession.shared loginRequest:[base stringByAppendingString:[self params]]] completion:^(NSDictionary *json,NSString *problem){
   if(generation!=self.generation)return;
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
   NSString *token=DLLoginText(data[@"token"]),*url=DLLoginText(data[@"qrcode_index_url"]);
@@ -108,34 +109,79 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  if(self.polling||self.completing||!self.token.length)return;
  if(self.deadline.timeIntervalSinceNow<=0){[self suspend];self.qr.image=nil;self.status.text=@"二维码已过期，点击刷新重新获取。";return;}
  self.polling=YES;NSUInteger generation=self.generation;
- NSString *base=@"https://login.douyin.com/passport/web/check_qrconnect/?";
- NSString *query=[NSString stringWithFormat:@"aid=6383&token=%@",DLFormEncode(self.token)];
- NSMutableURLRequest *r=[DLAccountSession.shared webRequest:[base stringByAppendingString:query]];
- r.HTTPMethod=@"POST";
- NSString *body=[NSString stringWithFormat:@"need_logo=false&is_frontier=true&token=%@&is_new_login=1&next=https%%3A%%2F%%2Fwww.douyin.com&need_short_url=true",DLFormEncode(self.token)];
- r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];
- [r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+ NSString *query=nil,*base=nil;
+ if(self.provider==0){
+  base=@"https://sso.douyin.com/check_qrconnect/?";
+  query=[NSString stringWithFormat:@"aid=10006&token=%@&service=https%%3A%%2F%%2Fwww.douyin.com%%2Fpay&t=%.0f",
+         DLFormEncode(self.token),floor(NSDate.date.timeIntervalSince1970*1000)];
+ }else{
+  base=@"https://login.douyin.com/passport/web/check_qrconnect/?";
+  query=[NSString stringWithFormat:@"aid=6383&token=%@&t=%.0f",
+         DLFormEncode(self.token),floor(NSDate.date.timeIntervalSince1970*1000)];
+ }
+ NSMutableURLRequest *r=[DLAccountSession.shared loginRequest:[base stringByAppendingString:query]];
+ if(self.provider==1){
+  r.HTTPMethod=@"POST";
+  NSString *body=[NSString stringWithFormat:@"need_logo=false&is_frontier=true&token=%@&is_new_login=1&next=https%%3A%%2F%%2Fwww.douyin.com&need_short_url=true",DLFormEncode(self.token)];
+  r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];
+  [r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+ }
  [DLAccountSession.shared requestJSON:r completion:^(NSDictionary *json,NSString *problem){
   if(generation!=self.generation)return;self.polling=NO;
-  if(problem){self.status.text=problem;return;}
+  if(problem){
+   if(self.provider==0&&[problem rangeOfString:@"HTTP 403"].location!=NSNotFound){
+    self.provider=1;self.token=nil;self.qr.image=nil;self.scanned=NO;
+    self.status.text=@"当前登录入口拒绝请求，正在切换备用登录入口…";
+    [self createQRForGeneration:generation];return;
+   }
+   self.status.text=problem;return;
+  }
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
   NSString *serverCode=DLLoginText(data[@"error_code"]);
   if(!serverCode.length)serverCode=DLLoginText(json[@"error_code"]);
   if(!serverCode.length)serverCode=DLLoginText(json[@"status_code"]);
   if([serverCode isEqualToString:@"4031"]){
-    [self suspend];
-    self.status.text=@"抖音登录接口返回 4031，当前扫码会话被服务端拒绝。请刷新二维码，使用最新版抖音扫码；如持续出现，请在现代设备的官方浏览器完成登录验证。游客浏览不受影响。";
-    return;
+   if(self.provider==0){
+    self.provider=1;self.token=nil;self.qr.image=nil;self.scanned=NO;
+    self.status.text=@"当前登录入口拒绝请求，正在切换备用登录入口…";
+    [self createQRForGeneration:generation];return;
+   }
+   [self suspend];
+   self.status.text=@"备用登录入口也返回 4031。请稍后重试，或先在 Safari 登录抖音后返回本应用。";
+   return;
   }
-  NSString *status=[DLLoginText(data[@"status"]) lowercaseString],*redirect=DLLoginText(data[@"redirect_url"]);
-  if([DLLoginText(data[@"error_code"]) isEqualToString:@"2046"]||[DLLoginText(json[@"error_code"]) isEqualToString:@"2046"]){[self suspend];self.status.text=@"账号需要额外验证，请打开官方页面完成。";return;}
-  if(redirect.length){[self suspend];self.completing=YES;self.status.text=@"已确认，正在完成登录回调…";NSUInteger finishGeneration=self.generation;
-   [DLAccountSession.shared finishLoginAtURL:[NSURL URLWithString:redirect] completion:^(BOOL ok,NSString *message){if(finishGeneration!=self.generation)return;self.completing=NO;self.status.text=message;if(ok)self.qr.image=nil;}];return;
+  NSString *status=DLLoginText(data[@"status"]),*redirect=DLLoginText(data[@"redirect_url"]);
+  if(!redirect.length)redirect=DLLoginText(json[@"redirect_url"]);
+  if(redirect.length){
+   NSURL *callback=[NSURL URLWithString:redirect];
+   if(!DLIsOfficialLoginURL(callback)){
+    [self suspend];self.status.text=@"抖音返回了非官方登录回调地址，已停止跳转以保护账号安全。";return;
+   }
+   [self suspend];self.completing=YES;self.status.text=@"已确认，正在完成登录回调…";
+   NSUInteger finishGeneration=self.generation;
+   [DLAccountSession.shared finishLoginAtURL:callback completion:^(BOOL ok,NSString *message){
+    if(finishGeneration!=self.generation)return;
+    self.completing=NO;self.status.text=message;
+    if(ok){self.token=nil;self.qr.image=nil;}
+   }];
+   return;
   }
-  if([@[@"3",@"confirmed",@"success"] containsObject:status]){[self suspend];self.status.text=@"已确认扫码，正在校验账号会话…";[self verify];return;}
-  if([@[@"4",@"5",@"expired",@"expire",@"refused",@"cancelled",@"canceled"] containsObject:status]){[self suspend];self.qr.image=nil;self.status.text=@"二维码已失效，请刷新后重新扫码。";return;}
-  if([@[@"2",@"scanned",@"scanning"] containsObject:status])self.scanned=YES;
-  self.status.text=self.scanned?@"已扫码，请在抖音中点击确认。":@"等待扫码，请在抖音中确认登录。";
+  if([@[@"1",@"wait",@"waiting"] containsObject:status]){
+   self.status.text=@"等待扫码，请在抖音中确认登录。";return;
+  }
+  if([@[@"2",@"scanned",@"scanning"] containsObject:status]){
+   self.scanned=YES;self.status.text=@"已扫码，请在抖音中点击确认。";return;
+  }
+  if([@[@"3",@"confirmed",@"success"] containsObject:status]){
+   self.scanned=YES;self.status.text=@"已确认，正在等待抖音返回登录回调…";return;
+  }
+  if([@[@"5",@"4",@"expired",@"expire",@"refused",@"cancelled",@"canceled"] containsObject:status]){
+   [self suspend];self.qr.image=nil;self.status.text=@"二维码已失效，请刷新后重新扫码。";return;
+  }
+  NSString *message=DLLoginText(data[@"description"]);
+  if(!message.length)message=DLLoginText(json[@"message"]);
+  self.status.text=message.length?[NSString stringWithFormat:@"登录状态：%@。%@",status.length?status:@"未知",message]:
+      [NSString stringWithFormat:@"登录状态：%@，继续等待确认。",status.length?status:@"未知"];
  }];
 }
 - (void)verify{
