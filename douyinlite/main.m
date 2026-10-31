@@ -1286,7 +1286,21 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  }];
 }
 - (void)loadOnlineFeed:(BOOL)reset {
-    // Only direct on-device requests: ignore settings left by previous releases.
+    // Use the user's explicitly configured DouyinBridge browser session when
+    // the old iOS 8 TLS/browser stack cannot generate an official login QR.
+    // Unconfigured devices continue using direct on-device public requests.
+    NSUserDefaults *settings=[NSUserDefaults standardUserDefaults];
+    NSString *endpoint=[settings stringForKey:@"dl_feed_endpoint_v1"]?:@"";
+    NSString *secret=[settings stringForKey:@"dl_bridge_key_v1"]?:@"";
+    NSURL *url=[NSURL URLWithString:endpoint];
+    BOOL trusted=[url.scheme.lowercaseString isEqualToString:@"https"] &&
+        [url.path hasSuffix:@"/api/feed"] && url.host.length &&
+        (!url.port || url.port.integerValue==443) && !url.user.length &&
+        !url.password.length && secret.length>=32;
+    if(trusted){
+        [self loadJSONFeed:reset];
+        return;
+    }
     [self loadDouyinAccountFeed:reset];
 }
 - (void)loadOnlineFeed:(BOOL)reset preserveHost:(BOOL)preserveHost {
