@@ -36,7 +36,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  self.refresh=[self button:@"生成 / 刷新二维码" action:@selector(startLogin) frame:CGRectMake(20,330,w-40,38) parent:scroll];
  [self button:@"已确认登录，检查账号" action:@selector(verify) frame:CGRectMake(20,370,w-40,36) parent:scroll];
   [self button:@"退出并重新扫码" action:@selector(logout) frame:CGRectMake(20,409,w-40,36) parent:scroll];
- [self button:@"通过云端 Chrome 登录（需要 DouyinBridge）" action:@selector(openBridgeLogin) frame:CGRectMake(16,454,w-32,40) parent:scroll];
+ [self button:@"电脑浏览器扫码登录" action:@selector(openBridgeLogin) frame:CGRectMake(16,454,w-32,40) parent:scroll];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
  if(DLAccountSession.shared.hasSession){self.status.text=@"本机保存了账号会话，正在检查…";[self verify];}else [self startLogin];
@@ -189,13 +189,46 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
  NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
  NSURL *url=[NSURL URLWithString:base];
- if(![url.scheme.lowercaseString isEqualToString:@"https"]||
-    ![url.path hasSuffix:@"/api/feed"]||!url.host.length||!key.length){
-  UIAlertController *info=[UIAlertController alertControllerWithTitle:@"需要配置 DouyinBridge"
-      message:@"当前抖音登录服务器拒绝旧设备扫码请求（可能出现 4031）。另一条可尝试的途径是在自己部署的 DouyinBridge 云端 Chrome 中，通过抖音官方页面扫码或完成人工验证。请先返回视频来源菜单配置可信的 HTTPS 服务地址与私有密钥。云端登录不会自动把 Cookie 复制到手机本地。"
-      preferredStyle:UIAlertControllerStyleAlert];
-  [info addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
-  [self presentViewController:info animated:YES completion:nil];
+ BOOL configured=[url.scheme.lowercaseString isEqualToString:@"https"] &&
+      [url.path hasSuffix:@"/api/feed"] && url.host.length && key.length>=32 &&
+      !url.user.length && !url.password.length && (!url.port||url.port.integerValue==443);
+ if(!configured){
+  UIAlertController *setup=[UIAlertController alertControllerWithTitle:@"连接电脑浏览器"
+    message:@"先在 Windows 电脑运行 DouyinBridge 的 start_windows.cmd。用电脑里的 Chromium 打开抖音官网扫码登录。然后把电脑显示的 HTTPS 地址和私有密钥填到这里。电脑须保持运行。账号 Cookie 只保存在你的电脑。"
+    preferredStyle:UIAlertControllerStyleAlert];
+  [setup addTextFieldWithConfigurationHandler:^(UITextField *field){
+    field.placeholder=@"https://xxxxx.trycloudflare.com/api/feed";
+    field.text=base;
+    field.keyboardType=UIKeyboardTypeURL;
+    field.autocorrectionType=UITextAutocorrectionTypeNo;
+    field.autocapitalizationType=UITextAutocapitalizationTypeNone;
+  }];
+  [setup addTextFieldWithConfigurationHandler:^(UITextField *field){
+    field.placeholder=@"电脑显示的私有密钥";
+    field.text=key;field.secureTextEntry=YES;
+    field.autocorrectionType=UITextAutocorrectionTypeNo;
+    field.autocapitalizationType=UITextAutocapitalizationTypeNone;
+  }];
+  [setup addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+  [setup addAction:[UIAlertAction actionWithTitle:@"连接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+    NSString *address=[setup.textFields[0].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSString *secret=[setup.textFields[1].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSURL *candidate=[NSURL URLWithString:address];
+    BOOL allowed=[candidate.scheme.lowercaseString isEqualToString:@"https"] &&
+      [candidate.path hasSuffix:@"/api/feed"] && candidate.host.length &&
+      !candidate.user.length && !candidate.password.length &&
+      (!candidate.port||candidate.port.integerValue==443) && secret.length>=32;
+    if(!allowed){
+      self.status.text=@"连接参数无效。请使用电脑显示的 HTTPS /api/feed 地址及完整私有密钥。";
+      return;
+    }
+    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
+    [defaults setObject:address forKey:@"dl_feed_endpoint_v1"];
+    [defaults setObject:secret forKey:@"dl_bridge_key_v1"];
+    [defaults synchronize];
+    [self openBridgeLogin];
+  }]];
+  [self presentViewController:setup animated:YES completion:nil];
   return;
  }
  DLRemoteBrowserController *browser=[[DLRemoteBrowserController alloc]initWithFeedURL:url apiKey:key];
