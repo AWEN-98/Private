@@ -46,8 +46,9 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  NSString *value=[self cookieValue:@"webid"];if(!value.length)value=[self cookieValue:@"webid_v2"];
  if(value.length)return value;
  if(!self.fallbackWebID.length){
-  unsigned long long bits=(((unsigned long long)arc4random())<<32)|(unsigned long long)arc4random();
-  self.fallbackWebID=[NSString stringWithFormat:@"%llu",1000000000000000000ULL+(bits%9000000000000000000ULL)];
+  NSMutableString *generated=[NSMutableString stringWithFormat:@"%u",(unsigned)arc4random_uniform(9)+1];
+  for(NSInteger i=0;i<18;i++)[generated appendFormat:@"%u",(unsigned)arc4random_uniform(10)];
+  self.fallbackWebID=[generated copy];
  }
  return self.fallbackWebID;
 }
