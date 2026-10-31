@@ -388,6 +388,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,strong) NSArray *demoVideos;
 @property(nonatomic,strong) NSMutableArray *onlineVideos;
+@property(nonatomic,strong) NSMutableArray *recentOnlineIDs;
 @property(nonatomic,strong) NSMutableArray *pendingShareURLs;
 @property(nonatomic,assign) NSUInteger batchImported;
 @property(nonatomic,assign) NSUInteger batchFailed;
@@ -402,7 +403,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) long long mobileFeedMinCursor;
 @property(nonatomic,assign) NSInteger mobileFeedPageAdded;
 @property(nonatomic,assign) BOOL mobileFeedEnd;
-@property(nonatomic,assign) NSInteger onlineIndex;
 @property(nonatomic,assign) NSInteger onlineInstance;
 @property(nonatomic,assign) NSUInteger onlineRequestID;
 @property(nonatomic,assign) BOOL onlinePaging;
@@ -518,7 +518,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
     self.onlineVideos=[NSMutableArray array];
-    self.onlineIndex=MAX(0,(NSInteger)[defaults integerForKey:@"dl_online_index_v1"]);
+    self.recentOnlineIDs=[NSMutableArray array];
+    for(id identity in ([defaults arrayForKey:@"dl_recent_online_ids_v1"]?:@[])){
+        if([identity isKindOfClass:NSString.class] && [identity length] && ![self.recentOnlineIDs containsObject:identity])
+            [self.recentOnlineIDs addObject:identity];
+    }
+    while(self.recentOnlineIDs.count>120)[self.recentOnlineIDs removeObjectAtIndex:0];
     self.liveVideos=[NSMutableArray array];self.category=@"推荐";
     self.onlineMode=YES;self.demoMode=NO;self.index=0;
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
@@ -942,24 +947,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 // The native public video-list request needs no pasted share URL.
 // Some app gateways return only when an aweme_id is supplied. If this
 // standalone list request is empty, retain the signed web-feed fallback.
-- (void)restoreOnlinePositionAfterRefresh {
-    if(!self.onlineVideos.count)return;
-    NSString *last=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_online_last_id_v1"];
-    if(last.length){
-        for(NSUInteger i=0;i<self.onlineVideos.count;i++){
-            NSDictionary *clip=self.onlineVideos[i];
-            NSString *identity=DLText(clip[@"id"]);
-            if(!identity.length)identity=DLText(clip[@"url"]);
-            if([identity isEqualToString:last]){
-                self.index=(NSInteger)((i+1)%self.onlineVideos.count);
-                self.onlineIndex=self.index;
-                [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
-                return;
-            }
-        }
-    }
-    self.index=MIN(MAX(0,self.onlineIndex),(NSInteger)self.onlineVideos.count-1);
-    self.onlineIndex=self.index;
+- (void)rememberOnlineIdentity:(NSString *)identity {
+    if(!identity.length)return;
+    if(!self.recentOnlineIDs)self.recentOnlineIDs=[NSMutableArray array];
+    [self.recentOnlineIDs removeObject:identity];
+    [self.recentOnlineIDs addObject:identity];
+    while(self.recentOnlineIDs.count>120)[self.recentOnlineIDs removeObjectAtIndex:0];
+    [[NSUserDefaults standardUserDefaults] setObject:self.recentOnlineIDs forKey:@"dl_recent_online_ids_v1"];
 }
 - (void)loadDouyinAccountFeed:(BOOL)reset {
     if(self.onlineLoading && !reset)return;
@@ -977,8 +971,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.onlineLoading=YES;self.onlinePaging=YES;
     NSUInteger token=++self.onlineRequestID;
     if(reset){
-        self.message.text=@"正在加载抖音视频…";
+        self.message.text=@"正在获取新一批推荐…";
         [self.loadingIndicator startAnimating];
+        [self reloadCurrent];
     }
     [self requestMobileFeed:0 token:token reset:reset];
 }
@@ -1020,6 +1015,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if([moreValue respondsToSelector:@selector(boolValue)]&&![moreValue boolValue])self.mobileFeedEnd=YES;
 
             NSMutableSet *seen=[NSMutableSet set];
+            for(NSString *identity in self.recentOnlineIDs)if(identity.length)[seen addObject:identity];
             for(NSDictionary *old in self.onlineVideos){
                 NSString *identity=DLText(old[@"id"]);
                 if(!identity.length)identity=DLText(old[@"url"]);
@@ -1068,7 +1064,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             }
             NSInteger drop=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
             if(drop>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,drop)];self.index-=drop;}
-            if(reset)[self restoreOnlinePositionAfterRefresh];
             if(self.onlineMode&&!self.presentedViewController){
                 if(reset || self.onlineVideos.count==self.mobileFeedPageAdded)[self reloadCurrent];
                 else [self reloadMetadata];
@@ -1096,6 +1091,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if(token!=self.onlineRequestID)return;
             NSUInteger count=0;
             NSMutableSet *known=[NSMutableSet set];
+            for(NSString *identity in self.recentOnlineIDs)if(identity.length)[known addObject:identity];
             for(NSDictionary *entry in self.onlineVideos){
                 NSString *identity=DLText(entry[@"id"]);
                 if(!identity.length)identity=DLText(entry[@"url"]);
@@ -1122,7 +1118,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 self.onlineError=nil;
                 self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
                 self.douyinEnd=YES; // static ranking has no pagination
-                if(self.onlineVideos.count==count)[self restoreOnlinePositionAfterRefresh];
             }else{
                 self.onlineError=@"推荐和热门视频接口暂未返回可播放内容。\n当前网络可能需要访问验证。可以稍后刷新或在「我的」尝试扫码登录。";
                 self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
@@ -1155,6 +1150,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  NSUInteger token=++self.onlineRequestID;
  NSString *signError=nil;
  NSMutableArray *seenIDs=[NSMutableArray array];
+ for(NSString *vid in [self.recentOnlineIDs reverseObjectEnumerator]){
+  if(vid.length && ![seenIDs containsObject:vid])[seenIDs addObject:vid];
+  if(seenIDs.count>=30)break;
+ }
  for(NSDictionary *clip in [self.onlineVideos reverseObjectEnumerator]){
   NSString *vid=DLText(clip[@"id"]);
   if(vid.length)[seenIDs addObject:vid];
@@ -1176,6 +1175,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"feed_list"]){if([body[key] isKindOfClass:NSArray.class]){rows=body[key];break;}}
   if(!rows&&[nested isKindOfClass:NSArray.class])rows=nested;
   NSMutableArray *items=[NSMutableArray array];NSMutableSet *known=[NSMutableSet set];
+  for(NSString *identity in self.recentOnlineIDs)if(identity.length)[known addObject:identity];
   for(NSDictionary *old in self.onlineVideos)[known addObject:DLText(old[@"id"]).length?old[@"id"]:DLText(old[@"url"])];
   for(id obj in rows){
    if(![obj isKindOfClass:NSDictionary.class])continue;
@@ -1202,7 +1202,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
   if(self.onlineMode && !self.presentedViewController){
-   if(reset)[self restoreOnlinePositionAfterRefresh];
    if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];
   }
  }];
@@ -1282,19 +1281,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     return self.videos;
 }
 - (void)savePlaybackIndex {
-    if(self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
-        self.onlineIndex=self.index;
-        [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
-        NSArray *clips=self.onlineVideos;
-        if(self.index>=0 && self.index<(NSInteger)clips.count){
-            NSDictionary *clip=clips[self.index];
-            NSString *identity=DLText(clip[@"id"]);
-            if(!identity.length)identity=DLText(clip[@"url"]);
-            if(identity.length)[[NSUserDefaults standardUserDefaults] setObject:identity forKey:@"dl_online_last_id_v1"];
-        }
-    }else if(!self.favoritesOnly&&!self.historyOnly&&!self.onlineMode){
+    if(!self.favoritesOnly&&!self.historyOnly&&!self.onlineMode)
         [[NSUserDefaults standardUserDefaults] setInteger:self.index forKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"];
-    }
 }
 - (void)setLoading:(BOOL)busy {
     _loading=busy;
@@ -1659,9 +1647,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.searchGeneration++;self.liveGeneration++;
         self.liveMode=NO;self.demoMode=NO;self.searchMode=NO;self.onlineMode=YES;
         self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;
-        self.index=self.onlineVideos.count?MIN(MAX(0,self.onlineIndex),(NSInteger)self.onlineVideos.count-1):0;
-        [self reloadCurrent];
-        if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
+        self.index=0;
+        [self loadOnlineFeed:YES];
     }else if(tab==1){
         self.searchGeneration++;
         self.liveMode=YES;self.onlineMode=NO;self.searchMode=NO;self.favoritesOnly=NO;
@@ -1700,6 +1687,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *clips=[self visibleVideos];
     if(!clips.count)return;
     NSInteger next=self.index+delta;
+    if(delta<0 && self.index==0 && self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
+        [self loadOnlineFeed:YES];
+        return;
+    }
     if(next<0 || next>=clips.count){
         if(self.demoMode&&!self.searchMode&&!self.favoritesOnly&&!self.historyOnly){
             next=next<0?(NSInteger)clips.count-1:0;
@@ -1817,9 +1808,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
         NSString *identity=DLText(clip[@"id"]);
         if(!identity.length)identity=DLText(clip[@"url"]);
-        if(identity.length)[[NSUserDefaults standardUserDefaults] setObject:identity forKey:@"dl_online_last_id_v1"];
-        self.onlineIndex=self.index;
-        [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
+        [self rememberOnlineIdentity:identity];
     }
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
