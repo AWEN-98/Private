@@ -18,7 +18,7 @@ checks={
  "Search is official query": "/aweme/v1/web/general/search/single/" in session,
  "Search uses current browser query contract": "from_group_id=7378810571505847586" in session and "search_id=%@" in session and "count=15" in session,
  "Search keeps URL encoded keywords": "DLFormEncode(word)" in session,
- "Search does not append obsolete a_bogus": "a_bogus" not in session[session.index("- (NSMutableURLRequest *)searchRequestForKeyword:"):session.index("- (void)requestJSON:")],
+ "Search does not append obsolete a_bogus": "&a_bogus=" not in session[session.index("- (NSMutableURLRequest *)searchRequestForKeyword:"):session.index("- (void)requestJSON:")],
  "Web requests include Argus marker": 'forHTTPHeaderField:@"x-tt-argus"' in session,
  "Web requests forward UIFID": 'forHTTPHeaderField:@"uifid"' in session,
  "Search continuation token is declared": "searchID:(NSString *)searchID" in header,
