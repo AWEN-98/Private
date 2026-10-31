@@ -27,6 +27,7 @@ jobs:
           python3 douyinlite/tests/test_search_live_ui.py
           python3 douyinlite/tests/test_0141_recovery.py
           python3 douyinlite/tests/test_feed_pagination.py
+          python3 douyinlite/bridge/test_windows_launcher.py
       - name: Probe current public Douyin endpoints (diagnostic only)
         continue-on-error: true
         run: python3 douyinlite/tests/smoke_douyin_api.py
@@ -122,7 +123,10 @@ jobs:
           cp "$DEB" downloads/DouyinLite-iOS8-v0.15.2.deb
           (cd downloads && zip -q -9 DouyinLite-iOS8-v0.15.2.zip DouyinLite-iOS8-v0.15.2.deb)
           unzip -t downloads/DouyinLite-iOS8-v0.15.2.zip | tail -1
+          (zip -qr -X downloads/DouyinBridge-Windows-v0.15.3.zip douyinlite/bridge -x "*/__pycache__/*" "*/profile/*" "*/.venv/*" "*/.bridge-key" "*/cloudflared.exe")
+          unzip -t downloads/DouyinBridge-Windows-v0.15.3.zip | tail -1
           sha256sum downloads/DouyinLite-iOS8-v0.15.2.*
+          sha256sum downloads/DouyinBridge-Windows-v0.15.3.zip
       - name: Upload install packages as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -131,6 +135,7 @@ jobs:
             downloads/DouyinLite-iOS8-v0.15.2.deb
             downloads/DouyinLite-iOS8-v0.15.2.ipa
             downloads/DouyinLite-iOS8-v0.15.2.zip
+            downloads/DouyinBridge-Windows-v0.15.3.zip
           if-no-files-found: error
           retention-days: 30
       - name: Publish verified files
@@ -138,7 +143,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/DouyinLite-iOS8-v0.15.2.deb downloads/DouyinLite-iOS8-v0.15.2.zip downloads/DouyinLite-iOS8-v0.15.2.ipa
+          git add downloads/DouyinLite-iOS8-v0.15.2.deb downloads/DouyinLite-iOS8-v0.15.2.zip downloads/DouyinLite-iOS8-v0.15.2.ipa downloads/DouyinBridge-Windows-v0.15.3.zip
           if ! git diff --cached --quiet; then
             git commit -m "release: verified DouyinLite 0.15.2 armv7 install packages [skip ci]"
             for attempt in 1 2 3 4 5; do
