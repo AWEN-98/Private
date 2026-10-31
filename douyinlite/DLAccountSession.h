@@ -12,6 +12,7 @@ FOUNDATION_EXPORT BOOL DLIsOfficialLoginURL(NSURL *url);
 - (BOOL)saveSession;
 - (void)logout;
 - (NSMutableURLRequest *)webRequest:(NSString *)url;
+- (NSMutableURLRequest *)loginRequest:(NSString *)url;
 - (void)prepareLogin:(void (^)(void))completion;
 - (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset error:(NSString **)error;
 - (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset seenIDs:(NSArray *)seenIDs error:(NSString **)error;
