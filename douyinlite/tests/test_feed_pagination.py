@@ -22,7 +22,7 @@ checks={
     "response min_cursor is retained": 'body[@"min_cursor"]?:json[@"min_cursor"]' in mobile,
     "has_more controls mobile end state": "self.mobileFeedEnd=YES" in mobile,
     "small mobile batches continue to next endpoint": "endpointIndex+1<(NSInteger)hosts.count" in mobile,
-    "small mobile batches fall through to signed web feed": "[self loadDouyinAccountFeedWeb:YES]" in mobile,
+    "small mobile batches fall through to signed web feed": "loadDouyinAccountFeedWeb:(self.onlineOffset==0)" in mobile,
     "mobile and web sources deduplicate IDs": "[seen containsObject:identity]" in mobile and "[known containsObject:identity]" in web,
     "recently viewed IDs persist across refresh": '"dl_recent_online_ids_v1"' in s,
     "mobile feed excludes recently viewed IDs": "for(NSString *identity in self.recentOnlineIDs)" in mobile,
