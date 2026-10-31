@@ -34,12 +34,14 @@ jobs:
         run: |
           export THEOS="$HOME/theos"
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-      - name: Obtain iOS 9.3 SDK
+      - name: Obtain the iOS 10.3 SDK required by the Theos target
         run: |
           mkdir -p "$HOME/theos/sdks"
           git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/douyin-sdks
-          git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS9.3.sdk
-          cp -a /tmp/douyin-sdks/iPhoneOS9.3.sdk "$HOME/theos/sdks/"
+          git -C /tmp/douyin-sdks sparse-checkout set iPhoneOS10.3.sdk
+          test -d /tmp/douyin-sdks/iPhoneOS10.3.sdk
+          cp -a /tmp/douyin-sdks/iPhoneOS10.3.sdk "$HOME/theos/sdks/"
+          test -d "$HOME/theos/sdks/iPhoneOS10.3.sdk"
       - name: Compile and package
         # V0.14.1: compile remote Chrome viewer and package ARMv7 DEB
         # Retry V0.14.1 package with retained diagnostic output
