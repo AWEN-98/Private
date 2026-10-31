@@ -448,6 +448,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) NSInteger searchOffset;
 @property(nonatomic,assign) BOOL searchLoading;
 @property(nonatomic,assign) BOOL searchEnd;
+@property(nonatomic,assign) NSInteger categorySearchAttempt;
+@property(nonatomic,copy) NSString *categoryFailure;
+@property(nonatomic,copy) NSString *liveFailure;
 
 @property(nonatomic,strong) NSArray *tabButtons;
 @property(nonatomic,strong) NSArray *tabLabels;
@@ -1545,18 +1548,16 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSArray *categories=@[@"推荐",@"热门",@"游戏",@"音乐",@"生活"];
     if(idx<0||idx>=(NSInteger)categories.count)return;
     self.category=categories[idx];
+    self.categorySearchAttempt=0;self.categoryFailure=nil;
+    self.searchGeneration++;
     self.liveGeneration++;
     self.liveMode=NO;self.historyOnly=NO;self.favoritesOnly=NO;self.demoMode=NO;
     self.searchMode=NO;self.onlineMode=YES;self.index=0;
     self.onlineRequestID++;self.onlineLoading=NO;self.onlinePaging=NO;
     [self showBottomTemporarily];
     if(idx==0){[self loadOnlineFeed:YES];}
-    else if(idx==1){
-        // The deprecated public hot-video list may return no videos.
-        // Try the same signed search pipeline as other categories and retain
-        // the successful recommendation playlist as the honest fallback.
-        [self searchVideos:@"热门" reset:YES];
-    }else [self searchVideos:categories[idx] reset:YES];
+    else if(idx==1){[self searchVideos:@"热门" reset:YES];}
+    else [self searchVideos:categories[idx] reset:YES];
     [self reloadCurrent];[self layoutScreen];
 }
 - (void)openSearch {
@@ -1577,53 +1578,43 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)fallbackForFailedSearch:(NSString *)term reason:(NSString *)reason {
     if(!self.searchMode || ![self.searchQuery isEqualToString:term])return;
-    // Only reuse clips that genuinely contain an identifiable category term.
-    // Never silently label arbitrary recommendations as category videos.
-    NSMutableArray *matches=[NSMutableArray array];
-    NSArray *keywords=nil;
-    if([term isEqualToString:@"游戏"])keywords=@[@"游戏",@"电竞",@"王者",@"原神",@"崩铁",@"英雄联盟",@"手游",@"单机"];
-    else if([term isEqualToString:@"音乐"])keywords=@[@"音乐",@"歌曲",@"唱歌",@"翻唱",@"演唱",@"乐器",@"弹唱",@"钢琴"];
-    else if([term isEqualToString:@"生活"])keywords=@[@"生活",@"日常",@"居家",@"旅行",@"做饭",@"美食",@"穿搭",@"记录"];
-    else if([term isEqualToString:@"热门"])keywords=@[@"热门",@"热榜",@"爆款",@"热点"];
-    for(NSDictionary *v in self.onlineVideos){
-        NSString *title=DLText(v[@"title"]);
-        BOOL matched=NO;
-        for(NSString *word in keywords)if([title rangeOfString:word options:NSCaseInsensitiveSearch].location!=NSNotFound){matched=YES;break;}
-        if(matched)[matches addObject:v];
-        if(matches.count>=35)break;
-    }
-    if(matches.count){
-        self.searchResults=matches;
-        self.index=0;
-        [self reloadCurrent];
-        // Filtered from real titles, not from the restricted search endpoint.
-        self.message.text=[NSString stringWithFormat:@"已从推荐视频中筛选%@内容",term];
-        [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2.5];
+    BOOL isCategory=[@[@"热门",@"游戏",@"音乐",@"生活"] containsObject:self.category] &&
+        [self.category isEqualToString:term];
+    if(isCategory && self.categorySearchAttempt<2){
+        self.categorySearchAttempt++;
+        [self searchVideos:term reset:YES];
         return;
     }
-    self.searchMode=NO;self.searchEnd=YES;self.onlineMode=YES;self.index=0;
-    self.category=@"推荐";
-    [self reloadCurrent];[self layoutScreen];
-    if(self.onlineVideos.count){
-        self.message.text=[NSString stringWithFormat:@"%@分类暂不可用，已返回推荐视频",term];
-        [self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:3.5];
-    }else{
-        self.message.text=reason.length?reason:@"该分类暂时没有可播放内容，正在尝试推荐视频";
-        [self loadOnlineFeed:YES];
-    }
+    self.searchEnd=YES;
+    NSString *detail=reason.length?reason:@"抖音搜索接口没有返回此分类可播放的视频";
+    self.categoryFailure=detail;
+    [self reloadCurrent];
+    self.message.text=[NSString stringWithFormat:@"%@：%@。可以稍后重试或先在「我的」登录。",term,detail];
+    [self layoutScreen];
 }
 - (void)searchVideos:(NSString *)keyword reset:(BOOL)reset {
     if(!keyword.length)return;
     if(!reset && (self.searchLoading||self.searchEnd))return;
     if(reset){self.searchOffset=0;self.index=0;self.searchResults=@[];}
     self.searchQuery=keyword;self.searchMode=YES;self.liveMode=NO;
+    NSString *actualKeyword=keyword;
+    if([self.category isEqualToString:keyword]){
+        if([keyword isEqualToString:@"游戏"])
+            actualKeyword=self.categorySearchAttempt==0?@"游戏":(self.categorySearchAttempt==1?@"游戏解说":@"手游");
+        else if([keyword isEqualToString:@"音乐"])
+            actualKeyword=self.categorySearchAttempt==0?@"音乐":(self.categorySearchAttempt==1?@"翻唱":@"乐器");
+        else if([keyword isEqualToString:@"生活"])
+            actualKeyword=self.categorySearchAttempt==0?@"生活":(self.categorySearchAttempt==1?@"美食":@"生活记录");
+        else if([keyword isEqualToString:@"热门"])
+            actualKeyword=self.categorySearchAttempt==0?@"热门":(self.categorySearchAttempt==1?@"热点":@"热门视频");
+    }
     if(reset)self.searchEnd=NO;
     self.favoritesOnly=NO;self.historyOnly=NO;self.onlineMode=NO;
     self.searchLoading=YES;
     NSUInteger generation=++self.searchGeneration;
     self.message.text=[NSString stringWithFormat:@"正在搜索%@…",keyword];
     NSString *issue=nil;
-    NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:keyword offset:self.searchOffset error:&issue];
+    NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:actualKeyword offset:self.searchOffset error:&issue];
     if(!request){
         self.searchLoading=NO;
         [self fallbackForFailedSearch:keyword reason:issue];
@@ -1633,10 +1624,18 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         if(generation!=self.searchGeneration)return;
         self.searchLoading=NO;
         NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:json;
-        NSArray *items=[data[@"data"] isKindOfClass:NSArray.class]?data[@"data"]:@[];
+        id nested=data[@"data"];
+        NSArray *items=[nested isKindOfClass:NSArray.class]?nested:@[];
+        if(!items.count && [nested isKindOfClass:NSDictionary.class]){
+            NSDictionary *inner=nested;
+            for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"search_result",@"data"]){
+                if([inner[key] isKindOfClass:NSArray.class]){items=inner[key];break;}
+            }
+        }
         if(!items.count&&[json[@"data"] isKindOfClass:NSArray.class])items=json[@"data"];
-        if(!items.count&&[data[@"aweme_list"] isKindOfClass:NSArray.class])items=data[@"aweme_list"];
-        if(!items.count&&[data[@"search_result"] isKindOfClass:NSArray.class])items=data[@"search_result"];
+        for(NSString *key in @[@"aweme_list",@"item_list",@"list",@"search_result"]){
+            if(!items.count && [data[key] isKindOfClass:NSArray.class])items=data[key];
+        }
         NSUInteger previousCount=reset?0:self.searchResults.count;
         NSMutableArray *results=reset?[NSMutableArray array]:[self.searchResults mutableCopy];
         NSMutableSet *seen=[NSMutableSet set];
@@ -1644,7 +1643,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         for(id raw in items){
             if(![raw isKindOfClass:NSDictionary.class])continue;
             NSDictionary *entry=raw;
+            if([entry[@"data"] isKindOfClass:NSDictionary.class])entry=entry[@"data"];
             if([entry[@"aweme_info"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme_info"];
+            if([entry[@"aweme"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme"];
             NSString *link=DLPublicPlaybackURL(entry);
             NSString *idString=DLText(entry[@"aweme_id"]);
             if(!idString.length)idString=DLText(entry[@"id"]);
@@ -1660,7 +1661,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.searchResults=results;
         if(items.count)self.searchOffset+=items.count;
         if(!items.count||results.count==previousCount)self.searchEnd=YES;
-        if(results.count){self.message.text=@"";[self reloadCurrent];}
+        if(results.count){self.categoryFailure=nil;self.message.text=@"";if(reset || results.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
         else{
             // The general search endpoint is frequently restricted for guests.
             // Fall back to genuine matched clips from our working homepage feed.
