@@ -20,7 +20,8 @@ checks={
     "no cloud setup from native tabs": "连接 DouyinBridge" not in tabs,
     "My tab opens QR directly": "else if(tab==3)[self openAccount];" in tabs,
     "No pasted links in main tabs": "纯手机 · 粘贴抖音视频链接" not in tabs,
-    "online feed stays native only": "[self loadDouyinAccountFeed:reset];" in src[src.index("- (void)loadOnlineFeed:(BOOL)reset {"):src.index("- (void)loadOnlineFeed:(BOOL)reset preserveHost:")],
+    "native feed remains available when no bridge configured": "[self loadDouyinAccountFeed:reset];" in src[src.index("- (void)loadOnlineFeed:(BOOL)reset {"):src.index("- (void)loadOnlineFeed:(BOOL)reset preserveHost:")],
+    "browser feed is explicit and HTTPS token-gated": "[self loadJSONFeed:reset];" in src and "secret.length>=32" in src,
 }
 for label,ok in checks.items():
     print(("PASS" if ok else "FAIL")+": "+label)
