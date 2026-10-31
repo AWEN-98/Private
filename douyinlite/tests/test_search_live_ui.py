@@ -21,6 +21,7 @@ checks={
  "Search does not append obsolete a_bogus": "&a_bogus=" not in session[session.index("- (NSMutableURLRequest *)searchRequestForKeyword:"):session.index("- (void)requestJSON:")],
  "Web requests include Argus marker": 'forHTTPHeaderField:@"x-tt-argus"' in session,
  "Web requests forward UIFID": 'forHTTPHeaderField:@"uifid"' in session,
+ "Anonymous requests bootstrap UIFID cookie": 'NSHTTPCookieName:@"UIFID"' in session and 'NSHTTPCookieStorage.sharedHTTPCookieStorage setCookie:cookie' in session,
  "Search continuation token is declared": "searchID:(NSString *)searchID" in header,
  "Search API declared": "searchRequestForKeyword:" in header,
  "Only real video URLs in results": "NSString *link=DLPublicPlaybackURL(entry);" in s,
