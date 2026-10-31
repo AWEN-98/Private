@@ -26,6 +26,7 @@ jobs:
           python3 douyinlite/tests/test_hot_fallback.py
           python3 douyinlite/tests/test_search_live_ui.py
           python3 douyinlite/tests/test_0141_recovery.py
+          python3 douyinlite/tests/test_feed_pagination.py
       - name: Install build dependencies
         run: |
           sudo apt-get update
