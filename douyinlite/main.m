@@ -1728,7 +1728,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         self.searchGeneration++;self.liveGeneration++;
         self.liveMode=NO;self.demoMode=NO;self.searchMode=NO;self.onlineMode=YES;
         self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;
-        self.index=0;
         [self loadOnlineFeed:YES];
     }else if(tab==1){
         self.searchGeneration++;
@@ -2426,7 +2425,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)accountChanged {
  self.accountReloadPending=YES;self.onlineRequestID++;self.onlineLoading=NO;self.onlinePaging=NO;
- [self.onlineVideos removeAllObjects];self.onlineError=nil;[self stopCurrent];
+ self.feedRefreshPending=NO;self.freshVideos=nil;self.onlineError=nil;
 }
 - (void)viewDidAppear:(BOOL)animated {
  [super viewDidAppear:animated];
