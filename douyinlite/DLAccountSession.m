@@ -16,6 +16,7 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,strong) JSContext *signer;
 @property(nonatomic,assign) NSUInteger sessionGeneration;
+@property(nonatomic,copy) NSString *fallbackWebID;
 @end
 @implementation DLAccountSession
 + (instancetype)shared{static DLAccountSession *s;static dispatch_once_t once;dispatch_once(&once,^{s=[self new];});return s;}
@@ -40,6 +41,15 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
 - (NSString *)cookieValue:(NSString *)name{
  for(NSHTTPCookie *c in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:[NSURL URLWithString:@"https://www.douyin.com/"]])if([c.name isEqualToString:name])return c.value;
  return @"";
+}
+- (NSString *)webID {
+ NSString *value=[self cookieValue:@"webid"];if(!value.length)value=[self cookieValue:@"webid_v2"];
+ if(value.length)return value;
+ if(!self.fallbackWebID.length){
+  unsigned long long bits=(((unsigned long long)arc4random())<<32)|(unsigned long long)arc4random();
+  self.fallbackWebID=[NSString stringWithFormat:@"%llu",1000000000000000000ULL+(bits%9000000000000000000ULL)];
+ }
+ return self.fallbackWebID;
 }
 - (BOOL)hasSession{return [self cookieValue:@"sessionid"].length||[self cookieValue:@"sessionid_ss"].length||[self cookieValue:@"sid_tt"].length;}
 - (BOOL)saveSession{
@@ -73,6 +83,11 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  [r setValue:DLWebUserAgent() forHTTPHeaderField:@"User-Agent"];[r setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
  [r setValue:@"https://www.douyin.com" forHTTPHeaderField:@"Origin"];[r setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
  [r setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
+ // Current Douyin web gateway requires the Argus marker and, when present,
+ // the same UIFID cookie used by the browser session.
+ [r setValue:@"1" forHTTPHeaderField:@"x-tt-argus"];
+ NSString *uifid=[self cookieValue:@"UIFID"];if(!uifid.length)uifid=[self cookieValue:@"UIFID_TEMP"];
+ if(uifid.length)[r setValue:uifid forHTTPHeaderField:@"uifid"];
  for(NSHTTPCookie *cookie in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:target])if([cookie.name isEqualToString:@"passport_csrf_token"])[r setValue:cookie.value forHTTPHeaderField:@"X-Tt-Passport-Csrf-Token"];
  return r;
 }
@@ -86,8 +101,8 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  if(!self.signer){NSString *path=[NSBundle.mainBundle pathForResource:@"DLSigner" ofType:@"js"];NSString *source=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;if(source.length){self.signer=[JSContext new];[self.signer evaluateScript:source];}}
  if(!self.signer||self.signer.exception){if(error)*error=@"本机签名组件加载失败，请重新安装。";return nil;}
  NSString *webid=[self cookieValue:@"webid"];if(!webid.length)webid=[self cookieValue:@"webid_v2"];
- NSString *query=[NSString stringWithFormat:@"device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=12&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2&version_code=190500&version_name=19.5.0&pc_client_type=1&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Windows&os_version=10&cpu_core_num=8&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50",(long)(page+1),(long)(reset?0:2)];
- for(NSArray *entry in @[@[@"webid",webid?:@""],@[@"msToken",[self cookieValue:@"msToken"]],@[@"verifyFp",[self cookieValue:@"s_v_web_id"]],@[@"fp",[self cookieValue:@"s_v_web_id"]]])if([entry[1] length])query=[query stringByAppendingFormat:@"&%@=%@",entry[0],DLFormEncode(entry[1])];
+ NSString *query=[NSString stringWithFormat:@"device_platform=webapp&aid=6383&channel=channel_pc_web&module_id=3003101&count=20&refresh_index=%ld&refer_type=10&pull_type=%ld&use_lite_type=2&version_code=190600&version_name=19.6.0&update_version_code=170400&pc_client_type=1&cookie_enabled=true&screen_width=2560&screen_height=1440&browser_language=zh-CN&browser_platform=MacIntel&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Mac OS&os_version=10.15.7&cpu_core_num=8&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50",(long)(page+1),(long)(reset?0:2)];
+ for(NSArray *entry in @[@[@"webid",[self webID]],@[@"msToken",[self cookieValue:@"msToken"]],@[@"verifyFp",[self cookieValue:@"s_v_web_id"]],@[@"fp",[self cookieValue:@"s_v_web_id"]]])if([entry[1] length])query=[query stringByAppendingFormat:@"&%@=%@",entry[0],DLFormEncode(entry[1])];
  NSMutableArray *ids=[NSMutableArray array];
  for(id entry in seenIDs){
   NSString *value=DLString(entry);
@@ -109,26 +124,23 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  if(websign){[r setValue:uifid forHTTPHeaderField:@"uifid"];[r setValue:websign forHTTPHeaderField:@"x-secsdk-web-signature"];[r setValue:stamp forHTTPHeaderField:@"x-secsdk-web-expire"];}return r;
 }
 - (NSMutableURLRequest *)searchRequestForKeyword:(NSString *)keyword offset:(NSInteger)offset error:(NSString **)error {
- if(!self.signer){
-  NSString *path=[NSBundle.mainBundle pathForResource:@"DLSigner" ofType:@"js"];
-  NSString *source=path?[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL]:nil;
-  if(source.length){self.signer=[JSContext new];[self.signer evaluateScript:source];}
- }
- if(!self.signer||self.signer.exception){if(error)*error=@"搜索签名组件暂不可用";return nil;}
+ return [self searchRequestForKeyword:keyword offset:offset searchID:@"" error:error];
+}
+- (NSMutableURLRequest *)searchRequestForKeyword:(NSString *)keyword offset:(NSInteger)offset searchID:(NSString *)searchID error:(NSString **)error {
  NSString *word=[keyword stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
  if(!word.length||word.length>48){if(error)*error=@"请输入不超过48个字的关键词";return nil;}
- NSString *query=[NSString stringWithFormat:@"search_channel=aweme_general&enable_history=1&keyword=%@&search_source=tab_search&query_correct_type=1&is_filter_search=0&offset=%ld&count=12&need_filter_settings=1&list_type=multi&device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&cookie_enabled=true&browser_language=zh-CN&browser_platform=Win32&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Windows&os_version=10",
-     DLFormEncode(word),(long)MAX(0,offset)];
- NSString *webid=[self cookieValue:@"webid"];if(webid.length)query=[query stringByAppendingFormat:@"&webid=%@",DLFormEncode(webid)];
+ // The current general-search endpoint does not use a_bogus. It expects the
+ // browser's common query fields, search_id continuation token, x-tt-argus
+ // header and (when available) the UIFID cookie header.
+ NSString *query=[NSString stringWithFormat:
+  @"search_channel=aweme_general&enable_history=1&keyword=%@&search_source=tab_search&query_correct_type=1&is_filter_search=0&from_group_id=7378810571505847586&offset=%ld&count=15&need_filter_settings=1&list_type=multi&search_id=%@&device_platform=webapp&aid=6383&channel=channel_pc_web&version_code=190600&version_name=19.6.0&update_version_code=170400&pc_client_type=1&cookie_enabled=true&browser_language=zh-CN&browser_platform=MacIntel&browser_name=Chrome&browser_version=131.0.0.0&browser_online=true&engine_name=Blink&engine_version=131.0.0.0&os_name=Mac%%20OS&os_version=10.15.7&cpu_core_num=8&device_memory=8&platform=PC&screen_width=2560&screen_height=1440&effective_type=4g&round_trip_time=50",
+  DLFormEncode(word),(long)MAX(0,offset),DLFormEncode(searchID?:@"")];
+ NSString *webid=[self webID];if(webid.length)query=[query stringByAppendingFormat:@"&webid=%@",DLFormEncode(webid)];
  NSString *token=[self cookieValue:@"msToken"];if(token.length)query=[query stringByAppendingFormat:@"&msToken=%@",DLFormEncode(token)];
- self.signer.exception=nil;
- JSValue *fn=self.signer[@"DLSigner"][@"sign"];
- JSValue *value=[fn callWithArguments:@[query,@"",DLWebUserAgent(),@(floor(NSDate.date.timeIntervalSince1970*1000))]];
- NSString *signature=value.isString?value.toString:nil;
- if(self.signer.exception||!signature.length){if(error)*error=@"搜索请求签名失败";return nil;}
- NSString *full=[NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/general/search/single/?%@&a_bogus=%@",query,DLFormEncode(signature)];
+ NSString *full=[NSString stringWithFormat:@"https://www.douyin.com/aweme/v1/web/general/search/single/?%@",query];
  NSMutableURLRequest *request=[self webRequest:full];
- [request setValue:[@"https://www.douyin.com/search/" stringByAppendingString:DLFormEncode(word)] forHTTPHeaderField:@"Referer"];
+ NSString *referer=[NSString stringWithFormat:@"https://www.douyin.com/search/%@?aid=f594bbd9-a0e2-4651-9319-ebe3cb6298c1&type=general",DLFormEncode(word)];
+ [request setValue:referer forHTTPHeaderField:@"Referer"];
  return request;
 }
 - (void)requestJSON:(NSURLRequest *)request completion:(void (^)(NSDictionary *,NSString *))completion{
