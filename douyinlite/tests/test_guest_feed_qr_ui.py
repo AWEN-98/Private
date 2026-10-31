@@ -27,6 +27,11 @@ checks={
  "Status 3 waits for redirect callback": '@[@"3",@"confirmed",@"success"]' in qr and '正在等待抖音返回登录回调' in qr,
  "Status 5 expires QR": '@[@"5",@"4",@"expired"' in qr,
  "QR code actually rendered": "CIQRCodeGenerator" in qr,
+ "QR 4031 does not silently discard scanned QR and switch providers": "if([serverCode isEqualToString:@\"4031\"])" in qr and "已停止自动切换二维码" in qr,
+ "Account screen offers cloud browser fallback": 'action:@selector(openBridgeLogin)' in qr and 'DLRemoteBrowserController' in qr,
+ "Cloud fallback only accepts HTTPS user configured bridge": 'url.path hasSuffix:@"/api/feed"' in qr and 'url.scheme.lowercaseString' in qr,
+ "Cloud session clearly separate from local cookies": "云端登录不会自动把 Cookie 复制到手机本地" in qr,
+
  "QR requests use isolated login headers": "loginRequest:" in session and "x-tt-argus" not in session[session.index("- (NSMutableURLRequest *)loginRequest:"):session.index("- (void)prepareLogin:")],
  "Login redirects retain official SSO domain": "DLIsOfficialLoginURL(request.URL)?request:nil" in session,
  "Login callback fetches redirect before account verification": "loginRequest:url.absoluteString" in session and "verifyAccount:completion" in session,
