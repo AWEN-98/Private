@@ -1,5 +1,25 @@
 # DouyinBridge
 
+## Windows companion: official browser QR login on iPhone 4S
+
+**Why this exists:** When Douyin returns code 4031 or an HTML anti-bot page while generating a QR code, the legacy iOS 8 app has no valid QR token to display. Repeating the same HTTP API call will not fix the server response. A user-visible modern Chromium browser on the owner's Windows computer is a supported alternative. DouyinBridge does not bypass CAPTCHA, login checks or access controls.
+
+1. Download `DouyinBridge-Windows.zip` from the DouyinLite release and extract it. Keep all the files together.
+2. On the Windows computer, install Python 3.10 or newer if needed. Double-click `start_windows.cmd`. The first run installs the Python dependencies, Playwright Chromium and the official Cloudflare tunnel client.
+3. A visible Chromium browser starts on the computer. Open `https://www.douyin.com/` and use Douyin's genuine login interface; scan its QR using the normal Douyin app on another phone and complete any required verification.
+4. Keep the companion window open. It prints a temporary HTTPS `/api/feed` URL and a random private key. On iPhone 4S, open DouyinLite, tap **我的**, then **电脑浏览器扫码登录**. Enter the URL and private key, and choose **连接**.
+5. DouyinLite opens a remote browser viewer. The app's homepage can fetch a browser-backed video feed through the configured endpoint when videos are actually available. If the browser encounters an access challenge or unsupported video, the app may still report empty content. **The computer must remain powered on and connected.**
+
+Security and limitations:
+- The service listens only on `127.0.0.1` on the computer and uses a random 48-character private key for remote API requests. Cloudflare Quick Tunnel provides temporary public HTTPS; its address changes when the companion restarts.
+- Treat the HTTPS address and secret as private. Do not share either publicly. The secret is stored locally in `.bridge-key` and the login browser profile in `profile/`. Never send either directory, cookies, passwords, or SMS codes to anyone.
+- Cookies remain inside the computer browser profile, and are **not transferred to the iPhone**. The phone accesses the authorized remote browser and its publicly available video feed.
+- The Windows helper needs a functioning internet connection to install its dependencies and connect to Cloudflare. A firewall, captive portal or network policy can block it. This is an optional computer-assisted mode, not offline or stand-alone phone login.
+- Remote viewer screenshot functionality is for navigation and human verification. Video access still depends on Douyin's response and compatible media; Cloudflare TLS support on iOS 8 must be checked on the actual phone.
+
+---
+
+
 A deployable **experimental** companion for DouyinLite on iPhone 4S. It runs a modern, persistent Chromium browser on a Linux VPS and extracts accessible public video metadata from normal page responses.
 
 **Important:** This service does not bypass CAPTCHA or access controls. A real browser session can still be restricted by Douyin, and available media URLs may expire or use unsupported codecs. Successful compilation alone does not establish a working recommendation feed.
