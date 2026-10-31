@@ -13,6 +13,7 @@ import random
 import re
 import subprocess
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -75,8 +76,26 @@ def cookies():
     return {c.name: c.value for c in COOKIE_JAR}
 
 
+def ensure_uifid():
+    c = cookies()
+    value = c.get("UIFID") or c.get("UIFID_TEMP")
+    if value:
+        return value
+    value = uuid.uuid4().hex
+    COOKIE_JAR.set_cookie(http.cookiejar.Cookie(
+        version=0, name="UIFID", value=value, port=None, port_specified=False,
+        domain=".douyin.com", domain_specified=True, domain_initial_dot=True,
+        path="/", path_specified=True, secure=True, expires=None, discard=True,
+        comment=None, comment_url=None, rest={}, rfc2109=False))
+    return value
+
+
+def preview(data):
+    return data[:220].decode("utf-8", "replace").replace("\n", " ")
+
 def smoke_search():
     c = cookies()
+    uifid = ensure_uifid()
     webid = c.get("webid") or c.get("webid_v2") or str(random.randint(1_000_000_000_000_000_000, 9_000_000_000_000_000_000))
     params = [
         ("search_channel", "aweme_general"), ("enable_history", "1"),
@@ -100,14 +119,13 @@ def smoke_search():
         params.append(("msToken", c["msToken"]))
     headers = {"Referer": "https://www.douyin.com/search/%E6%B8%B8%E6%88%8F",
                "x-tt-argus": "1"}
-    if c.get("UIFID") or c.get("UIFID_TEMP"):
-        headers["uifid"] = c.get("UIFID") or c.get("UIFID_TEMP")
+    headers["uifid"] = uifid
     status, mime, data = request(
         "https://www.douyin.com/aweme/v1/web/general/search/single/?" + qencode(params),
         headers=headers)
     root = parse_json(data)
     count = find_video_count(root.get("data", root)) if isinstance(root, dict) else 0
-    print("SEARCH status=%s mime=%s bytes=%s video_objects=%s" % (status, mime, len(data), count))
+    print("SEARCH status=%s mime=%s bytes=%s video_objects=%s preview=%r" % (status, mime, len(data), count, preview(data)))
 
 
 def smoke_feed():
@@ -150,21 +168,12 @@ def smoke_feed():
     query += "&a_bogus=" + urllib.parse.quote(signature, safe="*-._")
     headers = {"Referer": "https://www.douyin.com/", "Origin": "https://www.douyin.com",
                "Content-Type": "application/x-www-form-urlencoded", "x-tt-argus": "1"}
-    uifid = c.get("UIFID") or c.get("UIFID_TEMP")
-    if uifid:
-        headers["uifid"] = uifid
-        stamp = str(int(time.time()))
-        query += "&uifid=" + urllib.parse.quote(uifid, safe="*-._") + "&timestamp=" + stamp
-        digest = hashlib.md5(("%s_%s_A96D855A08C0A9707F8BEF0D9A527E4E_%s" %
-                              (uifid, stamp, query)).encode()).hexdigest()
-        query += "&x-secsdk-web-signature=" + digest
-        headers["x-secsdk-web-signature"] = digest
-        headers["x-secsdk-web-expire"] = stamp
+    headers["uifid"] = uifid
     status, mime, data = request("https://www.douyin.com/aweme/v2/web/module/feed/?" + query,
                                  headers=headers, body=body.encode())
     root = parse_json(data)
     count = find_video_count(root.get("data", root)) if isinstance(root, dict) else 0
-    print("FEED status=%s mime=%s bytes=%s video_objects=%s" % (status, mime, len(data), count))
+    print("FEED status=%s mime=%s bytes=%s video_objects=%s preview=%r" % (status, mime, len(data), count, preview(data)))
 
 
 def find_live_rooms(node):
@@ -214,8 +223,8 @@ def smoke_live():
 
 def main():
     status, mime, data = request("https://www.douyin.com/",
-                                 headers={"Accept": "text/html,application/xhtml+xml"})
-    print("HOME status=%s mime=%s bytes=%s" % (status, mime, len(data)))
+                                 headers={"Accept": "text/html,application/xhtml+xml", "x-tt-argus": "1"})
+    print("HOME status=%s mime=%s bytes=%s cookies=%s preview=%r" % (status, mime, len(data), sorted(cookies()), preview(data)))
     smoke_search()
     smoke_feed()
     smoke_live()
