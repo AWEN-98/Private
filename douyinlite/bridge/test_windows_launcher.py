@@ -47,3 +47,10 @@ def test_windows_launcher_uses_real_browser_and_private_tunnel():
     assert 'cloudflared-windows-amd64.exe' in code
     assert '"/api/feed"' not in code or 'api/feed' in code
     assert 'print("   私有密钥:' in code
+
+
+if __name__ == "__main__":
+    for name, func in sorted(globals().items()):
+        if name.startswith("test_") and callable(func):
+            func()
+            print("PASS:", name)
