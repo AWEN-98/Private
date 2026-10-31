@@ -126,11 +126,10 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  self.signer.exception=nil;JSValue *function=self.signer[@"DLSigner"][@"sign"];JSValue *result=[function callWithArguments:@[query,body,DLWebUserAgent(),now]];
  NSString *signature=result.isString?result.toString:nil;if(self.signer.exception||!signature.length){if(error)*error=@"请求签名失败，请检查手机日期时间。";return nil;}
  query=[query stringByAppendingFormat:@"&a_bogus=%@",DLFormEncode(signature)];
- NSString *uifid=@"";for(NSString *name in @[@"UIFID",@"UIFID_TEMP",@"uifid",@"uifid_temp",@"UIFIDTEMP",@"uifidtemp"]){uifid=[self cookieValue:name];if(uifid.length)break;}
- NSString *stamp=[NSString stringWithFormat:@"%.0f",floor(NSDate.date.timeIntervalSince1970)],*websign=nil;
- if(uifid.length){query=[query stringByAppendingFormat:@"&uifid=%@&timestamp=%@",DLFormEncode(uifid),stamp];websign=DLMD5([NSString stringWithFormat:@"%@_%@_A96D855A08C0A9707F8BEF0D9A527E4E_%@",uifid,stamp,query]);query=[query stringByAppendingFormat:@"&x-secsdk-web-signature=%@",websign];}
- NSMutableURLRequest *r=[self webRequest:[@"https://www.douyin.com/aweme/v2/web/module/feed/?" stringByAppendingString:query]];r.HTTPMethod=@"POST";r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];[r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
- if(websign){[r setValue:uifid forHTTPHeaderField:@"uifid"];[r setValue:websign forHTTPHeaderField:@"x-secsdk-web-signature"];[r setValue:stamp forHTTPHeaderField:@"x-secsdk-web-expire"];}return r;
+ NSMutableURLRequest *r=[self webRequest:[@"https://www.douyin.com/aweme/v2/web/module/feed/?" stringByAppendingString:query]];
+ r.HTTPMethod=@"POST";r.HTTPBody=[body dataUsingEncoding:NSUTF8StringEncoding];
+ [r setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+ return r;
 }
 - (NSMutableURLRequest *)searchRequestForKeyword:(NSString *)keyword offset:(NSInteger)offset error:(NSString **)error {
  return [self searchRequestForKeyword:keyword offset:offset searchID:@"" error:error];
