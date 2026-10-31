@@ -30,7 +30,9 @@ checks={
  "QR 4031 does not silently discard scanned QR and switch providers": "if([serverCode isEqualToString:@\"4031\"])" in qr and "已停止自动切换二维码" in qr,
  "Account screen offers cloud browser fallback": 'action:@selector(openBridgeLogin)' in qr and 'DLRemoteBrowserController' in qr,
  "Cloud fallback only accepts HTTPS user configured bridge": 'url.path hasSuffix:@"/api/feed"' in qr and 'url.scheme.lowercaseString' in qr,
- "Cloud session clearly separate from local cookies": "云端登录不会自动把 Cookie 复制到手机本地" in qr,
+ "Cloud login stays on PC": "账号 Cookie 只保存在你的电脑" in qr,
+ "Login page accepts browser bridge configuration": "setup addTextFieldWithConfigurationHandler" in qr and '@"dl_feed_endpoint_v1"' in qr,
+ "Browser bridge requires secret and HTTPS": 'secret.length>=32' in qr and 'candidate.scheme.lowercaseString isEqualToString:@"https"' in qr,
 
  "QR requests use isolated login headers": "loginRequest:" in session and "x-tt-argus" not in session[session.index("- (NSMutableURLRequest *)loginRequest:"):session.index("- (void)prepareLogin:")],
  "Login redirects retain official SSO domain": "DLIsOfficialLoginURL(request.URL)?request:nil" in session,
