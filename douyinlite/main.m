@@ -1147,7 +1147,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6];
     [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
     [req setValue:@"https://www.iesdouyin.com/" forHTTPHeaderField:@"Referer"];
-    [req setValue:(stage==0?DLModernMobileAgent():@"okhttp3") forHTTPHeaderField:@"User-Agent"];
+    [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
     self.message.text=@"正在尝试公开视频热榜…";
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         id raw=(!error && data.length>0 && data.length<3500000)?
@@ -1483,7 +1483,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
     [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
     [req setValue:@"https://live.douyin.com/" forHTTPHeaderField:@"Referer"];
-    [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
+    [req setValue:(stage==0?DLModernMobileAgent():@"okhttp3") forHTTPHeaderField:@"User-Agent"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(id)response:nil;
         id raw=(!error&&data.length>0&&data.length<3500000)?
