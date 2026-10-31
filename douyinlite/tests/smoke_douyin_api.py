@@ -175,6 +175,51 @@ def smoke_feed():
     print("FEED status=%s mime=%s bytes=%s video_objects=%s preview=%r" % (status, mime, len(data), count, preview(data)))
 
 
+
+def smoke_qr_login():
+    """Exercise only the public QR bootstrap and one status poll; never logs token/QR URL."""
+    service = "https://www.douyin.com/pay"
+    headers = {
+        "Origin": "https://www.douyin.com",
+        "Referer": "https://www.douyin.com/",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Sec-Fetch-Site": "same-site",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+    }
+    query = qencode([
+        ("aid", "10006"), ("service", service),
+        ("t", str(int(time.time() * 1000))),
+    ])
+    status, mime, body = request("https://sso.douyin.com/get_qrcode/?" + query,
+                                 headers=headers, timeout=18)
+    root = parse_json(body)
+    data = root.get("data", {}) if isinstance(root, dict) else {}
+    token = data.get("token") if isinstance(data, dict) else None
+    qr_url = data.get("qrcode_index_url") if isinstance(data, dict) else None
+    code = (data.get("error_code") if isinstance(data, dict) else None)
+    if code is None and isinstance(root, dict):
+        code = root.get("status_code", root.get("error_code"))
+    print("QR_CREATE status=%s mime=%s bytes=%s token=%s qr_host=%s code=%s" %
+          (status, mime, len(body), bool(token),
+           urllib.parse.urlparse(qr_url).hostname if isinstance(qr_url, str) else "",
+           code if code is not None else ""))
+    if not token:
+        return
+    poll_query = qencode([
+        ("aid", "10006"), ("token", token), ("service", service),
+        ("t", str(int(time.time() * 1000))),
+    ])
+    poll_status, poll_mime, poll_body = request(
+        "https://sso.douyin.com/check_qrconnect/?" + poll_query,
+        headers=headers, timeout=15)
+    poll_root = parse_json(poll_body)
+    poll_data = poll_root.get("data", {}) if isinstance(poll_root, dict) else {}
+    state = poll_data.get("status") if isinstance(poll_data, dict) else None
+    poll_code = poll_data.get("error_code") if isinstance(poll_data, dict) else None
+    print("QR_POLL status=%s mime=%s bytes=%s state=%s code=%s" %
+          (poll_status, poll_mime, len(poll_body), state, poll_code))
+
 def find_live_rooms(node):
     found = []
     if isinstance(node, list):
@@ -227,6 +272,7 @@ def main():
                                           "x-tt-argus": "1", "uifid": uifid})
     print("HOME status=%s mime=%s bytes=%s cookies=%s preview=%r" %
           (status, mime, len(data), sorted(cookies()), preview(data)))
+    smoke_qr_login()
     smoke_search()
     smoke_feed()
     smoke_live()
