@@ -398,6 +398,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL onlineMode;
 @property(nonatomic,assign) BOOL onlineLoading;
 @property(nonatomic,assign) NSInteger onlineOffset;
+@property(nonatomic,assign) long long mobileFeedMaxCursor;
+@property(nonatomic,assign) long long mobileFeedMinCursor;
+@property(nonatomic,assign) NSInteger mobileFeedPageAdded;
+@property(nonatomic,assign) BOOL mobileFeedEnd;
+@property(nonatomic,assign) NSInteger onlineIndex;
 @property(nonatomic,assign) NSInteger onlineInstance;
 @property(nonatomic,assign) NSUInteger onlineRequestID;
 @property(nonatomic,assign) BOOL onlinePaging;
@@ -513,6 +518,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
     self.onlineVideos=[NSMutableArray array];
+    self.onlineIndex=MAX(0,(NSInteger)[defaults integerForKey:@"dl_online_index_v1"]);
     self.liveVideos=[NSMutableArray array];self.category=@"推荐";
     self.onlineMode=YES;self.demoMode=NO;self.index=0;
     self.surface=[[DLVideoSurface alloc] initWithFrame:self.view.bounds];
@@ -936,12 +942,37 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 // The native public video-list request needs no pasted share URL.
 // Some app gateways return only when an aweme_id is supplied. If this
 // standalone list request is empty, retain the signed web-feed fallback.
+- (void)restoreOnlinePositionAfterRefresh {
+    if(!self.onlineVideos.count)return;
+    NSString *last=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_online_last_id_v1"];
+    if(last.length){
+        for(NSUInteger i=0;i<self.onlineVideos.count;i++){
+            NSDictionary *clip=self.onlineVideos[i];
+            NSString *identity=DLText(clip[@"id"]);
+            if(!identity.length)identity=DLText(clip[@"url"]);
+            if([identity isEqualToString:last]){
+                self.index=(NSInteger)((i+1)%self.onlineVideos.count);
+                self.onlineIndex=self.index;
+                [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
+                return;
+            }
+        }
+    }
+    self.index=MIN(MAX(0,self.onlineIndex),(NSInteger)self.onlineVideos.count-1);
+    self.onlineIndex=self.index;
+}
 - (void)loadDouyinAccountFeed:(BOOL)reset {
     if(self.onlineLoading && !reset)return;
     if(!reset && (self.douyinEnd || self.douyinRetryAfter.timeIntervalSinceNow>0))return;
     if(reset){
         self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];
         self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;
+        self.mobileFeedMaxCursor=0;self.mobileFeedMinCursor=-1;self.mobileFeedEnd=NO;
+    }
+    self.mobileFeedPageAdded=0;
+    if(!reset && self.mobileFeedEnd){
+        [self loadDouyinAccountFeedWeb:(self.onlineOffset==0)];
+        return;
     }
     self.onlineLoading=YES;self.onlinePaging=YES;
     NSUInteger token=++self.onlineRequestID;
@@ -957,16 +988,18 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(endpointIndex>=(NSInteger)hosts.count){
         if(token!=self.onlineRequestID)return;
         self.onlineLoading=NO;self.onlinePaging=NO;
-        [self loadDouyinAccountFeedWeb:reset];
+        [self loadDouyinAccountFeedWeb:(self.onlineOffset==0)];
         return;
     }
-    NSString *link=[NSString stringWithFormat:@"%@?aid=1128&count=12&type=0&pull_type=%ld&refresh_index=%ld",
-        hosts[endpointIndex],(long)(reset?0:2),(long)(self.onlineOffset+1)];
+    NSInteger pullType=(reset && self.mobileFeedPageAdded==0)?0:2;
+    NSString *link=[NSString stringWithFormat:@"%@?aid=1128&count=20&type=0&max_cursor=%lld&min_cursor=%lld&pull_type=%ld&need_relieve_aweme=0&filter_warn=0&is_cold_start=0",
+        hosts[endpointIndex],self.mobileFeedMaxCursor,self.mobileFeedMinCursor,(long)pullType];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:link]
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:10];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12];
     [request setValue:@"com.ss.android.ugc.aweme/290101 (Linux; U; Android 10; zh_CN; Pixel 4; Build/QQ3A.200805.001)"
         forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+    [request setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(id)response:nil;
         NSDictionary *json=nil;
@@ -979,6 +1012,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         if(!rows.count && [body[@"item_list"] isKindOfClass:NSArray.class])rows=body[@"item_list"];
         dispatch_async(dispatch_get_main_queue(),^{
             if(token!=self.onlineRequestID)return;
+            id maxValue=body[@"max_cursor"]?:json[@"max_cursor"];
+            id minValue=body[@"min_cursor"]?:json[@"min_cursor"];
+            if([maxValue respondsToSelector:@selector(longLongValue)])self.mobileFeedMaxCursor=[maxValue longLongValue];
+            if([minValue respondsToSelector:@selector(longLongValue)])self.mobileFeedMinCursor=[minValue longLongValue];
+            id moreValue=body[@"has_more"]?:json[@"has_more"];
+            if([moreValue respondsToSelector:@selector(boolValue)]&&![moreValue boolValue])self.mobileFeedEnd=YES;
+
             NSMutableSet *seen=[NSMutableSet set];
             for(NSDictionary *old in self.onlineVideos){
                 NSString *identity=DLText(old[@"id"]);
@@ -990,7 +1030,6 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(![obj isKindOfClass:NSDictionary.class])continue;
                 NSDictionary *item=obj;
                 if([item[@"aweme_info"] isKindOfClass:NSDictionary.class])item=item[@"aweme_info"];
-                // Exclude promotions and live cards. Only return actual video URLs.
                 if([item[@"is_ads"] respondsToSelector:@selector(boolValue)]&&[item[@"is_ads"] boolValue])continue;
                 if([item[@"is_live"] respondsToSelector:@selector(boolValue)]&&[item[@"is_live"] boolValue])continue;
                 NSString *url=DLPublicPlaybackURL(item);
@@ -1005,20 +1044,35 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(!title.length)title=DLText(author[@"nickname"]);
                 if(!title.length)title=@"抖音视频";
                 if(title.length>90)title=[title substringToIndex:90];
-                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,@"author":DLText(author[@"nickname"]),@"source":@"douyin-feed"}];
-                if(++inserted>=12)break;
+                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,
+                    @"author":DLText(author[@"nickname"]),@"source":@"douyin-feed"}];
+                inserted++;
             }
+            self.mobileFeedPageAdded+=inserted;
             if(inserted>0){
-                self.onlineLoading=NO;self.onlinePaging=NO;
-                self.onlineOffset++;
                 self.onlineError=nil;self.douyinRetryAfter=nil;
-                NSInteger drop=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
-                if(drop>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,drop)];self.index-=drop;}
-                if(self.onlineMode&&!self.presentedViewController){
-                    if(reset || self.onlineVideos.count==inserted)[self reloadCurrent];
-                    else [self reloadMetadata];
-                }
-            }else [self requestMobileFeed:endpointIndex+1 token:token reset:reset];
+            }
+            if(self.mobileFeedPageAdded<12 && !self.mobileFeedEnd && endpointIndex+1<(NSInteger)hosts.count){
+                [self requestMobileFeed:endpointIndex+1 token:token reset:reset];
+                return;
+            }
+            if(self.mobileFeedPageAdded<12 && self.onlineOffset==0){
+                self.onlineLoading=NO;self.onlinePaging=NO;
+                [self loadDouyinAccountFeedWeb:YES];
+                return;
+            }
+            self.onlineLoading=NO;self.onlinePaging=NO;
+            if(!self.mobileFeedPageAdded && self.mobileFeedEnd && !self.onlineVideos.count){
+                [self loadAnonymousHotVideos:token];
+                return;
+            }
+            NSInteger drop=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
+            if(drop>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,drop)];self.index-=drop;}
+            if(reset)[self restoreOnlinePositionAfterRefresh];
+            if(self.onlineMode&&!self.presentedViewController){
+                if(reset || self.onlineVideos.count==self.mobileFeedPageAdded)[self reloadCurrent];
+                else [self reloadMetadata];
+            }
         });
     }] resume];
 }
@@ -1068,6 +1122,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 self.onlineError=nil;
                 self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
                 self.douyinEnd=YES; // static ranking has no pagination
+                if(self.onlineVideos.count==count)[self restoreOnlinePositionAfterRefresh];
             }else{
                 self.onlineError=@"推荐和热门视频接口暂未返回可播放内容。\n当前网络可能需要访问验证。可以稍后刷新或在「我的」尝试扫码登录。";
                 self.douyinRetryAfter=[NSDate dateWithTimeIntervalSinceNow:20];
@@ -1091,7 +1146,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     }
  if(self.onlineLoading&&!reset)return;
  if(!reset&&(self.douyinEnd||self.douyinRetryAfter.timeIntervalSinceNow>0))return;
- if(reset){self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;}
+ if(reset){
+  self.onlineOffset=0;
+  if(!self.onlineVideos.count){self.index=0;self.onlineError=nil;}
+  self.douyinEnd=NO;self.douyinRetryAfter=nil;
+ }
  self.onlineLoading=YES;self.onlinePaging=YES;
  NSUInteger token=++self.onlineRequestID;
  NSString *signError=nil;
@@ -1142,7 +1201,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    if(!self.onlineVideos.count){[self loadAnonymousHotVideos:token];return;}
    if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
-  if(self.onlineMode && !self.presentedViewController){if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];}
+  if(self.onlineMode && !self.presentedViewController){
+   if(reset)[self restoreOnlinePositionAfterRefresh];
+   if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];
+  }
  }];
 }
 - (void)loadOnlineFeed:(BOOL)reset {
@@ -1220,8 +1282,19 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     return self.videos;
 }
 - (void)savePlaybackIndex {
-    if(!self.favoritesOnly&&!self.historyOnly&&!self.onlineMode)
+    if(self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
+        self.onlineIndex=self.index;
+        [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
+        NSArray *clips=self.onlineVideos;
+        if(self.index>=0 && self.index<(NSInteger)clips.count){
+            NSDictionary *clip=clips[self.index];
+            NSString *identity=DLText(clip[@"id"]);
+            if(!identity.length)identity=DLText(clip[@"url"]);
+            if(identity.length)[[NSUserDefaults standardUserDefaults] setObject:identity forKey:@"dl_online_last_id_v1"];
+        }
+    }else if(!self.favoritesOnly&&!self.historyOnly&&!self.onlineMode){
         [[NSUserDefaults standardUserDefaults] setInteger:self.index forKey:self.demoMode?@"dl_demo_index_v1":@"dl_library_index_v1"];
+    }
 }
 - (void)setLoading:(BOOL)busy {
     _loading=busy;
@@ -1585,7 +1658,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(tab==0){
         self.searchGeneration++;self.liveGeneration++;
         self.liveMode=NO;self.demoMode=NO;self.searchMode=NO;self.onlineMode=YES;
-        self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;self.index=0;
+        self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;
+        self.index=self.onlineVideos.count?MIN(MAX(0,self.onlineIndex),(NSInteger)self.onlineVideos.count-1):0;
         [self reloadCurrent];
         if(!self.onlineVideos.count)[self loadOnlineFeed:YES];
     }else if(tab==1){
@@ -1740,6 +1814,13 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         return;
     }
     NSDictionary *clip=visible[self.index];
+    if(self.onlineMode && !self.searchMode && !self.favoritesOnly && !self.historyOnly){
+        NSString *identity=DLText(clip[@"id"]);
+        if(!identity.length)identity=DLText(clip[@"url"]);
+        if(identity.length)[[NSUserDefaults standardUserDefaults] setObject:identity forKey:@"dl_online_last_id_v1"];
+        self.onlineIndex=self.index;
+        [[NSUserDefaults standardUserDefaults] setInteger:self.onlineIndex forKey:@"dl_online_index_v1"];
+    }
     NSString *address=DLText(clip[@"url"]);
     self.playingURL=address;
     self.titleText.text=DLText(clip[@"title"]);
