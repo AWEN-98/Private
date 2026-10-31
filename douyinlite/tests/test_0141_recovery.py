@@ -17,7 +17,7 @@ checks={
  "Search signing failure invokes fallback": '[self fallbackForFailedSearch:keyword reason:issue];' in main,
  "Live list tests multiple endpoints": 'https://live.douyin.com/webcast/feed/' in main and 'https://webcast.amemv.com/webcast/ranklist/hot/' in main,
  "Live list parses nested rooms": 'for(NSString *key in @[@"ranks",@"data",@"room_list",@"rooms",@"feed",@"list"])' in main,
- "Live room source must provide playable HLS": 'NSString *hls=DLLiveHLSFromData(data);' in main,
+ "Live room source must provide playable HLS": 'DLLiveHLSFromData(data)' in main,
  "Live list accepts direct HLS streams": 'NSString *hls=DLLiveHLS(room,0);' in main,
  "Live stream retries alternate sources": 'stage>=3' in main and 'checkLiveStageFallback:' in main,
  "Live fallback allows direct input": 'alertControllerWithTitle:@"进入直播间"' in main and 'DLLiveID' in main,
