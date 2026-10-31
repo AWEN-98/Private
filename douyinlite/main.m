@@ -365,6 +365,39 @@ static NSString *DLLiveHLS(id node,NSInteger depth){
     for(id key in d){NSString *h=DLLiveHLS(d[key],depth+1);if(h.length)return h;}
     return nil;
 }
+static NSString *DLLiveHLSFromData(NSData *data){
+    if(!data.length||data.length>4000000)return nil;
+    id decoded=[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:NULL];
+    NSString *hls=DLLiveHLS(decoded,0);
+    if(hls.length)return hls;
+    NSString *raw=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if(!raw.length)return nil;
+    NSMutableString *text=[raw mutableCopy];
+    NSArray *escapes=@[
+        @[@"\\\\u0026",@"&"],@[@"\\u0026",@"&"],
+        @[@"\\\\u002F",@"/"],@[@"\\u002F",@"/"],
+        @[@"\\/",@"/"],@[@"&amp;",@"&"]
+    ];
+    for(NSArray *pair in escapes)[text replaceOccurrencesOfString:pair[0] withString:pair[1] options:0 range:NSMakeRange(0,text.length)];
+    NSArray *patterns=@[
+        @"\"hls_pull_url\"\\s*:\\s*\"([^\"]+\\.m3u8[^\"]*)\"",
+        @"(?:https?:)?//[^\\s\"'<>]+\\.m3u8(?:\\?[^\\s\"'<>]*)?"
+    ];
+    for(NSUInteger p=0;p<patterns.count;p++){
+        NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:patterns[p] options:NSRegularExpressionCaseInsensitive error:NULL];
+        NSTextCheckingResult *match=[re firstMatchInString:text options:0 range:NSMakeRange(0,text.length)];
+        if(!match)continue;
+        NSRange range=p==0?[match rangeAtIndex:1]:match.range;
+        if(range.location==NSNotFound||NSMaxRange(range)>text.length)continue;
+        NSString *candidate=[text substringWithRange:range];
+        while(candidate.length&&[@[@",",@";",@")",@"]",@"}"] containsObject:[candidate substringFromIndex:candidate.length-1]])
+            candidate=[candidate substringToIndex:candidate.length-1];
+        if([candidate hasPrefix:@"//"])candidate=[@"https:" stringByAppendingString:candidate];
+        if(([candidate hasPrefix:@"http://"]||[candidate hasPrefix:@"https://"]) &&
+           [candidate rangeOfString:@".m3u8" options:NSCaseInsensitiveSearch].location!=NSNotFound)return candidate;
+    }
+    return nil;
+}
 static NSString *DLLiveID(NSString *text){
     if(!text.length)return nil;
     NSRegularExpression *re=[NSRegularExpression regularExpressionWithPattern:@"[0-9]{12,22}" options:0 error:NULL];
@@ -451,6 +484,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,assign) BOOL bottomHidden;
 @property(nonatomic,assign) NSUInteger searchGeneration;
 @property(nonatomic,assign) NSInteger searchOffset;
+@property(nonatomic,copy) NSString *searchID;
 @property(nonatomic,assign) BOOL searchLoading;
 @property(nonatomic,assign) BOOL searchEnd;
 @property(nonatomic,assign) NSInteger categorySearchAttempt;
@@ -1227,6 +1261,14 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   if(rows.count)self.onlineOffset++;
   if(self.feedRefreshPending)[self.freshVideos addObjectsFromArray:items];
   else [self.onlineVideos addObjectsFromArray:items];
+  // A refresh must not accept the same first page as a new feed. Walk the
+  // signed feed cursor until we have a useful fresh batch or the API is empty.
+  if(self.feedRefreshPending && self.freshVideos.count<12 && rows.count>0 &&
+     self.onlineOffset<4 && !self.douyinEnd){
+   self.onlineLoading=NO;self.onlinePaging=NO;
+   [self loadDouyinAccountFeedWeb:NO];
+   return;
+  }
   // Keep at most 120 feed entries without discarding the current or upcoming video.
   NSInteger remove=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
   if(remove>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,remove)];self.index-=remove;}
@@ -1569,9 +1611,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [req setValue:DLModernMobileAgent() forHTTPHeaderField:@"User-Agent"];
     [req setValue:@"https://live.douyin.com/" forHTTPHeaderField:@"Referer"];
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
-        id decoded=(!error&&data.length>0&&data.length<4000000)?
-            [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]:nil;
-        NSString *hls=DLLiveHLS(decoded,0);
+        NSString *hls=error?nil:DLLiveHLSFromData(data);
         dispatch_async(dispatch_get_main_queue(),^{
             if(generation!=self.liveGeneration||!self.liveMode)return;
             if(hls.length){
@@ -1646,7 +1686,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 - (void)searchVideos:(NSString *)keyword reset:(BOOL)reset {
     if(!keyword.length)return;
     if(!reset && (self.searchLoading||self.searchEnd))return;
-    if(reset){self.searchOffset=0;self.index=0;self.searchResults=@[];}
+    if(reset){self.searchOffset=0;self.searchID=@"";self.index=0;self.searchResults=@[];}
     self.searchQuery=keyword;self.searchMode=YES;self.liveMode=NO;
     NSString *actualKeyword=keyword;
     if([self.category isEqualToString:keyword]){
@@ -1665,7 +1705,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     NSUInteger generation=++self.searchGeneration;
     self.message.text=[NSString stringWithFormat:@"正在搜索%@…",keyword];
     NSString *issue=nil;
-    NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:actualKeyword offset:self.searchOffset error:&issue];
+    NSMutableURLRequest *request=[DLAccountSession.shared searchRequestForKeyword:actualKeyword offset:self.searchOffset searchID:self.searchID error:&issue];
     if(!request){
         self.searchLoading=NO;
         [self fallbackForFailedSearch:keyword reason:issue];
@@ -1674,6 +1714,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     [DLAccountSession.shared requestJSON:request completion:^(NSDictionary *json,NSString *problem){
         if(generation!=self.searchGeneration)return;
         self.searchLoading=NO;
+        NSDictionary *extra=[json[@"extra"] isKindOfClass:NSDictionary.class]?json[@"extra"]:@{};
+        NSString *nextSearchID=DLText(extra[@"logid"]);
+        if(nextSearchID.length)self.searchID=nextSearchID;
         NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:json;
         id nested=data[@"data"];
         NSArray *items=[nested isKindOfClass:NSArray.class]?nested:@[];
@@ -1697,6 +1740,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if([entry[@"data"] isKindOfClass:NSDictionary.class])entry=entry[@"data"];
             if([entry[@"aweme_info"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme_info"];
             if([entry[@"aweme"] isKindOfClass:NSDictionary.class])entry=entry[@"aweme"];
+            if([entry[@"aweme_mix_info"] isKindOfClass:NSDictionary.class]){
+                NSArray *mix=entry[@"aweme_mix_info"][@"mix_items"];
+                if([mix isKindOfClass:NSArray.class]&&mix.count&&[mix[0] isKindOfClass:NSDictionary.class])entry=mix[0];
+            }
             NSString *link=DLPublicPlaybackURL(entry);
             NSString *idString=DLText(entry[@"aweme_id"]);
             if(!idString.length)idString=DLText(entry[@"id"]);
