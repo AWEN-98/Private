@@ -88,6 +88,15 @@ static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringE
  // the same UIFID cookie used by the browser session.
  [r setValue:@"1" forHTTPHeaderField:@"x-tt-argus"];
  NSString *uifid=[self cookieValue:@"UIFID"];if(!uifid.length)uifid=[self cookieValue:@"UIFID_TEMP"];
+ if(!uifid.length){
+  NSString *generated=[[[NSUUID UUID] UUIDString] stringByReplacingOccurrencesOfString:@"-" withString:@""];
+  NSHTTPCookie *cookie=[NSHTTPCookie cookieWithProperties:@{
+   NSHTTPCookieDomain:@".douyin.com",NSHTTPCookiePath:@"/",
+   NSHTTPCookieName:@"UIFID",NSHTTPCookieValue:generated,NSHTTPCookieSecure:@YES
+  }];
+  if(cookie)[NSHTTPCookieStorage.sharedHTTPCookieStorage setCookie:cookie];
+  uifid=generated;
+ }
  if(uifid.length)[r setValue:uifid forHTTPHeaderField:@"uifid"];
  for(NSHTTPCookie *cookie in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:target])if([cookie.name isEqualToString:@"passport_csrf_token"])[r setValue:cookie.value forHTTPHeaderField:@"X-Tt-Passport-Csrf-Token"];
  return r;
