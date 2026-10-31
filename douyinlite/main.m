@@ -1600,11 +1600,12 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)resolveLiveRoomID:(NSString *)rid title:(NSString *)title
                    author:(NSString *)author stage:(NSInteger)stage generation:(NSUInteger)generation {
-    if(!rid.length||stage>=3)return;
+    if(!rid.length||stage>=4)return;
     NSString *route=stage==0?
         [NSString stringWithFormat:@"https://webcast.amemv.com/webcast/room/reflow/info/?room_id=%@&sec_user_id=&type_id=0",rid]:
         (stage==1?[NSString stringWithFormat:@"https://webcast.amemv.com/webcast/reflow/%@",rid]:
-         [NSString stringWithFormat:@"https://live.douyin.com/webcast/room/info_by_scene/?aid=6383&app_name=douyin_web&device_platform=web&room_id=%@&scene=aweme_video_feed_pc",rid]);
+         (stage==2?[NSString stringWithFormat:@"https://webcast.amemv.com/douyin/webcast/reflow/%@",rid]:
+          [NSString stringWithFormat:@"https://live.douyin.com/webcast/room/info_by_scene/?aid=6383&app_name=douyin_web&device_platform=web&room_id=%@&scene=aweme_video_feed_pc",rid]));
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:route]
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8];
     [req setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
@@ -1623,7 +1624,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(self.liveVideos.count==1){self.index=0;[self reloadCurrent];}
                 else [self reloadMetadata];
                 self.message.text=@"";
-            }else if(stage<2)[self resolveLiveRoomID:rid title:title author:author stage:stage+1 generation:generation];
+            }else if(stage<3)[self resolveLiveRoomID:rid title:title author:author stage:stage+1 generation:generation];
             else if(!self.liveVideos.count){
                 NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(id)response:nil;
                 self.liveFailure=error?[NSString stringWithFormat:@"直播间网络错误 %ld",(long)error.code]:
