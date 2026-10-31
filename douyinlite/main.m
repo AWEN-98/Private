@@ -1042,7 +1042,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(title.length>90)title=[title substringToIndex:90];
                 [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,
                     @"author":DLText(author[@"nickname"]),@"source":@"douyin-feed"}];
-                inserted++;
+                if(++inserted>=12)break;
             }
             self.mobileFeedPageAdded+=inserted;
             if(inserted>0){
@@ -1052,9 +1052,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 [self requestMobileFeed:endpointIndex+1 token:token reset:reset];
                 return;
             }
-            if(self.mobileFeedPageAdded<12 && self.onlineOffset==0){
+            if(self.mobileFeedPageAdded<12){
                 self.onlineLoading=NO;self.onlinePaging=NO;
-                [self loadDouyinAccountFeedWeb:YES];
+                [self loadDouyinAccountFeedWeb:(self.onlineOffset==0)];
                 return;
             }
             self.onlineLoading=NO;self.onlinePaging=NO;
