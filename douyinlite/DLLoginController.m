@@ -33,13 +33,14 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(20,5,w-40,40)];hint.numberOfLines=2;hint.text=@"无需登录也可以浏览公开视频\n扫码登录可获取账号相关内容";hint.font=[UIFont systemFontOfSize:13];hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.lightGrayColor;hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:hint];
  self.qr=[[UIImageView alloc]initWithFrame:CGRectMake((w-192)/2,53,192,192)];self.qr.backgroundColor=UIColor.whiteColor;self.qr.contentMode=UIViewContentModeScaleAspectFit;self.qr.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;[scroll addSubview:self.qr];
  self.status=[[UILabel alloc]initWithFrame:CGRectMake(20,253,w-40,70)];self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:self.status];
- self.refresh=[self button:@"生成 / 刷新二维码" action:@selector(startLogin) frame:CGRectMake(20,330,w-40,38) parent:scroll];
- [self button:@"已确认登录，检查账号" action:@selector(verify) frame:CGRectMake(20,370,w-40,36) parent:scroll];
-  [self button:@"退出并重新扫码" action:@selector(logout) frame:CGRectMake(20,409,w-40,36) parent:scroll];
- [self button:@"电脑浏览器扫码登录" action:@selector(openBridgeLogin) frame:CGRectMake(16,454,w-32,40) parent:scroll];
+ [self button:@"电脑浏览器生成二维码 / 登录" action:@selector(openBridgeLogin) frame:CGRectMake(14,330,w-28,40) parent:scroll];
+ self.refresh=[self button:@"尝试旧设备直连扫码" action:@selector(startLogin) frame:CGRectMake(20,375,w-40,35) parent:scroll];
+ [self button:@"检查本机登录状态" action:@selector(verify) frame:CGRectMake(20,414,w-40,35) parent:scroll];
+ [self button:@"退出本机账号" action:@selector(logout) frame:CGRectMake(20,454,w-40,35) parent:scroll];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
- if(DLAccountSession.shared.hasSession){self.status.text=@"本机保存了账号会话，正在检查…";[self verify];}else [self startLogin];
+ if(DLAccountSession.shared.hasSession){self.status.text=@"本机有已保存的登录信息，正在检查…";[self verify];}
+ else self.status.text=@"旧设备直连可能遇到 4031。建议点击「电脑浏览器生成二维码 / 登录」，通过自己电脑上的现代浏览器完成抖音官方扫码。";
 }
 - (void)close{[self suspend];[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)suspend{self.generation++;[self.pollTimer invalidate];self.pollTimer=nil;self.polling=NO;self.completing=NO;self.refresh.enabled=YES;}
@@ -183,7 +184,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 }
 - (void)verify{
  [self suspend];self.status.text=@"正在校验账号会话…";NSUInteger generation=self.generation;
- [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=message;if(ok){self.token=nil;self.qr.image=nil;}else [self startLogin];}];
+ [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=ok?message:[NSString stringWithFormat:@"%@。可尝试电脑浏览器官方扫码登录。",message?:@"本机会话无效"];if(ok){self.token=nil;self.qr.image=nil;}}];
 }
 - (void)openBridgeLogin{
  NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
