@@ -221,9 +221,12 @@ def smoke_live():
 
 
 def main():
+    uifid = ensure_uifid()
     status, mime, data = request("https://www.douyin.com/",
-                                 headers={"Accept": "text/html,application/xhtml+xml", "x-tt-argus": "1"})
-    print("HOME status=%s mime=%s bytes=%s cookies=%s preview=%r" % (status, mime, len(data), sorted(cookies()), preview(data)))
+                                 headers={"Accept": "text/html,application/xhtml+xml",
+                                          "x-tt-argus": "1", "uifid": uifid})
+    print("HOME status=%s mime=%s bytes=%s cookies=%s preview=%r" %
+          (status, mime, len(data), sorted(cookies()), preview(data)))
     smoke_search()
     smoke_feed()
     smoke_live()
