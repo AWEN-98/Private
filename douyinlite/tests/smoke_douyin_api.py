@@ -5,10 +5,8 @@ This is diagnostic only: GitHub-hosted runner IPs may be challenged independentl
 of an iPhone session. Results are printed for review and never block packaging.
 """
 import base64
-import hashlib
 import http.cookiejar
 import json
-import os
 import random
 import re
 import subprocess
@@ -130,6 +128,7 @@ def smoke_search():
 
 def smoke_feed():
     c = cookies()
+    uifid = ensure_uifid()
     webid = c.get("webid") or c.get("webid_v2") or str(random.randint(1_000_000_000_000_000_000, 9_000_000_000_000_000_000))
     params = [
         ("device_platform", "webapp"), ("aid", "6383"),
