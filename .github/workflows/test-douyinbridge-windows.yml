@@ -1,0 +1,54 @@
+name: Test DouyinBridge Windows companion
+on:
+  push:
+    paths:
+      - 'douyinlite/bridge/**'
+      - '.github/workflows/test-douyinbridge-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-browser:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline launcher regression tests
+        run: python douyinlite/bridge/test_windows_launcher.py
+      - name: Install browser dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r douyinlite/bridge/requirements.txt
+          python -m playwright install chromium
+      - name: Start actual Chromium-backed API and check access control
+        shell: pwsh
+        run: |
+          $env:BRIDGE_KEY = "00112233445566778899aabbccddeeff0011223344556677"
+          $env:HEADLESS = "true"
+          $env:BROWSER_PROFILE = Join-Path $env:RUNNER_TEMP "douyin-browser-profile"
+          $process = Start-Process -FilePath python -ArgumentList @("-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", "18765") -WorkingDirectory "douyinlite/bridge" -PassThru -NoNewWindow
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 100; $i++) {
+              if ($process.HasExited) { throw "DouyinBridge exited before starting" }
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:18765/health" -TimeoutSec 2
+                if ($health.ok -eq $true) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw "DouyinBridge did not start" }
+            $status = Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/status" -Headers @{"Authorization"="Bearer $env:BRIDGE_KEY"} -TimeoutSec 20
+            if ($null -eq $status.status -or $null -eq $status.session_cookie_present) { throw "Invalid session status" }
+            try {
+              Invoke-RestMethod -Uri "http://127.0.0.1:18765/api/browser/frame" -TimeoutSec 10
+              throw "Unprotected browser screenshot"
+            } catch {
+              if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw }
+            }
+            Write-Host "PASS: Windows Chromium browser starts and screenshot requires bearer authentication"
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
