@@ -35,6 +35,7 @@ checks={
     "refresh stages candidate list separately": "self.freshVideos=[NSMutableArray array]" in loader,
     "refresh preserves old playlist while waiting": "[self.onlineVideos removeAllObjects]" not in loader,
     "refresh swaps list only after new playable entries": "if(self.freshVideos.count)" in s and "[self.onlineVideos addObjectsFromArray:self.freshVideos]" in s,
+    "refresh continues signed pages until fresh batch is found": "self.freshVideos.count<12" in web and "self.onlineOffset<4" in web and "[self loadDouyinAccountFeedWeb:NO]" in web,
     "mobile feed writes into staged list": "self.feedRefreshPending?self.freshVideos:self.onlineVideos" in mobile,
     "web feed writes into staged list": "if(self.feedRefreshPending)[self.freshVideos addObjectsFromArray:items]" in web,
     "homepage no longer cycles through static hot fallback": "[self loadAnonymousHotVideos:token]" not in mobile and "[self loadAnonymousHotVideos:token]" not in web,
