@@ -28,10 +28,17 @@ checks={
     "mobile feed excludes recently viewed IDs": "for(NSString *identity in self.recentOnlineIDs)" in mobile,
     "web feed receives recent IDs for fresh recommendations": "self.recentOnlineIDs reverseObjectEnumerator" in web,
     "hot fallback excludes recent IDs": "for(NSString *identity in self.recentOnlineIDs)" in hot,
-    "home tab always requests a fresh feed": "[self loadOnlineFeed:YES]" in tabs and "self.index=0;" in tabs,
+    "home tab requests new data without rewinding": "[self loadOnlineFeed:YES]" in tabs and 'self.category=@"推荐";self.favoritesOnly=NO;self.historyOnly=NO;\n        [self loadOnlineFeed:YES];' in tabs,
     "pull down at first item refreshes feed": "[self loadOnlineFeed:YES]" in move,
     "refresh clears mobile cursor for a new recommendation request": "self.mobileFeedMaxCursor=0;self.mobileFeedMinCursor=-1;" in loader,
     "refresh no longer restores an old feed index": "restoreOnlinePositionAfterRefresh" not in s and "onlineIndex" not in s,
+    "refresh stages candidate list separately": "self.freshVideos=[NSMutableArray array]" in loader,
+    "refresh preserves old playlist while waiting": "[self.onlineVideos removeAllObjects]" not in loader,
+    "refresh swaps list only after new playable entries": "if(self.freshVideos.count)" in s and "[self.onlineVideos addObjectsFromArray:self.freshVideos]" in s,
+    "mobile feed writes into staged list": "self.feedRefreshPending?self.freshVideos:self.onlineVideos" in mobile,
+    "web feed writes into staged list": "if(self.feedRefreshPending)[self.freshVideos addObjectsFromArray:items]" in web,
+    "homepage no longer cycles through static hot fallback": "[self loadAnonymousHotVideos:token]" not in mobile and "[self loadAnonymousHotVideos:token]" not in web,
+    "failure reports cause and preserves old feed": "self.feedFailureReason" in s and "原有视频保留" in s,
 }
 for name,ok in checks.items():
     print(("PASS" if ok else "FAIL")+": "+name)
