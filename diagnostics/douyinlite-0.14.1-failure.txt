@@ -1,8 +1,6 @@
 DouyinLite 0.14.1 build failure
-Commit: f44bdd3b3ecfbed1d148729a4b43df67bba8a994
-Run: 41146460569
-Workflow logs: https://github.com/AWEN-98/Private/actions/runs/41146460569
+Commit: 493c4474937685d9e5523e8af7c46fe61c9b374a
+Run: 41216272849
+Workflow logs: https://github.com/AWEN-98/Private/actions/runs/41216272849
 
-[0;36m==> [1;39mCleaning…[m
-[0;31m==> [1;31mError:[m Your chosen SDK, “iPhoneOS10.3.sdk”, does not appear to exist.
-make: *** [/home/runner/theos/makefiles/master/rules.mk:74: before-all] Error 1
+No compiler log. Failure occurred during runner setup or dependency installation.
