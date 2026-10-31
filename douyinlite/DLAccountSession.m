@@ -99,8 +99,25 @@ static NSString *DLString(id x){return [x isKindOfClass:NSString.class]?x:([x re
  for(NSHTTPCookie *cookie in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:target])if([cookie.name isEqualToString:@"passport_csrf_token"])[r setValue:cookie.value forHTTPHeaderField:@"X-Tt-Passport-Csrf-Token"];
  return r;
 }
+- (NSMutableURLRequest *)loginRequest:(NSString *)url{
+ NSURL *target=[NSURL URLWithString:url];if(!DLIsOfficialLoginURL(target))return nil;
+ NSMutableURLRequest *r=[NSMutableURLRequest requestWithURL:target cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20];
+ [r setValue:DLWebUserAgent() forHTTPHeaderField:@"User-Agent"];
+ [r setValue:@"application/json, text/plain, */*" forHTTPHeaderField:@"Accept"];
+ [r setValue:@"zh-CN,zh;q=0.9,en;q=0.8" forHTTPHeaderField:@"Accept-Language"];
+ [r setValue:@"https://www.douyin.com/" forHTTPHeaderField:@"Referer"];
+ [r setValue:@"https://www.douyin.com" forHTTPHeaderField:@"Origin"];
+ [r setValue:@"same-site" forHTTPHeaderField:@"Sec-Fetch-Site"];
+ [r setValue:@"cors" forHTTPHeaderField:@"Sec-Fetch-Mode"];
+ [r setValue:@"empty" forHTTPHeaderField:@"Sec-Fetch-Dest"];
+ for(NSHTTPCookie *cookie in [NSHTTPCookieStorage.sharedHTTPCookieStorage cookiesForURL:target]){
+  if([cookie.name isEqualToString:@"passport_csrf_token"])
+   [r setValue:cookie.value forHTTPHeaderField:@"X-Tt-Passport-Csrf-Token"];
+ }
+ return r;
+}
 - (void)prepareLogin:(void (^)(void))completion{
- [[self.session dataTaskWithRequest:[self webRequest:@"https://www.douyin.com/"] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){dispatch_async(dispatch_get_main_queue(),completion);}] resume];
+ [[self.session dataTaskWithRequest:[self loginRequest:@"https://www.douyin.com/"] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){dispatch_async(dispatch_get_main_queue(),completion);}] resume];
 }
 - (NSMutableURLRequest *)feedRequestAtPage:(NSInteger)page reset:(BOOL)reset error:(NSString **)error{
  return [self feedRequestAtPage:page reset:reset seenIDs:@[] error:error];
@@ -180,7 +197,7 @@ static NSString *DLString(id x){return [x isKindOfClass:NSString.class]?x:([x re
  completion(YES,saved?@"账号已验证，登录会话已保存。":@"账号已验证，但会话保存失败，重开应用后可能需要重新登录。");
 }
 - (void)verifyAccount:(void (^)(BOOL,NSString *))completion{
- [self requestJSON:[self webRequest:@"https://www.douyin.com/passport/web/account/info/?aid=6383&account_sdk_source=web"] completion:^(NSDictionary *json,NSString *problem){
+ [self requestJSON:[self loginRequest:@"https://www.douyin.com/passport/web/account/info/?aid=6383&account_sdk_source=web"] completion:^(NSDictionary *json,NSString *problem){
   NSDictionary *data=[json[@"data"] isKindOfClass:NSDictionary.class]?json[@"data"]:@{};
   NSString *uid=DLString(data[@"user_id"]);if(!uid.length)uid=DLString(data[@"uid"]);if(!uid.length)uid=DLString(data[@"user_id_str"]);
   NSString *code=DLString(json[@"status_code"]);NSString *message=[DLString(json[@"message"]) lowercaseString];
@@ -188,7 +205,7 @@ static NSString *DLString(id x){return [x isKindOfClass:NSString.class]?x:([x re
   if(!problem&&apiSuccess&&uid.length&&![uid isEqualToString:@"0"]){[self confirmVerifiedAccount:completion];return;}
   // Account info may be unsupported on older sessions. Verify against the
   // separate profile endpoint rather than assuming cookies prove login.
-  [self requestJSON:[self webRequest:@"https://www.douyin.com/webcast/user/me/?aid=1128"] completion:^(NSDictionary *other,NSString *otherProblem){
+  [self requestJSON:[self loginRequest:@"https://www.douyin.com/webcast/user/me/?aid=1128"] completion:^(NSDictionary *other,NSString *otherProblem){
     NSDictionary *profile=[other[@"data"] isKindOfClass:NSDictionary.class]?other[@"data"]:@{};
     NSString *identity=DLString(profile[@"user_id"]);
     if(!identity.length)identity=DLString(profile[@"uid"]);
@@ -207,7 +224,7 @@ static NSString *DLString(id x){return [x isKindOfClass:NSString.class]?x:([x re
 - (void)finishLoginAtURL:(NSURL *)url completion:(void (^)(BOOL,NSString *))completion{
  if(!DLIsOfficialLoginURL(url)){completion(NO,@"登录回调地址无效，请刷新二维码重试。");return;}
  NSUInteger generation=self.sessionGeneration;
- [[self.session dataTaskWithRequest:[self webRequest:url.absoluteString] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.sessionGeneration||error){completion(NO,@"登录回调未完成，请重试。");return;}[self verifyAccount:completion];});}] resume];
+ [[self.session dataTaskWithRequest:[self loginRequest:url.absoluteString] completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){dispatch_async(dispatch_get_main_queue(),^{if(generation!=self.sessionGeneration||error){completion(NO,@"登录回调未完成，请重试。");return;}[self verifyAccount:completion];});}] resume];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request completionHandler:(void (^)(NSURLRequest *))completionHandler{completionHandler(DLIsOfficialLoginURL(request.URL)?request:nil);}
 @end
