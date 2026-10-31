@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 PORT = 18765
 HEALTH = "http://127.0.0.1:%d/health" % PORT
 CF_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com\b", re.I)
+TUNNEL_URL_RE = re.compile(r"(?<![a-z0-9.])https://[a-z0-9-]+\.trycloudflare\.com(?=$|[\s/\"'<>)])", re.I)
 MAX_BINARY = 150 * 1024 * 1024
 MIN_BINARY = 8 * 1024 * 1024
 
