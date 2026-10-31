@@ -14,11 +14,12 @@ checks={
  "Only genuine entries added": '[self.onlineVideos addObject:@{' in h,
  "Hot videos clearly identified": '@"source":@"douyin-hot"' in h,
  "No pretend pagination": "self.douyinEnd=YES;" in h,
- "Fallback from unavailable signed feed": "[self loadAnonymousHotVideos:token];return;" in web,
- "Fallback from signer error": "if(!self.onlineVideos.count)[self loadAnonymousHotVideos:token];" in web,
+ "Signed homepage no longer silently falls back to static hot list": "[self loadAnonymousHotVideos:token]" not in web,
+ "Signer errors are explained by refresh handler": "self.feedFailureReason=signError" in web and "[self finishFeedRequest]" in web,
  "Guest home cookie bootstrap": "if(!self.guestPrimed && !DLAccountSession.shared.hasSession)" in web,
  "Shows real failure if empty": "推荐和热门视频接口暂未返回可播放内容" in h,
  "No sample injection": "self.demoVideos" not in h,
+ "Static hot list is never requested as recommendation": "[self loadAnonymousHotVideos:token]" not in s,
  "Hot source labeled explicitly": 'hot?@"热门":@"推荐"' in s
 }
 for k,passed in checks.items():print(("PASS" if passed else "FAIL")+": "+k)
