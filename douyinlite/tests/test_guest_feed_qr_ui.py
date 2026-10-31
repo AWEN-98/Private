@@ -28,7 +28,8 @@ checks={
  "Status 5 expires QR": '@[@"5",@"4",@"expired"' in qr,
  "QR code actually rendered": "CIQRCodeGenerator" in qr,
  "QR 4031 does not silently discard scanned QR and switch providers": "if([serverCode isEqualToString:@\"4031\"])" in qr and "已停止自动切换二维码" in qr,
- "Account screen offers cloud browser fallback": 'action:@selector(openBridgeLogin)' in qr and 'DLRemoteBrowserController' in qr,
+ "Account screen prefers cloud browser QR": '电脑浏览器生成二维码 / 登录' in qr and 'action:@selector(openBridgeLogin)' in qr and 'DLRemoteBrowserController' in qr,
+ "Legacy direct QR requires explicit tap": 'action:@selector(startLogin)' in qr and 'else [self startLogin]' not in qr,
  "Cloud fallback only accepts HTTPS user configured bridge": 'url.path hasSuffix:@"/api/feed"' in qr and 'url.scheme.lowercaseString' in qr,
  "Cloud login stays on PC": "账号 Cookie 只保存在你的电脑" in qr,
  "Login page accepts browser bridge configuration": "setup addTextFieldWithConfigurationHandler" in qr and '@"dl_feed_endpoint_v1"' in qr,
@@ -45,7 +46,7 @@ checks={
  "Local favorites use bookmark": 'DLStyleIcon(self.likeButton,@"bookmark"' in s,
  "No obsolete corner controls": "top.tag=100;" in view and "action:@selector(addVideo)" not in view and "action:@selector(openMenu)" not in s,
  "Compact four tabs": 'NSArray *names=@[@"首页",@"直播",@"收藏",@"我的"]' in view,
- "Stale saved session automatically requests QR": "if(ok){self.token=nil;self.qr.image=nil;}else [self startLogin];" in qr,
+ "Invalid saved session does not force legacy QR": "可尝试电脑浏览器官方扫码登录" in qr and "else [self startLogin]" not in qr,
  "Logout starts fresh QR request": "已退出账号，正在重新申请二维码" in qr and "[self startLogin]" in qr,
  "No cloud login shortcut": 'action:@selector(openWebsite)' not in qr,
 }
