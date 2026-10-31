@@ -1,7 +1,6 @@
 #import "DLAccountSession.h"
 #import <Security/Security.h>
 #import <JavaScriptCore/JavaScriptCore.h>
-#import <CommonCrypto/CommonDigest.h>
 #import <math.h>
 
 NSString *const DLAccountDidChangeNotification=@"DLAccountDidChange";
@@ -10,7 +9,6 @@ NSString *DLFormEncode(NSString *value){return [value stringByAddingPercentEncod
 static BOOL DLDomain(NSString *host,NSString *domain){NSString *s=host.lowercaseString;return [s isEqualToString:domain]||[s hasSuffix:[@"." stringByAppendingString:domain]];}
 BOOL DLIsOfficialLoginURL(NSURL *url){return [url.scheme.lowercaseString isEqualToString:@"https"]&&!url.user.length&&!url.password.length&&(!url.port||url.port.integerValue==443)&&(DLDomain(url.host,@"douyin.com")||DLDomain(url.host,@"snssdk.com"));}
 static NSString *DLString(id x){return [x isKindOfClass:NSString.class]?x:([x respondsToSelector:@selector(stringValue)]?[x stringValue]:@"");}
-static NSString *DLMD5(NSString *s){NSData *d=[s dataUsingEncoding:NSUTF8StringEncoding];unsigned char hash[CC_MD5_DIGEST_LENGTH];CC_MD5(d.bytes,(CC_LONG)d.length,hash);NSMutableString *o=[NSMutableString string];for(int i=0;i<CC_MD5_DIGEST_LENGTH;i++)[o appendFormat:@"%02x",hash[i]];return o;}
 
 @interface DLAccountSession ()
 @property(nonatomic,strong) NSURLSession *session;
