@@ -21,12 +21,12 @@ checks={
  "Live list accepts direct HLS streams": 'NSString *hls=DLLiveHLS(room,0);' in main,
  "Live stream retries alternate sources": 'stage>=4' in main and 'stage<3' in main and 'checkLiveStageFallback:' in main,
  "Live fallback allows direct input": 'alertControllerWithTitle:@"进入直播间"' in main and 'DLLiveID' in main,
- "QR primary is captured official login": 'https://login.douyin.com/passport/web/get_qrcode/' in qr,
- "QR has bounded parameter variants": 'if(self.provider==0){self.provider=1;' in qr and 'account_sdk_source=web' in qr,
+ "QR primary uses official SSO login": 'https://sso.douyin.com/get_qrcode/' in qr,
+ "QR retains alternate login provider": 'if(self.provider==0){self.provider=1;' in qr and 'account_sdk_source=web' in qr,
  "QR never generates fake code": 'if(!token.length||(!qrImage' in qr,
  "QR accepts genuine image payload": 'initWithBase64EncodedString:encoded' in qr and 'if(qrImage){self.qr.image=qrImage;}' in qr,
  "QR returns server error details": 'error_code' in qr and 'qrFailureReason' in qr,
- "QR avoids HTML SSO fallback": 'sso.douyin.com/get_qrcode/' not in qr,
+ "QR polling uses GET on SSO provider": 'https://sso.douyin.com/check_qrconnect/' in qr and 'aid=10006&token=%@' in qr,
  "QR failed request does not affect guest mode": '游客视频不受影响' in qr
 }
 for key,ok in checks.items():
