@@ -388,6 +388,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 @property(nonatomic,strong) NSMutableArray *history;
 @property(nonatomic,strong) NSArray *demoVideos;
 @property(nonatomic,strong) NSMutableArray *onlineVideos;
+@property(nonatomic,strong) NSMutableArray *freshVideos;
+@property(nonatomic,assign) BOOL feedRefreshPending;
+@property(nonatomic,copy) NSString *feedFailureReason;
 @property(nonatomic,strong) NSMutableArray *recentOnlineIDs;
 @property(nonatomic,strong) NSMutableArray *pendingShareURLs;
 @property(nonatomic,assign) NSUInteger batchImported;
@@ -518,6 +521,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
       @{@"url":@"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4",@"title":@"演示素材 · 花朵（CC0）",@"source":@"demo"}
     ];
     self.onlineVideos=[NSMutableArray array];
+    self.freshVideos=nil;self.feedRefreshPending=NO;
     self.recentOnlineIDs=[NSMutableArray array];
     for(id identity in ([defaults arrayForKey:@"dl_recent_online_ids_v1"]?:@[])){
         if([identity isKindOfClass:NSString.class] && [identity length] && ![self.recentOnlineIDs containsObject:identity])
@@ -955,12 +959,34 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     while(self.recentOnlineIDs.count>120)[self.recentOnlineIDs removeObjectAtIndex:0];
     [[NSUserDefaults standardUserDefaults] setObject:self.recentOnlineIDs forKey:@"dl_recent_online_ids_v1"];
 }
+- (void)finishFeedRequest {
+    if(self.feedRefreshPending){
+        if(self.freshVideos.count){
+            [self.onlineVideos removeAllObjects];
+            [self.onlineVideos addObjectsFromArray:self.freshVideos];
+            self.index=0;self.onlineError=nil;self.douyinRetryAfter=nil;self.douyinEnd=NO;
+            [self reloadCurrent];
+        }else{
+            NSString *reason=self.feedFailureReason.length?self.feedFailureReason:@"抖音接口没有返回新的可播放视频";
+            self.onlineError=[NSString stringWithFormat:@"刷新失败：%@。原有视频保留，请稍后重试。",reason];
+            self.message.text=self.onlineError;
+        }
+        self.freshVideos=nil;self.feedRefreshPending=NO;
+    }else if(self.onlineVideos.count) {
+        [self reloadMetadata];
+    }else{
+        self.message.text=self.feedFailureReason.length?self.feedFailureReason:@"服务器暂未返回可播放的推荐视频";
+    }
+    self.onlineLoading=NO;self.onlinePaging=NO;
+    [self.loadingIndicator stopAnimating];
+}
 - (void)loadDouyinAccountFeed:(BOOL)reset {
     if(self.onlineLoading && !reset)return;
     if(!reset && (self.douyinEnd || self.douyinRetryAfter.timeIntervalSinceNow>0))return;
     if(reset){
-        self.onlineOffset=0;self.index=0;[self.onlineVideos removeAllObjects];
-        self.onlineError=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;
+        self.onlineOffset=0;
+        self.freshVideos=[NSMutableArray array];self.feedRefreshPending=YES;
+        self.feedFailureReason=nil;self.douyinEnd=NO;self.douyinRetryAfter=nil;
         self.mobileFeedMaxCursor=0;self.mobileFeedMinCursor=-1;self.mobileFeedEnd=NO;
     }
     self.mobileFeedPageAdded=0;
@@ -971,9 +997,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     self.onlineLoading=YES;self.onlinePaging=YES;
     NSUInteger token=++self.onlineRequestID;
     if(reset){
-        self.message.text=@"正在获取新一批推荐…";
+        self.message.text=@"正在请求全新推荐…";
         [self.loadingIndicator startAnimating];
-        [self reloadCurrent];
     }
     [self requestMobileFeed:0 token:token reset:reset];
 }
@@ -1007,6 +1032,9 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
         if(!rows.count && [body[@"item_list"] isKindOfClass:NSArray.class])rows=body[@"item_list"];
         dispatch_async(dispatch_get_main_queue(),^{
             if(token!=self.onlineRequestID)return;
+            if(error)self.feedFailureReason=[NSString stringWithFormat:@"移动接口连接失败 (%ld)",(long)error.code];
+            else if(http.statusCode!=200)self.feedFailureReason=[NSString stringWithFormat:@"移动接口 HTTP %ld",(long)http.statusCode];
+            else if(!json)self.feedFailureReason=@"移动接口返回非 JSON 数据";
             id maxValue=body[@"max_cursor"]?:json[@"max_cursor"];
             id minValue=body[@"min_cursor"]?:json[@"min_cursor"];
             if([maxValue respondsToSelector:@selector(longLongValue)])self.mobileFeedMaxCursor=[maxValue longLongValue];
@@ -1015,6 +1043,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if([moreValue respondsToSelector:@selector(boolValue)]&&![moreValue boolValue])self.mobileFeedEnd=YES;
 
             NSMutableSet *seen=[NSMutableSet set];
+            for(NSDictionary *candidate in self.freshVideos){NSString *vid=DLText(candidate[@"id"]);if(!vid.length)vid=DLText(candidate[@"url"]);if(vid.length)[seen addObject:vid];}
             for(NSString *identity in self.recentOnlineIDs)if(identity.length)[seen addObject:identity];
             for(NSDictionary *old in self.onlineVideos){
                 NSString *identity=DLText(old[@"id"]);
@@ -1040,7 +1069,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 if(!title.length)title=DLText(author[@"nickname"]);
                 if(!title.length)title=@"抖音视频";
                 if(title.length>90)title=[title substringToIndex:90];
-                [self.onlineVideos addObject:@{@"id":idString,@"url":url,@"title":title,
+                NSMutableArray *target=self.feedRefreshPending?self.freshVideos:self.onlineVideos;
+                [target addObject:@{@"id":idString,@"url":url,@"title":title,
                     @"author":DLText(author[@"nickname"]),@"source":@"douyin-feed"}];
                 if(++inserted>=12)break;
             }
@@ -1058,16 +1088,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 return;
             }
             self.onlineLoading=NO;self.onlinePaging=NO;
-            if(!self.mobileFeedPageAdded && self.mobileFeedEnd && !self.onlineVideos.count){
-                [self loadAnonymousHotVideos:token];
-                return;
-            }
+            if(!self.mobileFeedPageAdded && self.mobileFeedEnd)self.feedFailureReason=@"移动推荐接口返回空列表";
+            [self finishFeedRequest];
             NSInteger drop=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
             if(drop>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,drop)];self.index-=drop;}
-            if(self.onlineMode&&!self.presentedViewController){
-                if(reset || self.onlineVideos.count==self.mobileFeedPageAdded)[self reloadCurrent];
-                else [self reloadMetadata];
-            }
+            if(!reset && self.onlineMode && !self.presentedViewController)[self reloadMetadata];
         });
     }] resume];
 }
@@ -1154,6 +1179,10 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   if(vid.length && ![seenIDs containsObject:vid])[seenIDs addObject:vid];
   if(seenIDs.count>=30)break;
  }
+ for(NSDictionary *clip in [self.freshVideos reverseObjectEnumerator]){
+  NSString *vid=DLText(clip[@"id"]);if(vid.length && ![seenIDs containsObject:vid])[seenIDs addObject:vid];
+  if(seenIDs.count>=30)break;
+ }
  for(NSDictionary *clip in [self.onlineVideos reverseObjectEnumerator]){
   NSString *vid=DLText(clip[@"id"]);
   if(vid.length)[seenIDs addObject:vid];
@@ -1161,9 +1190,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
  }
  NSMutableURLRequest *request=[DLAccountSession.shared feedRequestAtPage:self.onlineOffset reset:reset seenIDs:seenIDs error:&signError];
  if(!request){
-  self.onlineLoading=NO;self.onlinePaging=NO;self.onlineError=signError;
-  if(!self.onlineVideos.count)[self loadAnonymousHotVideos:token];
-  else [self reloadCurrent];
+  self.feedFailureReason=signError?:@"请求签名失败";
+  [self finishFeedRequest];
   return;
  }
  if(reset){self.message.text=DLAccountSession.shared.hasSession?@"正在加载账号推荐…":@"正在加载游客视频…";[self.loadingIndicator startAnimating];}
@@ -1176,6 +1204,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   if(!rows&&[nested isKindOfClass:NSArray.class])rows=nested;
   NSMutableArray *items=[NSMutableArray array];NSMutableSet *known=[NSMutableSet set];
   for(NSString *identity in self.recentOnlineIDs)if(identity.length)[known addObject:identity];
+  for(NSDictionary *old in self.freshVideos)[known addObject:DLText(old[@"id"]).length?old[@"id"]:DLText(old[@"url"])];
   for(NSDictionary *old in self.onlineVideos)[known addObject:DLText(old[@"id"]).length?old[@"id"]:DLText(old[@"url"])];
   for(id obj in rows){
    if(![obj isKindOfClass:NSDictionary.class])continue;
@@ -1188,7 +1217,8 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
   }
   self.onlineLoading=NO;self.onlinePaging=NO;
   if(rows.count)self.onlineOffset++;
-  [self.onlineVideos addObjectsFromArray:items];
+  if(self.feedRefreshPending)[self.freshVideos addObjectsFromArray:items];
+  else [self.onlineVideos addObjectsFromArray:items];
   // Keep at most 120 feed entries without discarding the current or upcoming video.
   NSInteger remove=MIN(MAX(0,(NSInteger)self.onlineVideos.count-120),MAX(0,self.index-10));
   if(remove>0){[self.onlineVideos removeObjectsInRange:NSMakeRange(0,remove)];self.index-=remove;}
@@ -1198,12 +1228,11 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
    NSString *reason=problem;
    if(!reason.length){NSString *code=DLText(root[@"status_code"]);if(!code.length)code=DLText(body[@"status_code"]);reason=code.length&&![code isEqualToString:@"0"]?[NSString stringWithFormat:@"内容接口返回状态 %@。",code]:@"未返回新的兼容视频，可能需要账号登录或网页验证。";}
    self.onlineError=[reason stringByAppendingString:@"\n当前网络暂未返回视频列表。可以稍后刷新，扫码登录为可选操作。"];
-   if(!self.onlineVideos.count){[self loadAnonymousHotVideos:token];return;}
-   if(self.onlineVideos.count){self.message.text=@"本次未取得新视频，稍后可重试";[self performSelector:@selector(clearTransientMessage) withObject:nil afterDelay:2];}
+   self.feedFailureReason=reason;
+   if(self.onlineVideos.count)self.message.text=@"本次未取得新视频，稍后可重试";
   }else{self.onlineError=nil;self.douyinRetryAfter=nil;[DLAccountSession.shared saveSession];}
-  if(self.onlineMode && !self.presentedViewController){
-   if(reset||self.onlineVideos.count==items.count)[self reloadCurrent];else [self reloadMetadata];
-  }
+  [self finishFeedRequest];
+  if(!reset && self.onlineMode && !self.presentedViewController && items.count && self.onlineVideos.count==items.count)[self reloadCurrent];
  }];
 }
 - (void)loadOnlineFeed:(BOOL)reset {
