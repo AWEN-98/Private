@@ -69,6 +69,7 @@ async def main():
             await legacy.wait_for_timeout(6500)
             old["title"]=(await legacy.title())[:100]
             old["body_chars"]=await legacy.evaluate("document.body ? document.body.innerText.length : 0")
+            old["body_excerpt"]=(await legacy.evaluate("document.body ? document.body.innerText : ''"))[:180]
             old["video_count"]=await legacy.locator("video").count()
         except Exception as e:
             old["errors"].append("navigation:"+str(e)[:140])
