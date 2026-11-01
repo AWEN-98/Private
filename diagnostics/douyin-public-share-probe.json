@@ -1,0 +1,29 @@
+{
+  "utc": "2026-11-01T19:40:43Z",
+  "source": "public README.en sample",
+  "tests": [
+    {
+      "attempt": 1,
+      "http_status": 200,
+      "mime": "text/html",
+      "body_bytes": 32564,
+      "has_ttwid": true,
+      "has_ssr_marker": true,
+      "has_play_addr": false,
+      "playable_url_found": false,
+      "error": ""
+    },
+    {
+      "attempt": 2,
+      "http_status": 200,
+      "mime": "text/html",
+      "body_bytes": 37663,
+      "has_ttwid": true,
+      "has_ssr_marker": true,
+      "has_play_addr": true,
+      "playable_url_found": true,
+      "error": ""
+    }
+  ],
+  "verified_playable_address": true
+}
