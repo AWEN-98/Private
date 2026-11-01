@@ -23,6 +23,16 @@ checks={
  "page failure reports network errors": "didFailLoadWithError:" in page and "error.code" in page,
  "page timeout surfaced": "check" not in page or "timeout:" in page,
  "phone mode can be dismissed": "dismissViewControllerAnimated:YES" in page,
+ "fallback WKWebView available from iOS 8": "WKWebView *modern;" in page and "WKNavigationDelegate" in page,
+ "only allocate WKWebView after user chooses it": "if(!self.modern){" in page and 'action:@selector(switchEngine)' in page,
+ "switch leaves UIWebView as shared-cookie primary": "self.usingWK=!self.usingWK" in page and "self.modern.hidden=!self.usingWK" in page,
+ "safe HTTPS network diagnostics": 'action:@selector(probe)' in page and "NSURLSessionDataTask" in page and "NSURLSessionConfiguration ephemeralSessionConfiguration" in page,
+ "certificate failures not bypassed": "NSURLErrorServerCertificateUntrusted" in page and "不要跳过证书校验" in page,
+ "blank HTML detection for UIWebView": "stringByEvaluatingJavaScriptFromString" in page and "页面可能空白" in page,
+ "blank HTML detection for WKWebView": 'evaluateJavaScript:' in page and "内容为空" in page,
+ "server challenges not falsely treated as successful login": "4031" in page and "访问限制" in page,
+ "status only shows safe HTTP metadata": "HTTP %ld" in page and "cookieValue:" not in page,
+
 }
 for title,ok in checks.items():
  print(("PASS" if ok else "FAIL")+": "+title)
