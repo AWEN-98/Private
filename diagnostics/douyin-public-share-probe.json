@@ -1,5 +1,5 @@
 {
-  "utc": "2026-11-01T19:43:00Z",
+  "utc": "2026-11-01T19:44:35Z",
   "source": "public README.en sample",
   "tests": [
     {
@@ -24,13 +24,15 @@
       "has_ttwid": true,
       "has_ssr_marker": true,
       "has_play_addr": true,
-      "playable_url_found": false,
-      "media_range_status": null,
-      "media_mime": "",
-      "media_header_ok": false,
-      "error": ""
+      "playable_url_found": true,
+      "media_range_status": 206,
+      "media_mime": "video/mp4",
+      "media_header_ok": true,
+      "error": "",
+      "candidate_count": 1,
+      "sample_url_prefix": "https://aweme.snssdk.com/aweme/v1/playwm/"
     }
   ],
-  "verified_playable_address": false,
-  "verified_media_response": false
+  "verified_playable_address": true,
+  "verified_media_response": true
 }

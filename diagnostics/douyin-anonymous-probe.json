@@ -1,6 +1,10 @@
 {
-  "utc": "2026-11-01T19:42:23Z",
+  "utc": "2026-11-01T19:43:52Z",
   "responses": [
+    {
+      "status": 200,
+      "path": "/"
+    },
     {
       "status": 200,
       "path": "/"
@@ -19,10 +23,10 @@
     "engine": "current Chrome (UA imitation only)",
     "page_status": 200,
     "title": "抖音-记录美好生活",
-    "body_chars": 349,
-    "video_count": 1,
+    "body_chars": 29,
+    "video_count": 0,
     "errors": [],
-    "body_excerpt": "开启读屏标签\n读屏标签已关闭\nLog in\nGet APP\n00:00 / 25:02\n58.5K\n1813\n16.6K\n@野兽国语配音\n· 8月21日\n100天完全与世隔绝！为了50万美金，他们把自己关起来了 差点崩溃但结局很意外！#mrbeast#野兽先生#野兽国语配音#超能挑战赛#抖音精选计划\n100 days completely isolated "
+    "body_excerpt": "开启读屏标签\n读屏标签已关闭\nLog in\nGet APP"
   },
   "login_verification_proven": false,
   "items": 0
