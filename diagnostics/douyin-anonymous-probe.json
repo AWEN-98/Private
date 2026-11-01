@@ -1,5 +1,5 @@
 {
-  "utc": "2026-11-01T19:29:45Z",
+  "utc": "2026-11-01T19:30:59Z",
   "responses": [
     {
       "status": 200,
@@ -23,9 +23,10 @@
     "engine": "current Chrome (UA imitation only)",
     "page_status": 200,
     "title": "抖音-记录美好生活",
-    "body_chars": 33,
+    "body_chars": 29,
     "video_count": 0,
-    "errors": []
+    "errors": [],
+    "body_excerpt": "开启读屏标签\n读屏标签已关闭\nLog in\nGet APP"
   },
   "login_verification_proven": false,
   "items": 0
