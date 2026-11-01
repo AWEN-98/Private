@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "DLAccountSession.h"
+#import <WebKit/WebKit.h>
 
 // Standalone on-device official webpage login trial for iOS 8.
 // UIWebView shares NSHTTPCookieStorage with the native NSURLSession.
@@ -14,8 +15,14 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  return NO;
 }
 
-@interface DLPhoneWebLoginController : UIViewController <UIWebViewDelegate>
+@interface DLPhoneWebLoginController : UIViewController <UIWebViewDelegate, WKNavigationDelegate>
 @property(nonatomic,strong) UIWebView *web;
+@property(nonatomic,strong) WKWebView *modern;
+@property(nonatomic,assign) BOOL usingWK;
+@property(nonatomic,assign) BOOL didCompleteWebNavigation;
+@property(nonatomic,copy) NSString *diagnostics;
+@property(nonatomic,assign) NSUInteger probeGeneration;
+@property(nonatomic,copy) NSString *lastRequestedURL;
 @property(nonatomic,strong) UILabel *state;
 @property(nonatomic,strong) UILabel *address;
 @property(nonatomic,strong) UIActivityIndicatorView *busy;
@@ -47,31 +54,40 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  title.font=[UIFont boldSystemFontOfSize:14];title.textColor=UIColor.whiteColor;
  title.autoresizingMask=UIViewAutoresizingFlexibleWidth;[top addSubview:title];
 
- self.web=[[UIWebView alloc]initWithFrame:CGRectMake(0,64,w,MAX(90,h-164))];
+ self.web=[[UIWebView alloc]initWithFrame:CGRectMake(0,64,w,MAX(90,h-203))];
  self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
  self.web.delegate=self;self.web.scalesPageToFit=YES;
  self.web.dataDetectorTypes=UIDataDetectorTypeNone;
  self.web.mediaPlaybackRequiresUserAction=YES;
  [self.view addSubview:self.web];
+ WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];
+ configuration.preferences.javaScriptEnabled=YES;
+ self.modern=[[WKWebView alloc]initWithFrame:self.web.frame configuration:configuration];
+ self.modern.navigationDelegate=self;
+ self.modern.autoresizingMask=self.web.autoresizingMask;
+ self.modern.hidden=YES;
+ [self.view addSubview:self.modern];
 
- UIView *bottom=[[UIView alloc]initWithFrame:CGRectMake(0,h-100,w,100)];
+ UIView *bottom=[[UIView alloc]initWithFrame:CGRectMake(0,h-139,w,139)];
  bottom.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
  bottom.backgroundColor=[UIColor colorWithWhite:.12 alpha:1];
  [self.view addSubview:bottom];
- NSArray *labels=@[@"官网首页",@"账号页面",@"返回",@"刷新",@"检查登录"];
- SEL selectors[]={@selector(home),@selector(account),@selector(back),@selector(reload),@selector(verify)};
- for(NSInteger i=0;i<5;i++){
-  UIButton *b=[self button:labels[i] action:selectors[i] frame:CGRectMake((w*i)/5.0,0,w/5.0,37) parent:bottom];
+ NSArray *labels=@[@"官网首页",@"个人页",@"刷新",@"检查登录"];
+ SEL selectors[]={@selector(home),@selector(account),@selector(reload),@selector(verify)};
+ for(NSInteger i=0;i<4;i++){
+  UIButton *b=[self button:labels[i] action:selectors[i] frame:CGRectMake((w*i)/4.0,0,w/4.0,34) parent:bottom];
   b.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;
  }
- self.address=[[UILabel alloc]initWithFrame:CGRectMake(12,38,w-24,17)];
+ [self button:@"切换网页内核" action:@selector(switchEngine) frame:CGRectMake(4,34,w/2-8,30) parent:bottom];
+ [self button:@"检测网页连接" action:@selector(probe) frame:CGRectMake(w/2+4,34,w/2-8,30) parent:bottom];
+ self.address=[[UILabel alloc]initWithFrame:CGRectMake(12,65,w-24,16)];
  self.address.textColor=UIColor.lightGrayColor;self.address.font=[UIFont systemFontOfSize:10];
  self.address.lineBreakMode=NSLineBreakByTruncatingMiddle;
  self.address.autoresizingMask=UIViewAutoresizingFlexibleWidth;
  [bottom addSubview:self.address];
- self.state=[[UILabel alloc]initWithFrame:CGRectMake(12,55,w-24,43)];
+ self.state=[[UILabel alloc]initWithFrame:CGRectMake(12,81,w-24,56)];
  self.state.textColor=UIColor.whiteColor;self.state.font=[UIFont systemFontOfSize:11];
- self.state.numberOfLines=2;self.state.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+ self.state.numberOfLines=3;self.state.autoresizingMask=UIViewAutoresizingFlexibleWidth;
  [bottom addSubview:self.state];
  self.busy=[[UIActivityIndicatorView alloc]initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
  self.busy.frame=CGRectMake(w-31,20,25,25);self.busy.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin;
@@ -86,20 +102,25 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
   self.state.text=@"已拦截非官方登录网页。";return;
  }
  [self.web stopLoading];
- self.address.text=url.host;
+ [self.modern stopLoading];
+ self.didCompleteWebNavigation=NO;
+ self.lastRequestedURL=url.absoluteString;
+ self.address.text=[NSString stringWithFormat:@"%@ · %@",self.usingWK?@"WKWebView":@"UIWebView",url.host];
  [self.busy startAnimating];
- [self.web loadRequest:[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25]];
+ NSURLRequest *request=[NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25];
+ if(self.usingWK)[self.modern loadRequest:request];
+ else [self.web loadRequest:request];
  NSUInteger generation=++self.generation;
  [self performSelector:@selector(timeout:) withObject:@(generation) afterDelay:25.0];
 }
 - (void)home{[self open:@"https://www.douyin.com/"];}
 - (void)account{[self open:@"https://www.douyin.com/user/self"];}
-- (void)back{if(self.web.canGoBack)[self.web goBack];}
-- (void)reload{if(self.web.request.URL)[self open:self.web.request.URL.absoluteString];else[self home];}
+- (void)back{if(self.usingWK){if(self.modern.canGoBack)[self.modern goBack];}else if(self.web.canGoBack)[self.web goBack];}
+- (void)reload{NSString *address=self.lastRequestedURL;if(address.length)[self open:address];else[self home];}
 - (void)timeout:(NSNumber *)generation{
  if(generation.unsignedIntegerValue!=self.generation)return;
  [self.busy stopAnimating];
- self.state.text=@"加载超时。iOS 8 可能无法运行当前网页脚本，也可能是网络或证书问题。";
+ self.state.text=[NSString stringWithFormat:@"网页加载超过25秒。可点「检测网页连接」，确认是网络/证书还是旧版网页内核问题。%@ ",self.usingWK?@"当前使用WKWebView。":@"可切换网页内核重试。"];
 }
 - (void)verify{
  if(self.verifying)return;
@@ -120,7 +141,7 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
 }
 - (void)close{
  ++self.generation;
- [self.web stopLoading];
+ [self.web stopLoading];[self.modern stopLoading];
  // Trigger verification only if the official site supplied a session; never
  // infer success from UIWebView's page title or from a page being loaded.
  if(!self.verifying && DLAccountSession.shared.hasSession){
@@ -145,9 +166,13 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
 - (void)webViewDidFinishLoad:(UIWebView *)webView{
  ++self.generation;
  [self.busy stopAnimating];
+ self.didCompleteWebNavigation=YES;
  NSURL *url=webView.request.URL;
- if(url)self.address.text=url.host.lowercaseString;
- if(DLAccountSession.shared.hasSession){
+ if(url)self.address.text=[NSString stringWithFormat:@"UIWebView · %@",url.host.lowercaseString];
+ NSString *body=[webView stringByEvaluatingJavaScriptFromString:@"(document.body && document.body.innerText || '').trim().substring(0,120)"];
+ if(body.length<4 && !DLAccountSession.shared.hasSession)
+  self.state.text=@"UIWebView 已结束加载但页面可能空白。可切换网页内核，或检测HTTP状态。";
+ else if(DLAccountSession.shared.hasSession){
   self.state.text=@"检测到本机会话，点击「检查登录」核对账号状态。";
  }else{
   self.state.text=@"网页已加载。请在网页中完成登录，再点击「检查登录」。";
@@ -156,7 +181,82 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
 - (void)webView:(UIWebView *)webView didFailLoadWithError:(NSError *)error{
  if(error.code==NSURLErrorCancelled)return;
  ++self.generation;[self.busy stopAnimating];
- self.state.text=[NSString stringWithFormat:@"网页加载失败 (%ld)：%@。iOS 8 浏览器可能不兼容。",(long)error.code,error.localizedDescription?:@"未知错误"];
+ self.state.text=[NSString stringWithFormat:@"UIWebView 失败 %ld（%@）。可切换 WKWebView 或检测网页连接。",(long)error.code,error.domain?:@"网络错误"];
 }
-- (void)dealloc{[NSObject cancelPreviousPerformRequestsWithTarget:self];self.web.delegate=nil;}
+- (void)switchEngine {
+ self.usingWK=!self.usingWK;
+ self.modern.hidden=!self.usingWK;
+ self.web.hidden=self.usingWK;
+ self.state.text=self.usingWK?
+  @"已切到WKWebView。iOS 8 WK Cookie 与原生会话可能隔离，页面可显示也不保证能取得登录凭据。":
+  @"已切到UIWebView。此内核支持本机共享Cookie，但可能无法运行抖音新版本网页。";
+ [self reload];
+}
+- (void)probe {
+ NSString *address=self.lastRequestedURL.length?self.lastRequestedURL:@"https://www.douyin.com/";
+ NSURL *url=[NSURL URLWithString:address];
+ if(!DLPhoneOfficialPage(url)){self.state.text=@"仅允许检测抖音官方 HTTPS 页面。";return;}
+ self.state.text=@"正在检查网页HTTP状态与TLS连接…";
+ NSUInteger generation=++self.probeGeneration;
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
+ [req setValue:@"text/html,application/xhtml+xml,application/json" forHTTPHeaderField:@"Accept"];
+ NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
+ config.timeoutIntervalForRequest=16;
+ NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+ NSURLSessionDataTask *task=[session dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+  dispatch_async(dispatch_get_main_queue(),^{
+   if(self.probeGeneration!=generation)return;
+   if(error){
+    NSString *hint=@"网络连接失败";
+    if(error.code==NSURLErrorServerCertificateUntrusted || error.code==NSURLErrorServerCertificateHasBadDate ||
+       error.code==NSURLErrorSecureConnectionFailed || error.code==NSURLErrorServerCertificateHasUnknownRoot)
+       hint=@"TLS或证书验证失败；请检查系统时间和证书，不要跳过证书校验";
+    self.state.text=[NSString stringWithFormat:@"%@（%ld，%@）。",hint,(long)error.code,error.domain?:@"网络"];
+    return;
+   }
+   NSHTTPURLResponse *http=[response isKindOfClass:NSHTTPURLResponse.class]?(id)response:nil;
+   NSInteger status=http.statusCode;
+   NSString *mime=response.MIMEType?:@"未知";
+   NSString *hint=(status>=400)?@"服务端拒绝请求":
+      (([mime rangeOfString:@"html" options:NSCaseInsensitiveSearch].location==NSNotFound)?@"非HTML响应":@"HTTP连接正常，网页仍空白可能是旧WebKit脚本不兼容");
+   self.state.text=[NSString stringWithFormat:@"HTTP %ld，%@，%lu字节。%@",(long)status,mime,(unsigned long)data.length,hint];
+  });
+ }];
+ [task resume];
+}
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)action decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler{
+ NSURL *url=action.request.URL;
+ if([url.scheme.lowercaseString isEqualToString:@"about"] || DLPhoneOfficialPage(url)){
+  self.address.text=[NSString stringWithFormat:@"WKWebView · %@",url.host?:@""];
+  decisionHandler(WKNavigationActionPolicyAllow);
+ }else{
+  self.state.text=@"已拦截非官方地址。";
+  decisionHandler(WKNavigationActionPolicyCancel);
+ }
+}
+- (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation{
+ ++self.generation;
+ [self.busy startAnimating];self.state.text=@"WKWebView正在加载官方网页…";
+}
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation{
+ ++self.generation;
+ [self.busy stopAnimating];self.didCompleteWebNavigation=YES;
+ [webView evaluateJavaScript:@"(document.body && document.body.innerText || '').trim().substring(0,120)" completionHandler:^(id result,NSError *error){
+  if(!self.usingWK)return;
+  NSString *text=[result isKindOfClass:NSString.class]?result:@"";
+  self.state.text=text.length<4?@"WKWebView加载结束但内容为空。可能是新版网页脚本不兼容。":
+    @"WKWebView已加载部分网页。登录Cookie可能无法同步到iOS 8原生模块。";
+ }];
+}
+- (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error{
+ if(error.code==NSURLErrorCancelled)return;
+ ++self.generation;[self.busy stopAnimating];
+ self.state.text=[NSString stringWithFormat:@"WKWebView连接失败 %ld（%@），可检测网页连接。",(long)error.code,error.domain?:@"网络错误"];
+}
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error{
+ if(error.code==NSURLErrorCancelled)return;
+ ++self.generation;[self.busy stopAnimating];
+ self.state.text=[NSString stringWithFormat:@"WKWebView加载失败 %ld（%@）。",(long)error.code,error.domain?:@"网络错误"];
+}
+- (void)dealloc{[NSObject cancelPreviousPerformRequestsWithTarget:self];self.web.delegate=nil;self.modern.navigationDelegate=nil;}
 @end
