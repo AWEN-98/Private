@@ -15,7 +15,7 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  return NO;
 }
 
-@interface DLPhoneWebLoginController : UIViewController <UIWebViewDelegate, WKNavigationDelegate>
+@interface DLPhoneWebLoginController : UIViewController <UIWebViewDelegate, WKNavigationDelegate, WKUIDelegate>
 @property(nonatomic,strong) UIWebView *web;
 @property(nonatomic,strong) WKWebView *modern;
 @property(nonatomic,assign) BOOL usingWK;
@@ -145,6 +145,8 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)type{
  NSURL *url=request.URL;
  if([url.scheme.lowercaseString isEqualToString:@"about"])return YES;
+ if([url.scheme.lowercaseString isEqualToString:@"javascript"])
+  return DLPhoneOfficialPage(webView.request.URL);
  if(!DLPhoneOfficialPage(url)){
   self.state.text=@"已拦截外部地址，账号操作仅允许在抖音相关官方域名内进行。";
   return NO;
@@ -181,7 +183,7 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
   WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];
   configuration.preferences.javaScriptEnabled=YES;
   self.modern=[[WKWebView alloc]initWithFrame:self.web.frame configuration:configuration];
-  self.modern.navigationDelegate=self;
+  self.modern.navigationDelegate=self;self.modern.UIDelegate=self;
   self.modern.autoresizingMask=self.web.autoresizingMask;
   self.modern.hidden=YES;
   [self.view insertSubview:self.modern aboveSubview:self.web];
@@ -242,6 +244,13 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
   decisionHandler(WKNavigationActionPolicyCancel);
  }
 }
+- (WKWebView *)webView:(WKWebView *)webView createWebViewWithConfiguration:(WKWebViewConfiguration *)configuration forNavigationAction:(WKNavigationAction *)action windowFeatures:(WKWindowFeatures *)features{
+ // OAuth sign-in sometimes opens a same-origin new window. Reuse the single
+ // visible WKWebView on the RAM-constrained iPhone 4S.
+ if(!action.targetFrame && DLPhoneOfficialPage(action.request.URL))
+   [webView loadRequest:action.request];
+ return nil;
+}
 - (void)webView:(WKWebView *)webView didStartProvisionalNavigation:(WKNavigation *)navigation{
  ++self.generation;
  [self.busy startAnimating];self.state.text=@"WKWebView正在加载官方网页…";
@@ -266,5 +275,5 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  ++self.generation;[self.busy stopAnimating];
  self.state.text=[NSString stringWithFormat:@"WKWebView加载失败 %ld（%@）。",(long)error.code,error.domain?:@"网络错误"];
 }
-- (void)dealloc{[NSObject cancelPreviousPerformRequestsWithTarget:self];self.web.delegate=nil;self.modern.navigationDelegate=nil;}
+- (void)dealloc{[NSObject cancelPreviousPerformRequestsWithTarget:self];self.web.delegate=nil;self.modern.navigationDelegate=nil;self.modern.UIDelegate=nil;}
 @end
