@@ -1,29 +1,36 @@
 {
-  "utc": "2026-11-01T19:40:43Z",
+  "utc": "2026-11-01T19:43:00Z",
   "source": "public README.en sample",
   "tests": [
     {
       "attempt": 1,
       "http_status": 200,
       "mime": "text/html",
-      "body_bytes": 32564,
+      "body_bytes": 32565,
       "has_ttwid": true,
       "has_ssr_marker": true,
       "has_play_addr": false,
       "playable_url_found": false,
+      "media_range_status": null,
+      "media_mime": "",
+      "media_header_ok": false,
       "error": ""
     },
     {
       "attempt": 2,
       "http_status": 200,
       "mime": "text/html",
-      "body_bytes": 37663,
+      "body_bytes": 37664,
       "has_ttwid": true,
       "has_ssr_marker": true,
       "has_play_addr": true,
-      "playable_url_found": true,
+      "playable_url_found": false,
+      "media_range_status": null,
+      "media_mime": "",
+      "media_header_ok": false,
       "error": ""
     }
   ],
-  "verified_playable_address": true
+  "verified_playable_address": false,
+  "verified_media_response": false
 }
