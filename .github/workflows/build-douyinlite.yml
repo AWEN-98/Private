@@ -123,8 +123,24 @@ jobs:
           cp "$DEB" downloads/DouyinLite-iOS8-v0.15.4.deb
           (cd downloads && zip -q -9 DouyinLite-iOS8-v0.15.4.zip DouyinLite-iOS8-v0.15.4.deb)
           unzip -t downloads/DouyinLite-iOS8-v0.15.4.zip | tail -1
-          (zip -qr -X downloads/DouyinBridge-Windows-v0.15.4.zip douyinlite/bridge -x "*/__pycache__/*" "*/profile/*" "*/.venv/*" "*/.bridge-key" "*/cloudflared.exe")
-          unzip -t downloads/DouyinBridge-Windows-v0.15.4.zip | tail -1
+          mkdir -p /tmp/douyin-bridge-windows
+          for name in start_windows.cmd windows_launcher.py requirements.txt app.py streamer.py media.py share.py README.md; do
+            test -s "douyinlite/bridge/$name"
+            cp "douyinlite/bridge/$name" "/tmp/douyin-bridge-windows/$name"
+          done
+          (cd /tmp/douyin-bridge-windows && zip -q -X "$GITHUB_WORKSPACE/downloads/DouyinBridge-Windows-v0.15.4.zip" *)
+          python3 - <<'VERIFYWINDOWS'
+          from zipfile import ZipFile
+          filename="downloads/DouyinBridge-Windows-v0.15.4.zip"
+          required={"start_windows.cmd","windows_launcher.py","requirements.txt","app.py","streamer.py","media.py","share.py","README.md"}
+          with ZipFile(filename) as z:
+              names=set(z.namelist())
+              assert names==required, (names, required)
+              assert z.testzip() is None
+              for item in required:
+                  assert len(z.read(item))>0,item
+          print("Verified flat one-folder Windows companion package")
+          VERIFYWINDOWS
           sha256sum downloads/DouyinLite-iOS8-v0.15.4.*
           sha256sum downloads/DouyinBridge-Windows-v0.15.4.zip
       - name: Upload install packages as workflow artifacts
