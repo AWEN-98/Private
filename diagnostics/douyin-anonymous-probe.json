@@ -1,6 +1,10 @@
 {
-  "utc": "2026-10-29T16:01:46Z",
+  "utc": "2026-11-01T19:29:45Z",
   "responses": [
+    {
+      "status": 200,
+      "path": "/"
+    },
     {
       "status": 200,
       "path": "/"
@@ -15,5 +19,14 @@
   "status": 200,
   "page_title": "验证码中间页",
   "video_count": 0,
+  "legacy_user_agent_probe": {
+    "engine": "current Chrome (UA imitation only)",
+    "page_status": 200,
+    "title": "抖音-记录美好生活",
+    "body_chars": 33,
+    "video_count": 0,
+    "errors": []
+  },
+  "login_verification_proven": false,
   "items": 0
 }
