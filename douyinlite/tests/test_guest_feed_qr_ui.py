@@ -4,6 +4,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 s=(root/"main.m").read_text(encoding="utf-8")
 qr=(root/"DLLoginController.m").read_text(encoding="utf-8")
+phone=(root/"DLPhoneWebLoginController.m").read_text(encoding="utf-8")
 session=(root/"DLAccountSession.m").read_text(encoding="utf-8")
 view=s[s.index("- (void)viewDidLoad {"):s.index("- (void)viewDidLayoutSubviews")]
 tabs=s[s.index("- (void)tabPressed:"):s.index("- (BOOL)gestureRecognizer:")]
@@ -27,14 +28,16 @@ checks={
  "Status 3 waits for redirect callback": '@[@"3",@"confirmed",@"success"]' in qr and '正在等待抖音返回登录回调' in qr,
  "Status 5 expires QR": '@[@"5",@"4",@"expired"' in qr,
  "QR code actually rendered": "CIQRCodeGenerator" in qr,
- "QR 4031 does not silently discard scanned QR and switch providers": "if([serverCode isEqualToString:@\"4031\"])" in qr and "已停止自动切换二维码" in qr,
- "Account screen prefers cloud browser QR": '电脑浏览器生成二维码 / 登录' in qr and 'action:@selector(openBridgeLogin)' in qr and 'DLRemoteBrowserController' in qr,
- "Legacy direct QR requires explicit tap": 'action:@selector(startLogin)' in qr and 'else [self startLogin]' not in qr,
- "Cloud fallback only accepts HTTPS user configured bridge": 'url.path hasSuffix:@"/api/feed"' in qr and 'url.scheme.lowercaseString' in qr,
- "Cloud login stays on PC": "账号 Cookie 只保存在你的电脑" in qr,
- "Login page accepts browser bridge configuration": "setup addTextFieldWithConfigurationHandler" in qr and '@"dl_feed_endpoint_v1"' in qr,
- "Browser bridge requires secret and HTTPS": 'secret.length>=32' in qr and 'candidate.scheme.lowercaseString isEqualToString:@"https"' in qr,
-
+ "QR polling 4031 is diagnosed rather than ignored": "if([serverCode isEqualToString:@\"4031\"])" in qr,
+ "Account screen defaults to on-device web login": '打开抖音官网 · 手机登录' in qr and 'action:@selector(openPhoneLogin)' in qr,
+ "Phone browser receives official webpage": 'https://www.douyin.com/' in phone and 'https://www.douyin.com/user/self' in phone,
+ "Phone browser uses shared system cookie jar": 'UIWebView' in phone and 'NSHTTPCookieStorage' in phone,
+ "Phone browser validates official HTTPS hosts": 'DLPhoneOfficialPage(url)' in phone and 'url.scheme.lowercaseString' in phone,
+ "Phone browser reads session without exposing it": 'DLAccountSession.shared.hasSession' in phone and 'print' not in phone,
+ "Phone browser verifies account and persists session": '[DLAccountSession.shared verifyAccount:' in phone and '[self saveSession]' in session,
+ "Phone browser does not ask user for passwords": 'UITextField' not in phone,
+ "Old QR remains explicit opt-in": 'action:@selector(startLogin)' in qr and 'else [self startLogin]' not in qr,
+ "Account screen no longer requires PC bridge": 'openBridgeLogin' not in qr and 'DLRemoteBrowserController' not in qr,
  "QR requests use isolated login headers": "loginRequest:" in session and "x-tt-argus" not in session[session.index("- (NSMutableURLRequest *)loginRequest:"):session.index("- (void)prepareLogin:")],
  "Login redirects retain official SSO domain": "DLIsOfficialLoginURL(request.URL)?request:nil" in session,
  "Login callback fetches redirect before account verification": "loginRequest:url.absoluteString" in session and "verifyAccount:completion" in session,
@@ -46,8 +49,8 @@ checks={
  "Local favorites use bookmark": 'DLStyleIcon(self.likeButton,@"bookmark"' in s,
  "No obsolete corner controls": "top.tag=100;" in view and "action:@selector(addVideo)" not in view and "action:@selector(openMenu)" not in s,
  "Compact four tabs": 'NSArray *names=@[@"首页",@"直播",@"收藏",@"我的"]' in view,
- "Invalid saved session does not force legacy QR": "可尝试电脑浏览器官方扫码登录" in qr and "else [self startLogin]" not in qr,
- "Logout starts fresh QR request": "已退出账号，正在重新申请二维码" in qr and "[self startLogin]" in qr,
+ "Invalid session suggests phone official login": "请在上方尝试官方网页登录" in qr and "else [self startLogin]" not in qr,
+ "Logout leaves user to choose official web login": "已清除本机账号" in qr and "正在重新申请二维码" not in qr,
  "No cloud login shortcut": 'action:@selector(openWebsite)' not in qr,
 }
 for k,v in checks.items():print(("PASS" if v else "FAIL")+": "+k)
