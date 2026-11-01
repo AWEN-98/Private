@@ -1,5 +1,7 @@
 #import "DLAccountSession.h"
-#import "DLRemoteBrowserController.h"
+#import <UIKit/UIKit.h>
+@interface DLPhoneWebLoginController : UIViewController
+@end
 #import <CoreImage/CoreImage.h>
 #import <math.h>
 
@@ -16,6 +18,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 @property(nonatomic,assign) BOOL polling;
 @property(nonatomic,assign) BOOL scanned;
 @property(nonatomic,assign) BOOL completing;
+@property(nonatomic,assign) BOOL launchedPhone;
 @property(nonatomic,strong) NSDate *deadline;
 @end
 @implementation DLLoginController
@@ -26,34 +29,73 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
  [b setTitle:title forState:UIControlStateNormal];b.titleLabel.font=[UIFont systemFontOfSize:14];[b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];[parent addSubview:b];return b;
 }
 - (void)viewDidLoad{
- [super viewDidLoad];self.view.backgroundColor=[UIColor colorWithWhite:.07 alpha:1];CGFloat w=self.view.bounds.size.width;
+ [super viewDidLoad];
+ self.view.backgroundColor=[UIColor colorWithWhite:.07 alpha:1];
+ CGFloat w=self.view.bounds.size.width;
  [self button:@"关闭" action:@selector(close) frame:CGRectMake(8,23,52,36) parent:self.view];
- UILabel *title=[[UILabel alloc]initWithFrame:CGRectMake(65,23,w-130,36)];title.text=@"抖音账号";title.textColor=UIColor.whiteColor;title.textAlignment=NSTextAlignmentCenter;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;[self.view addSubview:title];
- UIScrollView *scroll=[[UIScrollView alloc]initWithFrame:CGRectMake(0,64,w,self.view.bounds.size.height-64)];scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;scroll.contentSize=CGSizeMake(w,510);[self.view addSubview:scroll];
- UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(20,5,w-40,40)];hint.numberOfLines=2;hint.text=@"无需登录也可以浏览公开视频\n扫码登录可获取账号相关内容";hint.font=[UIFont systemFontOfSize:13];hint.textAlignment=NSTextAlignmentCenter;hint.textColor=UIColor.lightGrayColor;hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:hint];
- self.qr=[[UIImageView alloc]initWithFrame:CGRectMake((w-192)/2,53,192,192)];self.qr.backgroundColor=UIColor.whiteColor;self.qr.contentMode=UIViewContentModeScaleAspectFit;self.qr.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;[scroll addSubview:self.qr];
- self.status=[[UILabel alloc]initWithFrame:CGRectMake(20,253,w-40,70)];self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;[scroll addSubview:self.status];
- [self button:@"电脑浏览器生成二维码 / 登录" action:@selector(openBridgeLogin) frame:CGRectMake(14,330,w-28,40) parent:scroll];
- self.refresh=[self button:@"尝试旧设备直连扫码" action:@selector(startLogin) frame:CGRectMake(20,375,w-40,35) parent:scroll];
- [self button:@"检查本机登录状态" action:@selector(verify) frame:CGRectMake(20,414,w-40,35) parent:scroll];
- [self button:@"退出本机账号" action:@selector(logout) frame:CGRectMake(20,454,w-40,35) parent:scroll];
+ UILabel *title=[[UILabel alloc]initWithFrame:CGRectMake(65,23,w-130,36)];
+ title.text=@"抖音账号 · 纯手机验证";title.textColor=UIColor.whiteColor;
+ title.textAlignment=NSTextAlignmentCenter;title.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+ [self.view addSubview:title];
+ UIScrollView *scroll=[[UIScrollView alloc]initWithFrame:CGRectMake(0,64,w,self.view.bounds.size.height-64)];
+ scroll.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+ scroll.contentSize=CGSizeMake(w,640);[self.view addSubview:scroll];
+ UILabel *hint=[[UILabel alloc]initWithFrame:CGRectMake(14,6,w-28,44)];
+ hint.numberOfLines=2;hint.text=@"优先使用手机内官方网页登录，不需要电脑或辅助服务。";
+ hint.font=[UIFont systemFontOfSize:13];hint.textAlignment=NSTextAlignmentCenter;
+ hint.textColor=UIColor.lightGrayColor;hint.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+ [scroll addSubview:hint];
+ UIButton *official=[self button:@"打开抖音官网 · 手机登录" action:@selector(openPhoneLogin) frame:CGRectMake(14,54,w-28,48) parent:scroll];
+ official.titleLabel.font=[UIFont boldSystemFontOfSize:16];
+ self.status=[[UILabel alloc]initWithFrame:CGRectMake(16,113,w-32,83)];
+ self.status.numberOfLines=0;self.status.font=[UIFont systemFontOfSize:13];
+ self.status.textColor=UIColor.whiteColor;self.status.textAlignment=NSTextAlignmentCenter;
+ self.status.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+ [scroll addSubview:self.status];
+ [self button:@"验证本机账号状态" action:@selector(verify) frame:CGRectMake(20,205,w-40,38) parent:scroll];
+ self.refresh=[self button:@"备选：尝试旧版二维码接口（可能 4031）" action:@selector(startLogin) frame:CGRectMake(12,254,w-24,37) parent:scroll];
+ self.refresh.titleLabel.font=[UIFont systemFontOfSize:12];
+ self.qr=[[UIImageView alloc]initWithFrame:CGRectMake((w-192)/2,297,192,192)];
+ self.qr.backgroundColor=UIColor.whiteColor;self.qr.contentMode=UIViewContentModeScaleAspectFit;
+ self.qr.hidden=YES;
+ self.qr.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin|UIViewAutoresizingFlexibleRightMargin;
+ [scroll addSubview:self.qr];
+ [self button:@"退出本机账号" action:@selector(logout) frame:CGRectMake(20,509,w-40,38) parent:scroll];
+ UILabel *help=[[UILabel alloc]initWithFrame:CGRectMake(16,551,w-32,80)];
+ help.numberOfLines=0;help.font=[UIFont systemFontOfSize:12];help.textColor=UIColor.lightGrayColor;
+ help.textAlignment=NSTextAlignmentCenter;help.autoresizingMask=UIViewAutoresizingFlexibleWidth;
+ help.text=@"请在网页中使用抖音官方登录入口，不在本应用中输入密码。若出现空白页、验证页或加载错误，请记录提示，旧版 WebKit 可能不兼容。";
+ [scroll addSubview:help];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(suspend) name:UIApplicationDidEnterBackgroundNotification object:nil];
  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(resume) name:UIApplicationDidBecomeActiveNotification object:nil];
- if(DLAccountSession.shared.hasSession){self.status.text=@"本机有已保存的登录信息，正在检查…";[self verify];}
- else self.status.text=@"旧设备直连可能遇到 4031。建议点击「电脑浏览器生成二维码 / 登录」，通过自己电脑上的现代浏览器完成抖音官方扫码。";
+ if(DLAccountSession.shared.hasSession){self.status.text=@"本机存在会话，正在验证账号…";[self verify];}
+ else self.status.text=@"优先点击上方蓝色登录入口。网页加载成功后按「检查登录」验证会话。";
+}
+- (void)openPhoneLogin{
+ [self suspend];
+ self.launchedPhone=YES;
+ [self presentViewController:[DLPhoneWebLoginController new] animated:YES completion:nil];
 }
 - (void)close{[self suspend];[self dismissViewControllerAnimated:YES completion:nil];}
 - (void)suspend{self.generation++;[self.pollTimer invalidate];self.pollTimer=nil;self.polling=NO;self.completing=NO;self.refresh.enabled=YES;}
 - (void)resume{if(self.presentedViewController)return;if(self.token.length&&self.deadline.timeIntervalSinceNow>0&&!self.completing){[self.pollTimer invalidate];self.pollTimer=[NSTimer scheduledTimerWithTimeInterval:2 target:self selector:@selector(poll) userInfo:nil repeats:YES];[self poll];}}
 - (void)viewWillDisappear:(BOOL)animated{[self suspend];[super viewWillDisappear:animated];}
-- (void)viewDidAppear:(BOOL)animated{[super viewDidAppear:animated];[self resume];}
+- (void)viewDidAppear:(BOOL)animated{
+ [super viewDidAppear:animated];
+ if(self.launchedPhone){
+  self.launchedPhone=NO;
+  if(DLAccountSession.shared.hasSession)[self verify];
+  else self.status.text=@"网页登录结束；目前没有取得有效会话。可以重新尝试或检查网页是否完整加载。";
+ }
+ [self resume];
+}
 - (NSString *)params{
  NSString *stamp=[NSString stringWithFormat:@"%.0f",floor(NSDate.date.timeIntervalSince1970*1000)];
  if(self.provider==0)return [NSString stringWithFormat:@"aid=10006&service=https%%3A%%2F%%2Fwww.douyin.com%%2Fpay&t=%@",stamp];
  return [NSString stringWithFormat:@"aid=6383&account_sdk_source=web&sdk_version=2.2.7&language=zh&is_new_login=1&need_logo=false&need_short_url=true&service=https%%3A%%2F%%2Fwww.douyin.com%%2F&next=https%%3A%%2F%%2Fwww.douyin.com%%2F&t=%@",stamp];
 }
 - (void)startLogin{
- [self suspend];self.token=nil;self.qr.image=nil;self.provider=0;self.qrFailureReason=nil;self.scanned=NO;self.completing=NO;self.refresh.enabled=NO;self.status.text=@"正在向抖音申请登录二维码…";
+ [self suspend];self.token=nil;self.qr.image=nil;self.qr.hidden=YES;self.provider=0;self.qrFailureReason=nil;self.scanned=NO;self.completing=NO;self.refresh.enabled=NO;self.status.text=@"正在向抖音申请登录二维码…";
  NSUInteger generation=self.generation;
  [DLAccountSession.shared prepareLogin:^{if(generation==self.generation)[self createQRForGeneration:generation];}];
 }
@@ -86,6 +128,7 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
    self.status.text=[NSString stringWithFormat:@"扫码登录暂不可用。%@\n游客视频不受影响。",self.qrFailureReason?:problem?:@"登录服务没有提供可用的二维码。"];
    return;
   }
+  self.qr.hidden=NO;
   if(qrImage){self.qr.image=qrImage;}
   else{
     CIFilter *filter=[CIFilter filterWithName:@"CIQRCodeGenerator"];
@@ -184,61 +227,12 @@ static NSString *DLLoginText(id v){return [v isKindOfClass:NSString.class]?v:([v
 }
 - (void)verify{
  [self suspend];self.status.text=@"正在校验账号会话…";NSUInteger generation=self.generation;
- [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=ok?message:[NSString stringWithFormat:@"%@。可尝试电脑浏览器官方扫码登录。",message?:@"本机会话无效"];if(ok){self.token=nil;self.qr.image=nil;}}];
-}
-- (void)openBridgeLogin{
- NSString *base=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_feed_endpoint_v1"]?:@"";
- NSString *key=[[NSUserDefaults standardUserDefaults] stringForKey:@"dl_bridge_key_v1"]?:@"";
- NSURL *url=[NSURL URLWithString:base];
- BOOL configured=[url.scheme.lowercaseString isEqualToString:@"https"] &&
-      [url.path hasSuffix:@"/api/feed"] && url.host.length && key.length>=32 &&
-      !url.user.length && !url.password.length && (!url.port||url.port.integerValue==443);
- if(!configured){
-  UIAlertController *setup=[UIAlertController alertControllerWithTitle:@"连接电脑浏览器"
-    message:@"先在 Windows 电脑运行 DouyinBridge 的 start_windows.cmd。用电脑里的 Chromium 打开抖音官网扫码登录。然后把电脑显示的 HTTPS 地址和私有密钥填到这里。电脑须保持运行。账号 Cookie 只保存在你的电脑。"
-    preferredStyle:UIAlertControllerStyleAlert];
-  [setup addTextFieldWithConfigurationHandler:^(UITextField *field){
-    field.placeholder=@"https://xxxxx.trycloudflare.com/api/feed";
-    field.text=base;
-    field.keyboardType=UIKeyboardTypeURL;
-    field.autocorrectionType=UITextAutocorrectionTypeNo;
-    field.autocapitalizationType=UITextAutocapitalizationTypeNone;
-  }];
-  [setup addTextFieldWithConfigurationHandler:^(UITextField *field){
-    field.placeholder=@"电脑显示的私有密钥";
-    field.text=key;field.secureTextEntry=YES;
-    field.autocorrectionType=UITextAutocorrectionTypeNo;
-    field.autocapitalizationType=UITextAutocapitalizationTypeNone;
-  }];
-  [setup addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-  [setup addAction:[UIAlertAction actionWithTitle:@"连接" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-    NSString *address=[setup.textFields[0].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSString *secret=[setup.textFields[1].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    NSURL *candidate=[NSURL URLWithString:address];
-    BOOL allowed=[candidate.scheme.lowercaseString isEqualToString:@"https"] &&
-      [candidate.path hasSuffix:@"/api/feed"] && candidate.host.length &&
-      !candidate.user.length && !candidate.password.length &&
-      (!candidate.port||candidate.port.integerValue==443) && secret.length>=32;
-    if(!allowed){
-      self.status.text=@"连接参数无效。请使用电脑显示的 HTTPS /api/feed 地址及完整私有密钥。";
-      return;
-    }
-    NSUserDefaults *defaults=[NSUserDefaults standardUserDefaults];
-    [defaults setObject:address forKey:@"dl_feed_endpoint_v1"];
-    [defaults setObject:secret forKey:@"dl_bridge_key_v1"];
-    [defaults synchronize];
-    [self openBridgeLogin];
-  }]];
-  [self presentViewController:setup animated:YES completion:nil];
-  return;
- }
- DLRemoteBrowserController *browser=[[DLRemoteBrowserController alloc]initWithFeedURL:url apiKey:key];
- [self presentViewController:browser animated:YES completion:nil];
+ [DLAccountSession.shared verifyAccount:^(BOOL ok,NSString *message){if(generation!=self.generation)return;self.status.text=ok?message:[NSString stringWithFormat:@"%@。请在上方尝试官方网页登录。",message?:@"本机会话无效"];if(ok){self.token=nil;self.qr.image=nil;}}];
 }
 - (void)logout{
  UIAlertController *a=[UIAlertController alertControllerWithTitle:@"退出抖音账号" message:@"将清除这台设备保存的抖音会话。" preferredStyle:UIAlertControllerStyleAlert];
  [a addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
- [a addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self suspend];self.token=nil;self.qr.image=nil;[DLAccountSession.shared logout];self.status.text=@"已退出账号，正在重新申请二维码…";[self startLogin];}]];[self presentViewController:a animated:YES completion:nil];
+ [a addAction:[UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action){[self suspend];self.token=nil;self.qr.image=nil;[DLAccountSession.shared logout];self.status.text=@"已清除本机账号。点击「打开抖音官网 · 手机登录」重新登录。";}]];[self presentViewController:a animated:YES completion:nil];
 }
 - (void)dealloc{[self.pollTimer invalidate];[[NSNotificationCenter defaultCenter] removeObserver:self];}
 @end
