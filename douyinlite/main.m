@@ -2400,7 +2400,7 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                      stage:(NSInteger)stage videoID:(NSString *)knownID retryWithCookie:(BOOL)retry {
     // Only retry once if the first public SSR response issued a visitor
     // cookie. Never spin on CAPTCHA pages or rejected HTTP status codes.
-    __block BOOL hadVisitorCookie=NO;
+    BOOL hadVisitorCookie=NO;
     for(NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:url]){
         if([cookie.name isEqualToString:@"ttwid"])hadVisitorCookie=YES;
     }
