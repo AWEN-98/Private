@@ -2394,6 +2394,16 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
 }
 - (void)requestPublicShare:(NSURL *)url original:(NSURL *)original
                      stage:(NSInteger)stage videoID:(NSString *)knownID {
+    [self requestPublicShare:url original:original stage:stage videoID:knownID retryWithCookie:NO];
+}
+- (void)requestPublicShare:(NSURL *)url original:(NSURL *)original
+                     stage:(NSInteger)stage videoID:(NSString *)knownID retryWithCookie:(BOOL)retry {
+    // Only retry once if the first public SSR response issued a visitor
+    // cookie. Never spin on CAPTCHA pages or rejected HTTP status codes.
+    __block BOOL hadVisitorCookie=NO;
+    for(NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:url]){
+        if([cookie.name isEqualToString:@"ttwid"])hadVisitorCookie=YES;
+    }
     NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:url
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:16];
     [req setValue:@"text/html,application/xhtml+xml" forHTTPHeaderField:@"Accept"];
@@ -2412,6 +2422,15 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
             if(video.length){
                 self.message.text=@"";
                 [self acceptImportedVideo:video title:DLText(clip[@"title"]) original:original];
+                return;
+            }
+            BOOL acquiredVisitorCookie=NO;
+            for(NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:url]){
+                if([cookie.name isEqualToString:@"ttwid"])acquiredVisitorCookie=YES;
+            }
+            if(!retry && stage>=0 && http.statusCode==200 && !hadVisitorCookie && acquiredVisitorCookie){
+                self.message.text=@"官网已建立游客会话，重新读取一次分享页…";
+                [self requestPublicShare:url original:original stage:stage videoID:knownID retryWithCookie:YES];
                 return;
             }
             // Stage -1 resolves a short link; stages 0 and 1 read the
