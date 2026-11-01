@@ -2342,17 +2342,21 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
     if(!self.batchInProgress)self.message.text=@"手机正在读取公开视频…";
     NSString *known=DLShareVideoID(url);
     if(known.length){
-        [self requestMobileVideoID:known original:url endpointIndex:0];
+        // Read the official public share page before requesting APIs that may
+        // require a newer client or app attestation. This avoids 18s of
+        // unnecessary mobile API timeouts on the old iPhone.
+        NSString *share=[NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@/",known];
+        [self requestPublicShare:[NSURL URLWithString:share] original:url stage:0 videoID:known];
     }else{
-        // Resolve official v.douyin.com short URLs first. Never guess a video ID.
-        [self requestPublicShare:url original:url stage:0 videoID:nil];
+        // Resolve the official short URL, then inspect its public share page.
+        [self requestPublicShare:url original:url stage:-1 videoID:nil];
     }
 }
 - (void)requestMobileVideoID:(NSString *)videoID original:(NSURL *)original endpointIndex:(NSInteger)index {
     NSArray *servers=@[@"https://api5-normal-c-hl.amemv.com/aweme/v1/feed/",
                        @"https://aweme.snssdk.com/aweme/v1/feed/"];
     if(index>=servers.count){
-        [self requestPublicShare:original original:original stage:0 videoID:videoID];
+        [self failImportedVideo:@"公开分享页和两个移动接口均未取得兼容视频。可能需要账号验证或当前网页禁止旧设备直接读取。"];
         return;
     }
     NSString *link=[NSString stringWithFormat:@"%@?aweme_id=%@&aid=1128",servers[index],videoID];
@@ -2410,17 +2414,20 @@ static void DLStyleIcon(UIButton *button,NSString *kind,CGFloat size,UIColor *co
                 [self acceptImportedVideo:video title:DLText(clip[@"title"]) original:original];
                 return;
             }
-            if(stage==0 && !knownID.length && identifier.length){
-                [self requestMobileVideoID:identifier original:original endpointIndex:0];
-                return;
-            }
-            if(identifier.length && stage<2){
-                NSString *shareURL=stage==0?
-                    [NSString stringWithFormat:@"https://www.douyin.com/share/video/%@/",identifier]:
-                    [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@/",identifier];
-                self.message.text=stage==0?@"正在读取备用分享页…":@"正在尝试另一条分享页路径…";
+            // Stage -1 resolves a short link; stages 0 and 1 read the
+            // public SSR share pages; mobile APIs are the final fallback.
+            if(identifier.length && stage<1){
+                NSString *shareURL=stage<0?
+                    [NSString stringWithFormat:@"https://www.iesdouyin.com/share/video/%@/",identifier]:
+                    [NSString stringWithFormat:@"https://www.douyin.com/share/video/%@/",identifier];
+                self.message.text=stage<0?@"已解析短链接，正在读取公开分享页…":@"正在读取备用分享页…";
                 [self requestPublicShare:[NSURL URLWithString:shareURL]
                     original:original stage:stage+1 videoID:identifier];
+                return;
+            }
+            if(identifier.length && stage==1){
+                self.message.text=@"公开分享页没有返回视频，正在尝试移动接口…";
+                [self requestMobileVideoID:identifier original:original endpointIndex:0];
                 return;
             }
             self.message.text=@"";
