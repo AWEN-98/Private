@@ -14,7 +14,7 @@ checks={
  "no PC required by login flow": "openBridgeLogin" not in login and "DLRemoteBrowserController" not in login,
  "legacy QR only opens by user request": 'action:@selector(startLogin)' in login and "else [self startLogin]" not in login,
  "uses UIWebView for shared cookie storage": 'UIWebView *web;' in page and "NSHTTPCookieStorage" in page,
- "never uses WKWebView isolated cookie jar": "WKWebView" not in page,
+ "WKWebView does not claim native cookie continuity": "WKWebView" in page and "Cookie" in page and "可能隔离" in page,
  "official login domain and HTTPS only": 'DLPhoneOfficialPage(NSURL *url)' in page and 'url.scheme.lowercaseString' in page and 'bytedance.com' in page,
  "no password or token collection in app UI": "UITextField" not in page and "cookie.value" not in page,
  "native account validation only after shared cookies": "DLAccountSession.shared.hasSession" in page and "[DLAccountSession.shared verifyAccount:" in page,
