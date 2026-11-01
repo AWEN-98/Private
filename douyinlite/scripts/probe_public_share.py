@@ -31,9 +31,9 @@ for attempt in range(2):
         result["body_bytes"]=len(body)
         result["has_ssr_marker"]=any(x in text for x in ("_ROUTER_DATA","RENDER_DATA","videoInfoRes"))
         result["has_play_addr"]='"play_addr"' in text
-        chunks=re.findall(r'["\\\']play_addr["\\\']\\s*:\\s*\\{[^}]{0,6000}\\}',text,re.I)
+        chunks=re.findall(r"""["']play_addr["']\s*:\s*\{[^}]{0,6000}\}""",text,re.I)
         for chunk in chunks:
-            candidates=re.findall(r'https?[^"\\\'\\s<>]{8,2200}',chunk,re.I)
+            candidates=re.findall(r"""https?[^"'\s<>]{8,2200}""",chunk,re.I)
             if any("play" in u and (".douyin" in u or ".byte" in u or ".snssdk" in u or ".amemv" in u) for u in candidates):
                 result["playable_url_found"]=True
                 report["verified_playable_address"]=True
