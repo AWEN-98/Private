@@ -55,6 +55,35 @@ static NSString *DLModernMobileAgent(void){
     return @"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 }
 
+// Public share pages sometimes serialize play_addr directly into HTML without
+// a usable _ROUTER_DATA/RENDER_DATA wrapper. Keep a strictly bounded fallback
+// for an actual public play_addr url_list entry (never fabricate video URLs).
+static NSString *DLDirectSharePlaybackURL(NSString *html) {
+    if(!html.length || html.length>2500000)return nil;
+    NSRegularExpression *address=[NSRegularExpression regularExpressionWithPattern:
+        @"[\\\"']play_addr[\\\"']\\s*:\\s*\\{[^\\}]{0,6000}\\}"
+        options:NSRegularExpressionCaseInsensitive error:NULL];
+    NSArray *blocks=[address matchesInString:html options:0 range:NSMakeRange(0,html.length)];
+    for(NSTextCheckingResult *block in blocks){
+        NSString *slice=[html substringWithRange:block.range];
+        NSRegularExpression *links=[NSRegularExpression regularExpressionWithPattern:
+            @"https?(?:\\\\u002F|\\\\/|/){2}[^\\\"'\\s<>\\\\]{6,2000}"
+            options:NSRegularExpressionCaseInsensitive error:NULL];
+        NSArray *matches=[links matchesInString:slice options:0 range:NSMakeRange(0,slice.length)];
+        for(NSTextCheckingResult *m in matches){
+            NSString *candidate=[slice substringWithRange:m.range];
+            for(NSArray *pair in @[
+                @[@"\\\\u002F",@"/"],@[@"\\\\/",@"/"],@[@"\\\\u0026",@"&"],
+                @[@"&amp;",@"&"],@[@"&#38;",@"&"]
+            ])candidate=[candidate stringByReplacingOccurrencesOfString:pair[0] withString:pair[1]];
+            NSURL *url=[NSURL URLWithString:candidate];
+            if(([url.scheme.lowercaseString isEqualToString:@"https"] ||
+                [url.scheme.lowercaseString isEqualToString:@"http"])&&url.host.length)
+                return candidate;
+        }
+    }
+    return nil;
+}
 static NSString *DLPublicVideoFromHTML(NSString *html){
     if(!html.length)return nil;
     // Only use an openly published video tag or metadata URL.
@@ -229,6 +258,7 @@ static NSDictionary *DLVideoDetails(NSString *html){
     NSDictionary *item=DLPublicInfoFromHTML(html);
     NSString *url=DLPublicPlaybackURL(item);
     if(!url.length)url=DLPublicVideoFromHTML(html);
+    if(!url.length)url=DLDirectSharePlaybackURL(html);
     if(!url.length)return nil;
     NSString *caption=DLText(item[@"desc"]);
     NSDictionary *author=[item[@"author"] isKindOfClass:[NSDictionary class]]?item[@"author"]:@{};
