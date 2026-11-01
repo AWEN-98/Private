@@ -60,13 +60,6 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  self.web.dataDetectorTypes=UIDataDetectorTypeNone;
  self.web.mediaPlaybackRequiresUserAction=YES;
  [self.view addSubview:self.web];
- WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];
- configuration.preferences.javaScriptEnabled=YES;
- self.modern=[[WKWebView alloc]initWithFrame:self.web.frame configuration:configuration];
- self.modern.navigationDelegate=self;
- self.modern.autoresizingMask=self.web.autoresizingMask;
- self.modern.hidden=YES;
- [self.view addSubview:self.modern];
 
  UIView *bottom=[[UIView alloc]initWithFrame:CGRectMake(0,h-139,w,139)];
  bottom.autoresizingMask=UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleWidth;
@@ -184,6 +177,15 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  self.state.text=[NSString stringWithFormat:@"UIWebView 失败 %ld（%@）。可切换 WKWebView 或检测网页连接。",(long)error.code,error.domain?:@"网络错误"];
 }
 - (void)switchEngine {
+ if(!self.modern){
+  WKWebViewConfiguration *configuration=[WKWebViewConfiguration new];
+  configuration.preferences.javaScriptEnabled=YES;
+  self.modern=[[WKWebView alloc]initWithFrame:self.web.frame configuration:configuration];
+  self.modern.navigationDelegate=self;
+  self.modern.autoresizingMask=self.web.autoresizingMask;
+  self.modern.hidden=YES;
+  [self.view insertSubview:self.modern aboveSubview:self.web];
+ }
  self.usingWK=!self.usingWK;
  self.modern.hidden=!self.usingWK;
  self.web.hidden=self.usingWK;
@@ -219,6 +221,12 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
    NSString *mime=response.MIMEType?:@"未知";
    NSString *hint=(status>=400)?@"服务端拒绝请求":
       (([mime rangeOfString:@"html" options:NSCaseInsensitiveSearch].location==NSNotFound)?@"非HTML响应":@"HTTP连接正常，网页仍空白可能是旧WebKit脚本不兼容");
+   NSString *snippet=[[NSString alloc]initWithData:[data subdataWithRange:NSMakeRange(0,MIN((NSUInteger)8192,data.length))] encoding:NSUTF8StringEncoding];
+   if([snippet rangeOfString:@"4031"].location!=NSNotFound ||
+      [snippet rangeOfString:@"captcha" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
+      [snippet rangeOfString:@"verify" options:NSCaseInsensitiveSearch].location!=NSNotFound){
+     hint=@"响应可能包含平台验证/访问限制，请通过官方页面验证";
+   }
    self.state.text=[NSString stringWithFormat:@"HTTP %ld，%@，%lu字节。%@",(long)status,mime,(unsigned long)data.length,hint];
   });
  }];
