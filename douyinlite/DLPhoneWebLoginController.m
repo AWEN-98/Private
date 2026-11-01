@@ -50,7 +50,6 @@ static BOOL DLPhoneOfficialPage(NSURL *url) {
  self.web=[[UIWebView alloc]initWithFrame:CGRectMake(0,64,w,MAX(90,h-164))];
  self.web.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
  self.web.delegate=self;self.web.scalesPageToFit=YES;
- self.web.keyboardDisplayRequiresUserAction=YES;
  self.web.dataDetectorTypes=UIDataDetectorTypeNone;
  self.web.mediaPlaybackRequiresUserAction=YES;
  [self.view addSubview:self.web];
