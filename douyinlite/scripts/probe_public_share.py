@@ -36,7 +36,7 @@ for attempt in range(2):
         for chunk in chunks:
             candidates=re.findall(r"""https?[^"'\s<>]{8,2200}""",chunk,re.I)
             for original in candidates:
-                candidate=original.replace("\\\\/","/").replace("\\\\u002F","/").replace("\\\\u0026","&")
+                candidate=original.replace(chr(92)+"/","/").replace(chr(92)+"u002F","/").replace(chr(92)+"u0026","&")
                 parsed=urlparse(candidate)
                 host=(parsed.hostname or "").lower()
                 trusted=any(host==domain or host.endswith("."+domain) for domain in
