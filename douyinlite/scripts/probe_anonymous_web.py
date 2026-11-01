@@ -55,6 +55,25 @@ async def main():
             report["video_count"]=await page.locator("video").count()
         except Exception as e:report["errors"].append("navigation:"+str(e)[:180])
         if tasks:await asyncio.gather(*tasks,return_exceptions=True)
+        # This is a real browser/network check, NOT iOS 8 WebKit emulation.
+        # With the iOS 8 user-agent we can detect whether the site refuses
+        # that client identity even when using a modern Chromium engine.
+        legacy_ua="Mozilla/5.0 (iPhone; CPU iPhone OS 8_4_1 like Mac OS X) AppleWebKit/600.1.4 (KHTML, like Gecko) Version/8.0 Mobile/12H321 Safari/600.1.4"
+        legacy=await browser.new_page(viewport={"width":320,"height":480},user_agent=legacy_ua)
+        report["legacy_user_agent_probe"]={"engine":"current Chrome (UA imitation only)","page_status":None,"title":"","body_chars":0,"video_count":0,"errors":[]}
+        old=report["legacy_user_agent_probe"]
+        legacy.on("pageerror",lambda e:old["errors"].append(str(e)[:180]) if len(old["errors"])<3 else None)
+        try:
+            response=await legacy.goto("https://www.douyin.com/",wait_until="domcontentloaded",timeout=25000)
+            old["page_status"]=response.status if response else None
+            await legacy.wait_for_timeout(6500)
+            old["title"]=(await legacy.title())[:100]
+            old["body_chars"]=await legacy.evaluate("document.body ? document.body.innerText.length : 0")
+            old["video_count"]=await legacy.locator("video").count()
+        except Exception as e:
+            old["errors"].append("navigation:"+str(e)[:140])
+        await legacy.close()
+        report["login_verification_proven"]=False
         await browser.close()
     report["items"]=len(items)
     Path("diagnostics").mkdir(exist_ok=True)
