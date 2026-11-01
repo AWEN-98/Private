@@ -8,7 +8,7 @@ on:
       - '.github/workflows/probe-douyin-anonymous.yml'
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
   probe:
     runs-on: ubuntu-22.04
@@ -34,20 +34,6 @@ jobs:
           mkdir -p diagnostics
           python douyinlite/scripts/probe_public_share.py || true
           cat diagnostics/douyin-public-share-probe.json
-      - name: Commit probe result and optional public video manifest
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/douyin-browser-run.log
-          if [ -f diagnostics/douyin-public-share-probe.json ]; then git add diagnostics/douyin-public-share-probe.json; fi
-          if [ -f diagnostics/douyin-anonymous-probe.json ]; then git add diagnostics/douyin-anonymous-probe.json; fi
-          if [ -f downloads/douyin-public-feed.json ]; then git add downloads/douyin-public-feed.json; fi
-          if ! git diff --cached --quiet; then
-            git commit -m "test: save anonymous Douyin browser probe results [skip ci]"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
