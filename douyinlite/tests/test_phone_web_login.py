@@ -31,6 +31,8 @@ checks={
  "blank HTML detection for UIWebView": "stringByEvaluatingJavaScriptFromString" in page and "页面可能空白" in page,
  "blank HTML detection for WKWebView": 'evaluateJavaScript:' in page and "内容为空" in page,
  "server challenges not falsely treated as successful login": "4031" in page and "访问限制" in page,
+ "official JavaScript links supported": 'isEqualToString:@"javascript"' in page and "return DLPhoneOfficialPage(webView.request.URL);" in page,
+ "official popup navigation stays inside WKWebView": "createWebViewWithConfiguration:" in page and "[webView loadRequest:action.request]" in page,
  "status only shows safe HTTP metadata": "HTTP %ld" in page and "cookieValue:" not in page,
 
 }
