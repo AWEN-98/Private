@@ -41,9 +41,10 @@ for attempt in range(2):
                 for _ in range(3):
                     candidate=candidate.replace(chr(92)+"/","/").replace(chr(92)+"u002F","/").replace(chr(92)+"u0026","&")
                 # Do not expose signed URLs or query tokens in diagnostics.
-                if "sample_url_prefix" not in result:
-                    result["sample_url_prefix"]=candidate.split("?",1)[0][:120]
                 parsed=urlparse(candidate)
+                if "sample_host" not in result:
+                    result["sample_host"]=(parsed.hostname or "")[:100]
+                    result["sample_path_type"]="play" if "/play" in parsed.path else "other"
                 host=(parsed.hostname or "").lower()
                 trusted=any(host==domain or host.endswith("."+domain) for domain in
                             ("douyinvod.com","douyin.com","ibytedtos.com","bytecdn.cn","amemv.com","snssdk.com"))
