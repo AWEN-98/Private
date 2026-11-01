@@ -35,8 +35,14 @@ for attempt in range(2):
         chunks=re.findall(r"""["']play_addr["']\s*:\s*\{[^}]{0,6000}\}""",text,re.I)
         for chunk in chunks:
             candidates=re.findall(r"""https?[^"'\s<>]{8,2200}""",chunk,re.I)
+            result["candidate_count"]=len(candidates)
             for original in candidates:
-                candidate=original.replace(chr(92)+"/","/").replace(chr(92)+"u002F","/").replace(chr(92)+"u0026","&")
+                candidate=original
+                for _ in range(3):
+                    candidate=candidate.replace(chr(92)+"/","/").replace(chr(92)+"u002F","/").replace(chr(92)+"u0026","&")
+                # Do not expose signed URLs or query tokens in diagnostics.
+                if "sample_url_prefix" not in result:
+                    result["sample_url_prefix"]=candidate.split("?",1)[0][:120]
                 parsed=urlparse(candidate)
                 host=(parsed.hostname or "").lower()
                 trusted=any(host==domain or host.endswith("."+domain) for domain in
